@@ -1,0 +1,48 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# Logs / temp
+*.log
+*.tmp
+*.bak
+.tmp/
+.cache/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets.*
+.secrets/
+
+# Local actionlint / tooling output
+actionlint
+actionlint.exe
+.actionlint-cache/
+
+# Python (if scripts are added later)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node (if scripts are added later)
+node_modules/
+npm-debug.log*
+
+# Misc
+coverage/
+dist/
+build/

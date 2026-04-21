@@ -1,0 +1,216 @@
+name: Resolve Docker image tags
+description: >-
+  Resolve a Docker image version (override, Dockerfile ARG, version file,
+  git tag, or commit SHA) and emit a deduplicated extra-tag list.
+
+inputs:
+  version_override:
+    description: 'Explicit version. Wins over every other source when set.'
+    required: false
+    default: ''
+  version_source:
+    description: '`auto` | `dockerfile` | `file` | `git_tag` | `sha`. `auto` cascades dockerfile -> file -> git_tag -> sha.'
+    required: false
+    default: auto
+  dockerfile:
+    description: 'Path to the Dockerfile to scan.'
+    required: false
+    default: ./Dockerfile
+  dockerfile_arg:
+    description: 'Name of the Dockerfile ARG that holds the version.'
+    required: false
+    default: APP_VERSION
+  version_file:
+    description: 'Plain-text version file (first non-comment line is the version).'
+    required: false
+    default: VERSION
+  strip_v_prefix:
+    description: 'Strip a leading `v` from the resolved version.'
+    required: false
+    default: 'true'
+  distro:
+    description: 'Optional distro/variant suffix (e.g. `alpine`, `noble`).'
+    required: false
+    default: ''
+  sha_length:
+    description: 'Length of the short commit SHA used in `sha-*` tags (4-40).'
+    required: false
+    default: '12'
+  sha_tag_prefix:
+    description: 'Prefix for the short-SHA tag. Empty disables the tag.'
+    required: false
+    default: 'sha-'
+  include_branch_tag:
+    description: 'When true, append `branch-<sanitised-name>` on branch pushes.'
+    required: false
+    default: 'false'
+  extra_tags:
+    description: 'Caller-supplied newline-separated extra tags. Merged + deduped.'
+    required: false
+    default: ''
+
+outputs:
+  version:
+    description: 'Resolved image version.'
+    value: ${{ steps.resolve.outputs.version }}
+  short_sha:
+    description: 'Short commit SHA.'
+    value: ${{ steps.resolve.outputs.short_sha }}
+  build_date:
+    description: 'ISO-8601 UTC build timestamp.'
+    value: ${{ steps.resolve.outputs.build_date }}
+  source:
+    description: 'Which source produced the version.'
+    value: ${{ steps.resolve.outputs.source }}
+  extra_tags:
+    description: 'Newline-separated, deduplicated tag list.'
+    value: ${{ steps.resolve.outputs.extra_tags }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        VERSION_OVERRIDE: ${{ inputs.version_override }}
+        VERSION_SOURCE: ${{ inputs.version_source }}
+        DOCKERFILE_PATH: ${{ inputs.dockerfile }}
+        DOCKERFILE_ARG: ${{ inputs.dockerfile_arg }}
+        VERSION_FILE: ${{ inputs.version_file }}
+        STRIP_V_PREFIX: ${{ inputs.strip_v_prefix }}
+        DISTRO: ${{ inputs.distro }}
+        SHA_LENGTH: ${{ inputs.sha_length }}
+        SHA_TAG_PREFIX: ${{ inputs.sha_tag_prefix }}
+        INCLUDE_BRANCH_TAG: ${{ inputs.include_branch_tag }}
+        CALLER_EXTRA_TAGS: ${{ inputs.extra_tags }}
+        COMMIT_SHA: ${{ github.sha }}
+        REF_NAME: ${{ github.ref_name }}
+        REF_TYPE: ${{ github.ref_type }}
+      run: |
+        set -euo pipefail
+
+        TAG_RE='^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$'
+        ID_RE='^[A-Za-z_][A-Za-z0-9_]*$'
+
+        die() { echo "ERROR: $*" >&2; exit 1; }
+
+        validate_tag() {
+          local name="$1" val="$2"
+          printf '%s' "${val}" | grep -Eq "${TAG_RE}" \
+            || die "${name} is not a valid Docker tag: '${val}'"
+        }
+
+        case "${VERSION_SOURCE}" in
+          auto|dockerfile|file|git_tag|sha) ;;
+          *) die "version_source must be one of: auto|dockerfile|file|git_tag|sha (got '${VERSION_SOURCE}')" ;;
+        esac
+
+        printf '%s' "${DOCKERFILE_ARG}" | grep -Eq "${ID_RE}" \
+          || die "dockerfile_arg must be a valid identifier (got '${DOCKERFILE_ARG}')"
+
+        case "${SHA_LENGTH}" in
+          ''|*[!0-9]*) die "sha_length must be a positive integer (got '${SHA_LENGTH}')" ;;
+        esac
+        if [ "${SHA_LENGTH}" -lt 4 ] || [ "${SHA_LENGTH}" -gt 40 ]; then
+          die "sha_length must be between 4 and 40 (got '${SHA_LENGTH}')"
+        fi
+
+        if [ -n "${DISTRO}" ];           then validate_tag "input 'distro'"                       "${DISTRO}"; fi
+        if [ -n "${VERSION_OVERRIDE}" ]; then validate_tag "input 'version_override'"             "${VERSION_OVERRIDE}"; fi
+        if [ -n "${SHA_TAG_PREFIX}" ];   then validate_tag "input 'sha_tag_prefix' (with sample)" "${SHA_TAG_PREFIX}deadbeef"; fi
+
+        from_dockerfile() {
+          [ -f "$1" ] || return 1
+          grep -E "^[[:space:]]*ARG[[:space:]]+$2=" "$1" \
+            | head -n1 \
+            | sed -E "s/^[[:space:]]*ARG[[:space:]]+$2=//; s/[[:space:]]+\$//; s/^\"(.*)\"\$/\\1/; s/^'(.*)'\$/\\1/"
+        }
+
+        from_file() {
+          [ -f "$1" ] || return 1
+          grep -E -m1 -v '^[[:space:]]*(#|$)' "$1" | tr -d '[:space:]'
+        }
+
+        from_git_tag() {
+          [ "${REF_TYPE}" = "tag" ] && [ -n "${REF_NAME}" ] && printf '%s' "${REF_NAME}"
+        }
+
+        VERSION=""
+        SOURCE=""
+
+        if [ -n "${VERSION_OVERRIDE}" ]; then
+          VERSION="${VERSION_OVERRIDE}"
+          SOURCE="override"
+        else
+          case "${VERSION_SOURCE}" in
+            dockerfile) VERSION="$(from_dockerfile "${DOCKERFILE_PATH}" "${DOCKERFILE_ARG}" || true)"; SOURCE="dockerfile" ;;
+            file)       VERSION="$(from_file "${VERSION_FILE}" || true)";                              SOURCE="file" ;;
+            git_tag)    VERSION="$(from_git_tag || true)";                                             SOURCE="git_tag" ;;
+            sha)        VERSION="${COMMIT_SHA}";                                                       SOURCE="sha" ;;
+            auto)
+              if VERSION="$(from_dockerfile "${DOCKERFILE_PATH}" "${DOCKERFILE_ARG}" 2>/dev/null)" && [ -n "${VERSION}" ]; then SOURCE="dockerfile"
+              elif VERSION="$(from_file "${VERSION_FILE}" 2>/dev/null)" && [ -n "${VERSION}" ];                                then SOURCE="file"
+              elif VERSION="$(from_git_tag 2>/dev/null)" && [ -n "${VERSION}" ];                                               then SOURCE="git_tag"
+              else VERSION="${COMMIT_SHA}"; SOURCE="sha"
+              fi ;;
+          esac
+        fi
+
+        [ -n "${VERSION:-}" ] || die "could not resolve version (source=${SOURCE})"
+        [ "${STRIP_V_PREFIX}" = "true" ] && VERSION="${VERSION#v}"
+
+        validate_tag "resolved version (source=${SOURCE})" "${VERSION}"
+
+        SHORT_SHA="${COMMIT_SHA:0:${SHA_LENGTH}}"
+        BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+        TAGS=("${VERSION}")
+        [ -n "${SHA_TAG_PREFIX}" ] && TAGS+=("${SHA_TAG_PREFIX}${SHORT_SHA}")
+
+        if [ -n "${DISTRO}" ]; then
+          TAGS+=("${DISTRO}" "${VERSION}-${DISTRO}")
+          [ -n "${SHA_TAG_PREFIX}" ] && TAGS+=("${SHA_TAG_PREFIX}${SHORT_SHA}-${DISTRO}")
+        fi
+
+        if [ "${INCLUDE_BRANCH_TAG}" = "true" ] && [ "${REF_TYPE}" = "branch" ] && [ -n "${REF_NAME}" ]; then
+          TAGS+=("branch-$(printf '%s' "${REF_NAME}" | tr -c 'A-Za-z0-9._-' '-')")
+        fi
+
+        if [ -n "${CALLER_EXTRA_TAGS}" ]; then
+          while IFS= read -r line || [ -n "${line}" ]; do
+            line="${line//$'\r'/}"
+            line="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+            [ -z "${line}" ] && continue
+            case "${line}" in \#*) continue ;; esac
+            TAGS+=("${line}")
+          done <<< "${CALLER_EXTRA_TAGS}"
+        fi
+
+        # Dedupe (preserve order) and validate every emitted tag.
+        declare -A seen=()
+        OUT_TAGS=()
+        for t in "${TAGS[@]+"${TAGS[@]}"}"; do
+          [ -n "${seen[$t]:-}" ] && continue
+          seen[$t]=1
+          validate_tag "computed tag" "${t}"
+          OUT_TAGS+=("${t}")
+        done
+
+        {
+          echo "version=${VERSION}"
+          echo "short_sha=${SHORT_SHA}"
+          echo "build_date=${BUILD_DATE}"
+          echo "source=${SOURCE}"
+          echo "extra_tags<<__EOF__"
+          if [ "${#OUT_TAGS[@]}" -gt 0 ]; then
+            printf '%s\n' "${OUT_TAGS[@]}"
+          fi
+          echo "__EOF__"
+        } >> "${GITHUB_OUTPUT}"
+
+        echo "version=${VERSION} (source=${SOURCE}) short_sha=${SHORT_SHA}"
+        if [ "${#OUT_TAGS[@]}" -gt 0 ]; then
+          printf 'tag: %s\n' "${OUT_TAGS[@]}"
+        else
+          echo "tag: (none)"
+        fi
