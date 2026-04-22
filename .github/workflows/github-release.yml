@@ -1,0 +1,233 @@
+name: GitHub Release (reusable)
+
+"on":
+  workflow_call:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g. `v1.2.3`). Required.'
+        required: true
+        type: string
+      release_name:
+        description: 'Release title. Defaults to `tag_name`.'
+        required: false
+        type: string
+        default: ''
+      version:
+        description: 'Resolved version (typically `tag_name` minus leading `v`). Auto-derived when empty.'
+        required: false
+        type: string
+        default: ''
+      image_ref:
+        description: >-
+          Optional fully qualified image reference (e.g. `docker.io/ns/img`).
+          When set, a "Docker images" section with `docker pull` examples is
+          included in the release body.
+        required: false
+        type: string
+        default: ''
+      platforms:
+        description: 'Comma-separated platform list (e.g. `linux/amd64,linux/arm64`).'
+        required: false
+        type: string
+        default: ''
+      template_path:
+        description: >-
+          Path to a Markdown template inside the caller repo. Empty uses
+          the bundled default.
+        required: false
+        type: string
+        default: ''
+      extra_context:
+        description: >-
+          Newline-separated `KEY=VALUE` pairs interpolated into the
+          template as `{{ KEY }}`.
+        required: false
+        type: string
+        default: ''
+      draft:
+        description: 'Create the release as a draft.'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: >-
+          `true`/`false` to force pre-release flag. Empty (default) lets
+          render-release-notes auto-detect from `vX.Y.Z-<suffix>`.
+        required: false
+        type: string
+        default: ''
+      make_latest:
+        description: '`true`/`false`/`legacy`. Forwarded to softprops/action-gh-release.'
+        required: false
+        type: string
+        default: 'true'
+      generate_release_notes:
+        description: >-
+          Append GitHub's auto-generated PR/contributor notes after the
+          rendered template body.
+        required: false
+        type: boolean
+        default: true
+      target_commitish:
+        description: 'Branch or commit the tag points at. Defaults to the workflow ref.'
+        required: false
+        type: string
+        default: ''
+      files:
+        description: 'Newline-separated globs of artifacts to attach to the release.'
+        required: false
+        type: string
+        default: ''
+      actions_repo:
+        description: 'Repo hosting the `render-release-notes` composite action.'
+        required: false
+        type: string
+        default: blackoutsecure/platform-automation
+      resolver_ref:
+        description: 'Git ref of `actions_repo` to checkout.'
+        required: false
+        type: string
+        default: main
+    secrets:
+      ACTIONS_REPO_TOKEN:
+        description: 'Optional. Only needed if `actions_repo` is private; falls back to `GITHUB_TOKEN`.'
+        required: false
+    outputs:
+      release_id:
+        description: 'GitHub Release ID.'
+        value: ${{ jobs.publish.outputs.release_id }}
+      release_url:
+        description: 'HTML URL of the published release.'
+        value: ${{ jobs.publish.outputs.release_url }}
+      prerelease:
+        description: 'Resolved pre-release flag (`true`/`false`).'
+        value: ${{ jobs.publish.outputs.prerelease }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # GitHub Releases are tag-scoped; never cancel an in-flight publish.
+  group: github-release-${{ github.workflow }}-${{ inputs.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.release.outputs.id }}
+      release_url: ${{ steps.release.outputs.url }}
+      prerelease: ${{ steps.prerelease.outputs.value }}
+    steps:
+      - name: Preflight validation
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          MAKE_LATEST: ${{ inputs.make_latest }}
+          ACTIONS_REPO: ${{ inputs.actions_repo }}
+        run: |
+          set -euo pipefail
+          ERR=0
+          fail() { echo "ERROR: $*" >&2; ERR=1; }
+
+          [ -n "${TAG_NAME}" ] || fail "input 'tag_name' is required"
+          case "${TAG_NAME}" in
+            *[$'\n\r\t ']*) fail "input 'tag_name' contains whitespace" ;;
+          esac
+
+          if [ -n "${PRERELEASE}" ]; then
+            case "${PRERELEASE}" in
+              true|false) ;;
+              *) fail "input 'prerelease' must be empty, 'true', or 'false' (got '${PRERELEASE}')" ;;
+            esac
+          fi
+
+          case "${MAKE_LATEST}" in
+            true|false|legacy) ;;
+            *) fail "input 'make_latest' must be 'true', 'false', or 'legacy' (got '${MAKE_LATEST}')" ;;
+          esac
+
+          if ! printf '%s' "${ACTIONS_REPO}" \
+            | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$'; then
+            fail "input 'actions_repo' must be 'owner/name' (got '${ACTIONS_REPO}')"
+          fi
+
+          [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
+
+      - name: Checkout caller repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout composite actions
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: ${{ inputs.actions_repo }}
+          ref: ${{ inputs.resolver_ref }}
+          path: .platform-automation
+          token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/render-release-notes
+          sparse-checkout-cone-mode: false
+
+      - name: Render release body
+        id: render
+        uses: ./.platform-automation/.github/actions/render-release-notes
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          version: ${{ inputs.version }}
+          release_name: ${{ inputs.release_name }}
+          image_ref: ${{ inputs.image_ref }}
+          platforms: ${{ inputs.platforms }}
+          template_path: ${{ inputs.template_path }}
+          extra_context: ${{ inputs.extra_context }}
+
+      - name: Resolve prerelease flag
+        id: prerelease
+        env:
+          OVERRIDE: ${{ inputs.prerelease }}
+          AUTO: ${{ steps.render.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          VALUE="${OVERRIDE:-${AUTO}}"
+          echo "value=${VALUE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish GitHub Release
+        id: release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          name: ${{ inputs.release_name || inputs.tag_name }}
+          body_path: ${{ steps.render.outputs.body_path }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ steps.prerelease.outputs.value }}
+          make_latest: ${{ inputs.make_latest }}
+          generate_release_notes: ${{ inputs.generate_release_notes }}
+          target_commitish: ${{ inputs.target_commitish }}
+          files: ${{ inputs.files }}
+          fail_on_unmatched_files: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Job summary
+        if: always()
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+          PRERELEASE: ${{ steps.prerelease.outputs.value }}
+        run: |
+          {
+            echo "## GitHub Release"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Tag         | \`${TAG_NAME}\` |"
+            echo "| Release ID  | \`${RELEASE_ID:-n/a}\` |"
+            echo "| URL         | ${RELEASE_URL:-n/a} |"
+            echo "| Pre-release | \`${PRERELEASE}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"

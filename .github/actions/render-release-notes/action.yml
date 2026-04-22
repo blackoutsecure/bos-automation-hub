@@ -1,0 +1,214 @@
+name: Render release notes
+description: >-
+  Render a Markdown release-notes body from a template plus structured
+  inputs (image ref, version, platforms, extra context). Performs simple
+  `{{ key }}` substitution — no shell or template-engine execution, so
+  caller-supplied values cannot inject runner commands.
+
+inputs:
+  tag_name:
+    description: 'Release tag (e.g. `v1.2.3`).'
+    required: true
+  version:
+    description: 'Resolved version (typically `tag_name` with leading `v` stripped).'
+    required: false
+    default: ''
+  release_name:
+    description: 'Human-readable release title. Defaults to `tag_name`.'
+    required: false
+    default: ''
+  image_ref:
+    description: >-
+      Optional fully qualified image reference (e.g. `docker.io/ns/img`).
+      When set, a "Docker images" section with `docker pull` examples is
+      rendered.
+    required: false
+    default: ''
+  platforms:
+    description: >-
+      Optional comma-separated platform list (e.g. `linux/amd64,linux/arm64`).
+      When set, a "Supported architectures" section is rendered.
+    required: false
+    default: ''
+  template_path:
+    description: >-
+      Path to a Markdown template. Defaults to the bundled template.
+      Supported placeholders: `{{ release_name }}`, `{{ version }}`,
+      `{{ tag_name }}`, `{{ short_sha }}`, `{{ commit_url }}`,
+      `{{ build_date }}`, `{{ image_section }}`, `{{ platforms_section }}`,
+      `{{ extra_section }}`, plus any keys passed via `extra_context`.
+    required: false
+    default: ''
+  extra_context:
+    description: >-
+      Newline-separated `KEY=VALUE` pairs interpolated into the template
+      as `{{ KEY }}`. Keys must match `^[A-Z][A-Z0-9_]*$`.
+    required: false
+    default: ''
+  output_path:
+    description: 'Where to write the rendered Markdown.'
+    required: false
+    default: /tmp/release-notes.md
+
+outputs:
+  body_path:
+    description: 'Path to the rendered Markdown file.'
+    value: ${{ steps.render.outputs.body_path }}
+  prerelease:
+    description: '`true` when `tag_name` matches `vX.Y.Z-<suffix>`.'
+    value: ${{ steps.render.outputs.prerelease }}
+
+runs:
+  using: composite
+  steps:
+    - id: render
+      shell: bash
+      env:
+        TAG_NAME: ${{ inputs.tag_name }}
+        VERSION_INPUT: ${{ inputs.version }}
+        RELEASE_NAME_INPUT: ${{ inputs.release_name }}
+        IMAGE_REF: ${{ inputs.image_ref }}
+        PLATFORMS: ${{ inputs.platforms }}
+        TEMPLATE_PATH_INPUT: ${{ inputs.template_path }}
+        EXTRA_CONTEXT: ${{ inputs.extra_context }}
+        OUTPUT_PATH: ${{ inputs.output_path }}
+        DEFAULT_TEMPLATE: ${{ github.action_path }}/default-template.md
+        COMMIT_SHA: ${{ github.sha }}
+        SERVER_URL: ${{ github.server_url }}
+        REPOSITORY: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        ERR=0
+        fail() { echo "ERROR: $*" >&2; ERR=1; }
+
+        [ -n "${TAG_NAME}" ] || fail "input 'tag_name' is required"
+        case "${TAG_NAME}" in
+          *[$'\n\r\t ']*) fail "input 'tag_name' contains whitespace: '${TAG_NAME}'" ;;
+        esac
+
+        if [ -n "${IMAGE_REF}" ]; then
+          if ! printf '%s' "${IMAGE_REF}" \
+            | grep -Eq '^[a-z0-9.-]+(:[0-9]+)?(/[a-z0-9._-]+)+$'; then
+            fail "input 'image_ref' is not a valid image reference: '${IMAGE_REF}'"
+          fi
+        fi
+
+        if [ -n "${PLATFORMS}" ]; then
+          if ! printf '%s' "${PLATFORMS}" \
+            | grep -Eq '^[a-z0-9]+/[a-z0-9]+(,[a-z0-9]+/[a-z0-9]+)*$'; then
+            fail "input 'platforms' must be comma-separated 'os/arch' values: '${PLATFORMS}'"
+          fi
+        fi
+
+        case "${OUTPUT_PATH}" in
+          /*) ;;
+          *) fail "input 'output_path' must be absolute: '${OUTPUT_PATH}'" ;;
+        esac
+
+        [ "${ERR}" -eq 0 ] || { echo "Validation failed." >&2; exit 1; }
+
+
+        VERSION="${VERSION_INPUT:-${TAG_NAME#v}}"
+        RELEASE_NAME="${RELEASE_NAME_INPUT:-${TAG_NAME}}"
+        SHORT_SHA="${COMMIT_SHA:0:12}"
+        COMMIT_URL="${SERVER_URL}/${REPOSITORY}/commit/${COMMIT_SHA}"
+        BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+        if printf '%s' "${TAG_NAME}" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+-[A-Za-z0-9.+-]+$'; then
+          PRERELEASE="true"
+        else
+          PRERELEASE="false"
+        fi
+
+        TEMPLATE_PATH="${TEMPLATE_PATH_INPUT:-${DEFAULT_TEMPLATE}}"
+        case "${TEMPLATE_PATH}" in
+          *..*) echo "ERROR: template_path must not contain '..': '${TEMPLATE_PATH}'" >&2; exit 1 ;;
+        esac
+        [ -f "${TEMPLATE_PATH}" ] \
+          || { echo "ERROR: template_path not found: '${TEMPLATE_PATH}'" >&2; exit 1; }
+
+
+        IMAGE_SECTION=""
+        if [ -n "${IMAGE_REF}" ]; then
+          IMAGE_SECTION=$(
+            printf '### Docker images\n\n'
+            printf '```bash\n'
+            printf 'docker pull %s:%s\n' "${IMAGE_REF}" "${VERSION}"
+            printf 'docker pull %s:latest\n' "${IMAGE_REF}"
+            printf '```'
+          )
+        fi
+
+        PLATFORMS_SECTION=""
+        if [ -n "${PLATFORMS}" ]; then
+          PLATFORMS_SECTION=$(
+            printf '### Supported architectures\n\n'
+            printf '| Platform |\n| --- |\n'
+            IFS=',' read -ra PLATS <<< "${PLATFORMS}"
+            for p in "${PLATS[@]}"; do printf '| `%s` |\n' "${p}"; done
+          )
+        fi
+
+        export TAG_NAME VERSION RELEASE_NAME SHORT_SHA COMMIT_URL BUILD_DATE
+        export IMAGE_SECTION PLATFORMS_SECTION EXTRA_CONTEXT
+        export TEMPLATE_PATH OUTPUT_PATH
+
+        python3 - <<'PY'
+        import os, re, sys
+
+        builtins = {
+            "release_name":      os.environ["RELEASE_NAME"],
+            "version":           os.environ["VERSION"],
+            "tag_name":          os.environ["TAG_NAME"],
+            "short_sha":         os.environ["SHORT_SHA"],
+            "commit_url":        os.environ["COMMIT_URL"],
+            "build_date":        os.environ["BUILD_DATE"],
+            "image_section":     os.environ.get("IMAGE_SECTION", ""),
+            "platforms_section": os.environ.get("PLATFORMS_SECTION", ""),
+        }
+
+        extra = {}
+        key_re = re.compile(r"^[A-Z][A-Z0-9_]*$")
+        raw = os.environ.get("EXTRA_CONTEXT", "")
+        for lineno, line in enumerate(raw.splitlines(), 1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" not in stripped:
+                sys.exit(f"ERROR: extra_context line {lineno} missing '=': {stripped!r}")
+            k, _, v = stripped.partition("=")
+            k = k.strip()
+            if not key_re.fullmatch(k):
+                sys.exit(f"ERROR: extra_context key must match ^[A-Z][A-Z0-9_]*$: {k!r}")
+            extra[k] = v
+
+        extra_section_lines = []
+        for k, v in extra.items():
+            extra_section_lines.append(f"- **{k.replace('_', ' ').title()}:** {v}")
+        builtins["extra_section"] = "\n".join(extra_section_lines)
+
+        with open(os.environ["TEMPLATE_PATH"], "r", encoding="utf-8") as f:
+            tpl = f.read()
+
+        # Restricted key shape (above) prevents caller values from injecting
+        # Actions runner commands via the rendered Markdown.
+        def replace(match):
+            key = match.group(1).strip()
+            if key in builtins:
+                return builtins[key]
+            if key.upper() in extra:
+                return extra[key.upper()]
+            sys.exit(f"ERROR: template references unknown placeholder: {{{{ {key} }}}}")
+
+        rendered = re.sub(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}", replace, tpl)
+
+        out_path = os.environ["OUTPUT_PATH"]
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(rendered)
+        print(f"Wrote {len(rendered)} bytes to {out_path}")
+        PY
+
+        {
+          echo "body_path=${OUTPUT_PATH}"
+          echo "prerelease=${PRERELEASE}"
+        } >> "${GITHUB_OUTPUT}"

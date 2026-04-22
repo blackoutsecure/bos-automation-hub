@@ -151,8 +151,8 @@ jobs:
           ERR=0
           fail() { echo "ERROR: $*" >&2; ERR=1; }
 
-          # Reject whitespace/newlines — a stray newline in a secret silently
-          # truncates GITHUB_OUTPUT for any downstream job.
+          # A stray newline in a secret silently truncates GITHUB_OUTPUT
+          # for any downstream job, so reject it explicitly.
           check_singleline() {
             local name="$1" val="$2"
             [ -n "${val}" ] || { fail "${name} is missing"; return; }
@@ -175,8 +175,6 @@ jobs:
           check_slug       "input 'block_name'"        "${BLOCK_NAME}"
           check_slug       "input 'balena_namespace'"  "${BALENA_NAMESPACE}"
 
-          # actions_repo must be `owner/name` — prevents `org/repo/.github/...`
-          # path-traversal style overrides from sneaking past the checkout.
           if ! printf '%s' "${ACTIONS_REPO}" \
             | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$'; then
             fail "input 'actions_repo' must be 'owner/name' (got '${ACTIONS_REPO}')"

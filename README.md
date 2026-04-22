@@ -6,6 +6,19 @@ Reusable GitHub Actions workflows and composite actions shared across
 This repo is public so any repository (including forks) can call these
 workflows directly without needing a token.
 
+### Configuration model
+
+- **`secrets:`** — things that grant access (Docker Hub token, Balena
+  API token, optional `ACTIONS_REPO_TOKEN`).
+- **`vars:`** — things that identify *what* you're publishing (image
+  name, namespace, block name). Set them once on the repository or
+  organisation and the caller workflow stays free of literals.
+
+The Docker Hub namespace is **public information** (it appears in every
+`docker pull` URL), so it's modelled as `vars.DOCKERHUB_NAMESPACE` /
+`inputs.dockerhub_namespace` rather than a secret. The legacy
+`secrets.DOCKERHUB_NAMESPACE` is still accepted for back-compat.
+
 ---
 
 ## Contents
@@ -14,9 +27,12 @@ workflows directly without needing a token.
 |------|------|---------|
 | [.github/workflows/docker-build-push.yml](.github/workflows/docker-build-push.yml) | Reusable workflow | Multi-arch Docker build, push-by-digest, and single-manifest publish to Docker Hub. |
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
+| [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
+| [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Poll an upstream repo's `latest` release, dispatch downstream workflows on change, and commit a tracking file. |
 | [.github/actions/resolve-docker-image-tags/action.yml](.github/actions/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
 | [.github/actions/resolve-release-context/action.yml](.github/actions/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
 | [.github/actions/sync-dockerhub-description/action.yml](.github/actions/sync-dockerhub-description/action.yml) | Composite action | Validates inputs and pushes a repo's README + short description to Docker Hub via `peter-evans/dockerhub-description`. |
+| [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
 
 ---
@@ -45,10 +61,10 @@ jobs:
     uses: blackoutsecure/platform-automation/.github/workflows/docker-build-push.yml@main
     with:
       image_name: my-service
+      dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
     secrets:
-      DOCKERHUB_USERNAME:  ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN:     ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_NAMESPACE: ${{ secrets.DOCKERHUB_NAMESPACE }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
 ```
 
 ### Default behaviour
@@ -69,6 +85,7 @@ jobs:
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
 | `image_name` | string | **required** | Image name (no registry/namespace). |
+| `dockerhub_namespace` | string | `''` | Docker Hub namespace. Set via `vars.DOCKERHUB_NAMESPACE`. Falls back to `secrets.DOCKERHUB_NAMESPACE` for back-compat. |
 | `dockerfile` | string | `./Dockerfile` | Path to the Dockerfile. |
 | `build_context` | string | `.` | Docker build context. |
 | `registry` | string | `docker.io` | Registry hostname. |
@@ -102,7 +119,7 @@ jobs:
 |--------|:--------:|-------------|
 | `DOCKERHUB_USERNAME` | ✔ | Docker Hub username. |
 | `DOCKERHUB_TOKEN` | ✔ | Docker Hub access token (not your password). |
-| `DOCKERHUB_NAMESPACE` | ✔ | Namespace (org or user) the image belongs to. |
+| `DOCKERHUB_NAMESPACE` | ✖ | **Deprecated.** Pass `dockerhub_namespace:` (or set `vars.DOCKERHUB_NAMESPACE`) instead. Still accepted for back-compat. |
 | `ACTIONS_REPO_TOKEN` | ✖ | Only needed if `actions_repo` is private. Falls back to `GITHUB_TOKEN`. |
 
 ### Outputs
@@ -111,6 +128,7 @@ jobs:
 |--------|-------------|
 | `image` | Fully qualified image reference (`registry/namespace/name`). |
 | `image_version` | Resolved version tag. |
+| `namespace` | Effective Docker Hub namespace. |
 
 ### Self-hosted runners
 
@@ -169,7 +187,7 @@ a successful manifest push, and can also be used standalone:
 ```yaml
 - uses: blackoutsecure/platform-automation/.github/actions/sync-dockerhub-description@main
   with:
-    repository: ${{ secrets.DOCKERHUB_NAMESPACE }}/my-service
+    repository: ${{ vars.DOCKERHUB_NAMESPACE }}/my-service
     username: ${{ secrets.DOCKERHUB_USERNAME }}
     password: ${{ secrets.DOCKERHUB_TOKEN }}
     readme_filepath: ./README.md
@@ -187,20 +205,14 @@ Resolve a block version (same logic as the Docker workflow), optionally
 sync the version back into `balena.yml`, and publish to balenaCloud via
 [`balena-io/deploy-to-balena-action`](https://github.com/balena-io/deploy-to-balena-action).
 
-### Caller template
-
-A copy-pasteable starter is in
-[examples/balena-block-publish.yml](examples/balena-block-publish.yml) —
-drop it into a downstream repo at `.github/workflows/balena-block-publish.yml`
-and set the repo variables/secrets below.
-
 ### Required configuration on the caller repo
 
-| Kind     | Name                 | Used for |
-|----------|----------------------|----------|
-| Variable | `BALENA_BLOCK_NAME`  | Block slug (without namespace). |
-| Variable | `BALENA_NAMESPACE`   | Balena user/org that owns the block. |
-| Secret   | `BALENA_API_TOKEN`   | balenaCloud API token (forwarded via `secrets: inherit`). |
+| Kind     | Name                  | Used for |
+|----------|-----------------------|----------|
+| Variable | `BALENA_BLOCK_NAME`   | Block slug (without namespace). |
+| Variable | `BALENA_NAMESPACE`    | Balena user/org that owns the block. |
+| Variable | `DOCKERHUB_NAMESPACE` | Docker Hub namespace for the image. |
+| Secret   | `BALENA_API_TOKEN`    | balenaCloud API token (forwarded via `secrets:`). |
 
 ### Default behaviour
 
@@ -216,6 +228,105 @@ and set the repo variables/secrets below.
   block; in-progress runs are never cancelled.
 
 See [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml)
+for the full input/output list.
+
+---
+
+## `github-release.yml` — reusable workflow
+
+Create or update a GitHub Release with a rendered Markdown body that
+includes `docker pull` commands, supported architectures, and any
+caller-supplied context. Wraps
+[`softprops/action-gh-release`](https://github.com/softprops/action-gh-release)
+(SHA-pinned) and the [`render-release-notes`](.github/actions/render-release-notes/action.yml)
+composite action.
+
+### Default behaviour
+
+- **Trigger-agnostic.** The caller passes `tag_name:` explicitly, so
+  the workflow works on `release` events, tag pushes, or manual
+  dispatches without hard-coding event assumptions.
+- **Pre-release auto-detection.** Tags shaped like `vX.Y.Z-<suffix>`
+  (e.g. `v1.2.3-rc1`) are marked as pre-releases automatically. Override
+  with `prerelease: 'true'` or `prerelease: 'false'`.
+- **Update-in-place.** Re-running against the same `tag_name:`
+  patches the existing release body instead of erroring.
+- **Auto-generated notes.** GitHub's PR/contributor notes are appended
+  after the rendered template body when `generate_release_notes: true`
+  (the default).
+- **Least-privilege.** Workflow defaults to `contents: read`; the
+  publish job opts into `contents: write` itself — the caller doesn't
+  need to grant it.
+
+### Template substitution
+
+The bundled template at
+[.github/actions/render-release-notes/default-template.md](.github/actions/render-release-notes/default-template.md)
+supports these placeholders out of the box:
+
+| Placeholder | Source |
+|-------------|--------|
+| `{{ release_name }}` | `release_name` input (defaults to `tag_name`). |
+| `{{ tag_name }}`     | `tag_name` input. |
+| `{{ version }}`      | `version` input (defaults to `tag_name` minus leading `v`). |
+| `{{ short_sha }}`    | First 12 chars of `github.sha`. |
+| `{{ commit_url }}`   | Auto-built from `github.server_url` + `github.repository`. |
+| `{{ build_date }}`   | ISO-8601 UTC timestamp at render time. |
+| `{{ image_section }}`     | Rendered when `image_ref:` is set. |
+| `{{ platforms_section }}` | Rendered when `platforms:` is set. |
+| `{{ extra_section }}`     | Bullet list built from `extra_context:` `KEY=VALUE` pairs. |
+
+Keys passed via `extra_context:` are also available as `{{ KEY }}` for
+custom templates. Substitution is regex-based on a fixed key shape
+(`^[A-Z][A-Z0-9_]*$`) — there is no template-engine evaluation, so
+user-supplied values cannot inject runner commands.
+
+See [.github/workflows/github-release.yml](.github/workflows/github-release.yml)
+for the full input/output list.
+
+---
+
+## `monitor-upstream-release.yml` — reusable workflow
+
+Poll a public GitHub repo on a schedule and react when its `latest`
+release tag changes. Designed for downstream repos that wrap an upstream
+project (e.g. building a custom Docker image of `actions/runner`,
+`balena-io/balena-cli`, `k3s-io/k3s`) and want their pipeline to
+rebuild whenever upstream cuts a release — without polling logic
+living in every caller repo.
+
+### Default behaviour
+
+- **Tracking file.** A small JSON file at `inputs.track_file` (default
+  `.github/upstream/tracked-release.json`) records the last-seen `repo`,
+  `tag`, `version`, and resolved `commit` SHA. The file is committed
+  back to the default branch when the upstream changes; subsequent runs
+  diff against it to detect change.
+- **Real commit SHA.** The release's `target_commitish` field is often
+  a branch name (`main`), and the Git Refs API returns the *tag-object*
+  SHA for annotated tags — neither is the commit you want. The workflow
+  resolves the actual commit SHA via `repos/<owner>/<repo>/commits/<tag>`,
+  which handles lightweight and annotated tags uniformly.
+- **Dispatch-then-commit ordering.** Downstream workflows are
+  dispatched **before** the tracking file is committed — if dispatch
+  fails, the marker is unchanged and the next scheduled run retries.
+- **Concurrent-push safety.** `git push` retries up to `push_retries`
+  attempts with a `git pull --rebase` between tries.
+- **No false positives.** `published_at` is deliberately excluded from
+  the tracking file — GitHub re-publishing a release with a tweaked
+  timestamp must not look like a new version.
+- **Least-privilege.** Workflow defaults to `contents: read`; the
+  monitor job opts into `contents: write` (for the marker commit) and
+  `actions: write` (for `gh workflow run`).
+
+### Optional `DISPATCH_TOKEN` secret
+
+The default `GITHUB_TOKEN` cannot trigger further `workflow_run` /
+`workflow_dispatch` chains. If your dispatched workflow itself needs
+to trigger another workflow, pass a fine-scoped PAT or GitHub App
+token via the `DISPATCH_TOKEN` secret.
+
+See [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml)
 for the full input/output list.
 
 ---
@@ -243,8 +354,6 @@ with access to their secrets, so they follow GitHub's
 - **Strict input validation.** Tags, identifiers, image names, slugs,
   Balena block names, and `actions_repo` overrides are all regex-checked
   before use; secrets are rejected if they contain stray whitespace.
-- **Masked outputs.** `DOCKERHUB_NAMESPACE` is registered with
-  `::add-mask::` before any log line that could echo it.
 - **Concurrency safety.** Publish jobs use `cancel-in-progress: false`
   to avoid leaving partial releases behind.
 - **No `pull_request_target`.** Untrusted PR code is never checked out

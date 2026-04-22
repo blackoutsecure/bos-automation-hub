@@ -19,7 +19,6 @@ In scope:
 
 - The reusable workflows in [`.github/workflows/`](.github/workflows/).
 - The composite actions in [`.github/actions/`](.github/actions/).
-- The example caller workflow in [`examples/`](examples/).
 
 Out of scope:
 
@@ -48,8 +47,6 @@ These workflows follow the practices recommended by
 - **Input validation** — image names, tags, slugs, and version strings
   are regex-validated; secrets are checked for stray whitespace before
   use.
-- **Masked outputs** — `DOCKERHUB_NAMESPACE` is registered with
-  `::add-mask::` before any log line that could echo it.
 - **Concurrency safety** — publish jobs use `cancel-in-progress: false`
   to avoid leaving partial releases behind.
 - **No `pull_request_target`** — workflows that handle PRs use the

@@ -1,4 +1,9 @@
-# Replace with a real team handle (e.g. @blackoutsecure/platform-team) before
-# enabling — GitHub silently ignores entries that reference non-existent users
-# or teams. CODEOWNERS approvals can then be required via branch protection.
+# Default code owners.
+#
+# Placeholder — uncomment and replace with a real GitHub user or team
+# handle (e.g. `@blackoutsecure/platform-team`) to enforce reviews.
+# GitHub silently ignores entries that reference non-existent users or
+# teams. Combine with a branch-protection rule that requires CODEOWNERS
+# approval to make it binding.
+#
 # * @blackoutsecure/platform-team
