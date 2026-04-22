@@ -1,0 +1,115 @@
+name: Resolve release context
+description: >-
+  Compute the publish-or-not gate and select the effective version and
+  build_date for a reusable release workflow. Centralises the
+  "publish only on push to default branch" rule shared by
+  docker-build-push.yml and balena-block-publish.yml.
+
+inputs:
+  publish_override:
+    description: >-
+      `'true'` or `'false'` to force the gate. Empty (default) means publish
+      only when the caller event is a `push` to the repo's default branch.
+    required: false
+    default: ''
+  auto_resolve_version:
+    description: >-
+      `'true'` when the caller already ran `resolve-docker-image-tags` and is
+      passing its outputs in `resolved_version` / `resolved_build_date`.
+      `'false'` to fall back to `version_override` (or the commit SHA).
+    required: false
+    default: 'true'
+  resolved_version:
+    description: 'Version output from `resolve-docker-image-tags` (when `auto_resolve_version=true`).'
+    required: false
+    default: ''
+  resolved_build_date:
+    description: 'Build-date output from `resolve-docker-image-tags` (when `auto_resolve_version=true`).'
+    required: false
+    default: ''
+  version_override:
+    description: 'Explicit version to use when `auto_resolve_version=false`.'
+    required: false
+    default: ''
+  build_date_override:
+    description: 'Explicit ISO-8601 UTC build date. Wins over resolved/auto-generated when set.'
+    required: false
+    default: ''
+
+outputs:
+  publish:
+    description: '`true` or `false` — the effective publish/push gate.'
+    value: ${{ steps.compute.outputs.publish }}
+  version:
+    description: 'Effective version string.'
+    value: ${{ steps.compute.outputs.version }}
+  build_date:
+    description: 'Effective ISO-8601 UTC build date.'
+    value: ${{ steps.compute.outputs.build_date }}
+
+runs:
+  using: composite
+  steps:
+    - id: compute
+      shell: bash
+      env:
+        INPUT_PUBLISH: ${{ inputs.publish_override }}
+        AUTO_RESOLVE: ${{ inputs.auto_resolve_version }}
+        RESOLVED_VERSION: ${{ inputs.resolved_version }}
+        RESOLVED_BUILD_DATE: ${{ inputs.resolved_build_date }}
+        INPUT_VERSION: ${{ inputs.version_override }}
+        INPUT_BUILD_DATE: ${{ inputs.build_date_override }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        EVENT_NAME: ${{ github.event_name }}
+        REF: ${{ github.ref }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        if [ -n "${INPUT_PUBLISH}" ]; then
+          PUBLISH="${INPUT_PUBLISH}"
+        elif [ "${EVENT_NAME}" = "push" ] && [ "${REF}" = "refs/heads/${DEFAULT_BRANCH}" ]; then
+          PUBLISH="true"
+        else
+          PUBLISH="false"
+        fi
+
+        case "${PUBLISH}" in
+          true|false) ;;
+          *) echo "ERROR: 'publish_override' must be 'true' or 'false' (got '${PUBLISH}')" >&2; exit 1 ;;
+        esac
+
+        case "${AUTO_RESOLVE}" in
+          true|false) ;;
+          *) echo "ERROR: 'auto_resolve_version' must be 'true' or 'false' (got '${AUTO_RESOLVE}')" >&2; exit 1 ;;
+        esac
+
+        if [ "${AUTO_RESOLVE}" = "true" ]; then
+          VERSION="${RESOLVED_VERSION}"
+          BUILD_DATE="${INPUT_BUILD_DATE:-${RESOLVED_BUILD_DATE}}"
+        else
+          VERSION="${INPUT_VERSION:-${SHA}}"
+          BUILD_DATE="${INPUT_BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        fi
+
+        if [ -z "${VERSION}" ]; then
+          echo "ERROR: no version could be resolved (auto_resolve_version=${AUTO_RESOLVE})" >&2
+          exit 1
+        fi
+
+        # Reject whitespace/newlines — a stray newline silently breaks GITHUB_OUTPUT
+        # for any downstream job that reads these values.
+        case "${VERSION}" in
+          *[$'\n\r\t ']*) echo "ERROR: resolved version contains whitespace: '${VERSION}'" >&2; exit 1 ;;
+        esac
+        case "${BUILD_DATE}" in
+          *[$'\n\r\t']*) echo "ERROR: build_date contains newlines/tabs: '${BUILD_DATE}'" >&2; exit 1 ;;
+        esac
+
+        {
+          echo "publish=${PUBLISH}"
+          echo "version=${VERSION}"
+          echo "build_date=${BUILD_DATE}"
+        } >> "${GITHUB_OUTPUT}"
+
+        echo "publish=${PUBLISH} version=${VERSION} build_date=${BUILD_DATE}"

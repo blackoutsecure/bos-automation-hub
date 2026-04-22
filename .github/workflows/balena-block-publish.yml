@@ -1,0 +1,356 @@
+name: Balena Block Publish (reusable)
+
+"on":
+  workflow_call:
+    inputs:
+      block_name:
+        description: 'Balena block slug (without namespace).'
+        required: true
+        type: string
+      balena_namespace:
+        description: 'Balena namespace (user/org) that owns the block.'
+        required: true
+        type: string
+      source:
+        description: 'Path passed as `source` to deploy-to-balena-action.'
+        required: false
+        type: string
+        default: .
+      balena_yml_path:
+        description: 'Path to balena.yml (used for version sync).'
+        required: false
+        type: string
+        default: ./balena.yml
+      publish:
+        description: "'true'/'false' to force; empty => publish only on push to default branch."
+        required: false
+        type: string
+        default: ''
+      version:
+        description: 'Explicit version. Overrides auto-resolved when set.'
+        required: false
+        type: string
+        default: ''
+      auto_resolve_version:
+        description: 'Run `resolve-docker-image-tags` to derive the version.'
+        required: false
+        type: boolean
+        default: true
+      version_source:
+        description: '`auto` | `dockerfile` | `file` | `git_tag` | `sha`.'
+        required: false
+        type: string
+        default: auto
+      dockerfile:
+        description: 'Path to the Dockerfile (used by version resolver).'
+        required: false
+        type: string
+        default: ./Dockerfile
+      version_build_arg:
+        description: 'Dockerfile ARG name to read the version from.'
+        required: false
+        type: string
+        default: APP_VERSION
+      version_file:
+        description: 'Plain-text version file path (used by `file`/`auto`).'
+        required: false
+        type: string
+        default: VERSION
+      sync_balena_yml:
+        description: >-
+          When publishing on the default branch, rewrite the top-level
+          `version:` in balena.yml and commit it back. Requires
+          `contents: write` on the caller.
+        required: false
+        type: boolean
+        default: true
+      draft:
+        description: 'Publish as a draft (sets `finalize: false`).'
+        required: false
+        type: boolean
+        default: false
+      cache:
+        description: 'Forwarded to deploy-to-balena-action `cache`.'
+        required: false
+        type: boolean
+        default: true
+      layer_cache:
+        description: 'Forwarded to deploy-to-balena-action `layer_cache`.'
+        required: false
+        type: boolean
+        default: true
+      debug:
+        description: 'Forwarded to deploy-to-balena-action `debug`.'
+        required: false
+        type: boolean
+        default: false
+      runs_on:
+        description: 'Runner label for the publish job.'
+        required: false
+        type: string
+        default: ubuntu-latest
+      actions_repo:
+        description: 'Repo hosting the `resolve-docker-image-tags` composite action.'
+        required: false
+        type: string
+        default: blackoutsecure/platform-automation
+      resolver_ref:
+        description: 'Git ref of `actions_repo` to checkout.'
+        required: false
+        type: string
+        default: main
+    secrets:
+      BALENA_API_TOKEN:
+        required: true
+      ACTIONS_REPO_TOKEN:
+        description: 'Optional. Only needed if `actions_repo` is private; falls back to GITHUB_TOKEN.'
+        required: false
+    outputs:
+      published:
+        description: '`true` when a release was actually pushed to balenaCloud.'
+        value: ${{ jobs.setup.outputs.publish }}
+      version:
+        description: 'Resolved block version.'
+        value: ${{ jobs.setup.outputs.version }}
+      fleet:
+        description: 'Resolved `<namespace>/<block_name>` slug.'
+        value: ${{ jobs.setup.outputs.fleet }}
+      release_id:
+        description: 'Balena release id (when publish ran).'
+        value: ${{ jobs.publish.outputs.release_id }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # balenaCloud rejects concurrent pushes to the same block.
+  group: balena-block-${{ github.workflow }}-${{ inputs.block_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      publish: ${{ steps.resolve.outputs.publish }}
+      version: ${{ steps.resolve.outputs.version }}
+      fleet: ${{ steps.resolve.outputs.fleet }}
+      build_date: ${{ steps.resolve.outputs.build_date }}
+    steps:
+      - name: Preflight validation
+        env:
+          BLOCK_NAME: ${{ inputs.block_name }}
+          BALENA_NAMESPACE: ${{ inputs.balena_namespace }}
+          VERSION_SOURCE: ${{ inputs.version_source }}
+          VERSION: ${{ inputs.version }}
+          BALENA_API_TOKEN: ${{ secrets.BALENA_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ERR=0
+          fail() { echo "ERROR: $*" >&2; ERR=1; }
+
+          # Reject whitespace/newlines (a stray newline in a secret silently breaks GITHUB_OUTPUT).
+          check_singleline() {
+            local name="$1" val="$2"
+            [ -n "${val}" ] || { fail "${name} is missing"; return; }
+            case "${val}" in
+              *[$'\n\r\t ']*) fail "${name} contains whitespace/newlines" ;;
+            esac
+          }
+
+          SLUG_RE='^[a-z0-9]+([._-][a-z0-9]+)*$'
+          check_slug() {
+            local name="$1" val="$2"
+            [ -n "${val}" ] || { fail "${name} is empty"; return; }
+            printf '%s' "${val}" | grep -Eq "${SLUG_RE}" \
+              || fail "${name} is not a valid Balena slug: '${val}'"
+          }
+
+          check_singleline "input 'block_name'"        "${BLOCK_NAME}"
+          check_singleline "input 'balena_namespace'"  "${BALENA_NAMESPACE}"
+          check_singleline "secret 'BALENA_API_TOKEN'" "${BALENA_API_TOKEN}"
+          check_slug       "input 'block_name'"        "${BLOCK_NAME}"
+          check_slug       "input 'balena_namespace'"  "${BALENA_NAMESPACE}"
+
+          case "${VERSION_SOURCE}" in
+            auto|dockerfile|file|git_tag|sha) ;;
+            *) fail "input 'version_source' must be one of: auto|dockerfile|file|git_tag|sha (got '${VERSION_SOURCE}')" ;;
+          esac
+
+          if [ -n "${VERSION}" ]; then
+            check_singleline "input 'version'" "${VERSION}"
+          fi
+
+          [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
+          echo "Preflight OK."
+
+      - name: Checkout caller repo
+        if: inputs.auto_resolve_version
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout composite actions
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.actions_repo }}
+          ref: ${{ inputs.resolver_ref }}
+          path: .platform-automation
+          token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/resolve-docker-image-tags
+            .github/actions/resolve-release-context
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve version
+        id: tags
+        if: inputs.auto_resolve_version
+        uses: ./.platform-automation/.github/actions/resolve-docker-image-tags
+        with:
+          version_override: ${{ inputs.version }}
+          version_source: ${{ inputs.version_source }}
+          dockerfile: ${{ inputs.dockerfile }}
+          dockerfile_arg: ${{ inputs.version_build_arg }}
+          version_file: ${{ inputs.version_file }}
+
+      - name: Resolve release context
+        id: ctx
+        uses: ./.platform-automation/.github/actions/resolve-release-context
+        with:
+          publish_override: ${{ inputs.publish }}
+          auto_resolve_version: ${{ inputs.auto_resolve_version }}
+          resolved_version: ${{ steps.tags.outputs.version }}
+          resolved_build_date: ${{ steps.tags.outputs.build_date }}
+          version_override: ${{ inputs.version }}
+
+      - id: resolve
+        env:
+          PUBLISH: ${{ steps.ctx.outputs.publish }}
+          VERSION: ${{ steps.ctx.outputs.version }}
+          BUILD_DATE: ${{ steps.ctx.outputs.build_date }}
+          BLOCK_NAME: ${{ inputs.block_name }}
+          BALENA_NAMESPACE: ${{ inputs.balena_namespace }}
+        run: |
+          set -euo pipefail
+          NS="$(printf '%s' "${BALENA_NAMESPACE}" | tr -d '[:space:]')"
+          NAME="$(printf '%s' "${BLOCK_NAME}" | tr -d '[:space:]')"
+          FLEET="${NS}/${NAME}"
+          {
+            echo "publish=${PUBLISH}"
+            echo "version=${VERSION}"
+            echo "fleet=${FLEET}"
+            echo "build_date=${BUILD_DATE}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "publish=${PUBLISH} version=${VERSION} fleet=${FLEET}"
+
+  sync-balena-yml:
+    name: Sync balena.yml
+    needs: setup
+    if: >-
+      needs.setup.outputs.publish == 'true'
+      && inputs.sync_balena_yml
+      && github.event_name == 'push'
+      && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Sync version into balena.yml
+        env:
+          BALENA_YML: ${{ inputs.balena_yml_path }}
+          VERSION: ${{ needs.setup.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Reject path traversal / absolute paths; balena.yml must live in the repo.
+          case "${BALENA_YML}" in
+            /*|*..*) echo "ERROR: balena_yml_path must be a repo-relative path" >&2; exit 1 ;;
+          esac
+          [ -f "${BALENA_YML}" ] || { echo "ERROR: ${BALENA_YML} not found" >&2; exit 1; }
+
+          # Validate version shape before injecting it into the file.
+          case "${VERSION}" in
+            ''|*[!A-Za-z0-9._+-]*)
+              echo "ERROR: refusing to write unsafe version '${VERSION}' into ${BALENA_YML}" >&2
+              exit 1 ;;
+          esac
+
+          # Top-level `version:` only (no leading whitespace).
+          tmp="$(mktemp)"
+          awk -v v="${VERSION}" '
+            BEGIN { done = 0 }
+            !done && /^version:[[:space:]]*/ { print "version: " v; done = 1; next }
+            { print }
+          ' "${BALENA_YML}" > "${tmp}"
+          mv "${tmp}" "${BALENA_YML}"
+
+          if git diff --quiet -- "${BALENA_YML}"; then
+            echo "${BALENA_YML} already at ${VERSION}"
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "${BALENA_YML}"
+          git commit -m "chore: sync balena block version to ${VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+  publish:
+    name: Publish block
+    needs: [setup, sync-balena-yml]
+    if: >-
+      always()
+      && needs.setup.result == 'success'
+      && needs.setup.outputs.publish == 'true'
+      && (needs.sync-balena-yml.result == 'success' || needs.sync-balena-yml.result == 'skipped')
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 60
+    outputs:
+      release_id: ${{ steps.deploy.outputs.release_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.sync-balena-yml.result == 'success' && github.event.repository.default_branch || github.sha }}
+          persist-credentials: false
+
+      - name: Publish to balenaCloud
+        id: deploy
+        uses: balena-io/deploy-to-balena-action@master
+        with:
+          balena_token: ${{ secrets.BALENA_API_TOKEN }}
+          fleet: ${{ needs.setup.outputs.fleet }}
+          source: ${{ inputs.source }}
+          cache: ${{ inputs.cache }}
+          layer_cache: ${{ inputs.layer_cache }}
+          debug: ${{ inputs.debug }}
+          finalize: ${{ inputs.draft && 'false' || 'true' }}
+
+      - name: Job summary
+        if: always()
+        env:
+          FLEET: ${{ needs.setup.outputs.fleet }}
+          VERSION: ${{ needs.setup.outputs.version }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
+          RELEASE_ID: ${{ steps.deploy.outputs.release_id }}
+        run: |
+          {
+            echo "## Balena Block Publish"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Fleet      | \`${FLEET}\` |"
+            echo "| Version    | \`${VERSION}\` |"
+            echo "| Build date | \`${BUILD_DATE}\` |"
+            echo "| Release ID | \`${RELEASE_ID:-n/a}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"

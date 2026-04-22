@@ -13,7 +13,9 @@ workflows directly without needing a token.
 | Path | Kind | Purpose |
 |------|------|---------|
 | [.github/workflows/docker-build-push.yml](.github/workflows/docker-build-push.yml) | Reusable workflow | Multi-arch Docker build, push-by-digest, and single-manifest publish to Docker Hub. |
+| [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/actions/resolve-docker-image-tags/action.yml](.github/actions/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
+| [.github/actions/resolve-release-context/action.yml](.github/actions/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
 
 ---
@@ -143,6 +145,45 @@ Standalone version/tag resolver. Usable outside the reusable workflow.
 
 See [action.yml](.github/actions/resolve-docker-image-tags/action.yml)
 for the full input list.
+
+---
+
+## `balena-block-publish.yml` — reusable workflow
+
+Resolve a block version (same logic as the Docker workflow), optionally
+sync the version back into `balena.yml`, and publish to balenaCloud via
+[`balena-io/deploy-to-balena-action`](https://github.com/balena-io/deploy-to-balena-action).
+
+### Caller template
+
+A copy-pasteable starter is in
+[examples/balena-block-publish.yml](examples/balena-block-publish.yml) —
+drop it into a downstream repo at `.github/workflows/balena-block-publish.yml`
+and set the repo variables/secrets below.
+
+### Required configuration on the caller repo
+
+| Kind     | Name                 | Used for |
+|----------|----------------------|----------|
+| Variable | `BALENA_BLOCK_NAME`  | Block slug (without namespace). |
+| Variable | `BALENA_NAMESPACE`   | Balena user/org that owns the block. |
+| Secret   | `BALENA_API_TOKEN`   | balenaCloud API token (forwarded via `secrets: inherit`). |
+
+### Default behaviour
+
+- **Publish trigger:** publishes only on `push` to the default branch.
+  Override with the `publish` input (or via `workflow_dispatch`).
+- **Version resolution:** `auto` cascade → Dockerfile `ARG APP_VERSION` →
+  `VERSION` file → annotated git tag → commit SHA.
+- **`balena.yml` sync:** when `sync_balena_yml: true` (default) and the
+  workflow is publishing on the default branch, the top-level `version:`
+  is rewritten and committed back. Requires `contents: write` on the
+  caller job (set in the template).
+- **Concurrency:** balenaCloud rejects concurrent pushes to the same
+  block; in-progress runs are never cancelled.
+
+See [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml)
+for the full input/output list.
 
 ---
 

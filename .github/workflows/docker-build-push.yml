@@ -243,8 +243,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout composite action
-        if: inputs.auto_resolve_version
+      - name: Checkout composite actions
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.actions_repo }}
@@ -254,6 +253,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             .github/actions/resolve-docker-image-tags
+            .github/actions/resolve-release-context
           sparse-checkout-cone-mode: false
 
       - name: Validate caller paths
@@ -279,40 +279,33 @@ jobs:
           distro: ${{ inputs.distro }}
           extra_tags: ${{ inputs.extra_tags }}
 
+      - name: Resolve release context
+        id: ctx
+        uses: ./.platform-automation/.github/actions/resolve-release-context
+        with:
+          publish_override: ${{ inputs.push }}
+          auto_resolve_version: ${{ inputs.auto_resolve_version }}
+          resolved_version: ${{ steps.tags.outputs.version }}
+          resolved_build_date: ${{ steps.tags.outputs.build_date }}
+          version_override: ${{ inputs.image_version }}
+          build_date_override: ${{ inputs.build_date }}
+
       - id: resolve
         env:
-          INPUT_PUSH: ${{ inputs.push }}
-          INPUT_VERSION: ${{ inputs.image_version }}
-          INPUT_BUILD_DATE: ${{ inputs.build_date }}
+          PUSH: ${{ steps.ctx.outputs.publish }}
+          IMAGE_VERSION: ${{ steps.ctx.outputs.version }}
+          BUILD_DATE: ${{ steps.ctx.outputs.build_date }}
           INPUT_EXTRA_TAGS: ${{ inputs.extra_tags }}
           INPUT_MULTI_ARCH: ${{ inputs.multi_arch }}
           RUNNER_TYPE: ${{ inputs.runner_type }}
           AUTO_RESOLVE: ${{ inputs.auto_resolve_version }}
-          RESOLVED_VERSION: ${{ steps.tags.outputs.version }}
-          RESOLVED_BUILD_DATE: ${{ steps.tags.outputs.build_date }}
           RESOLVED_EXTRA_TAGS: ${{ steps.tags.outputs.extra_tags }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          EVENT_NAME: ${{ github.event_name }}
-          REF: ${{ github.ref }}
-          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          if [ -n "${INPUT_PUSH}" ]; then
-            PUSH="${INPUT_PUSH}"
-          elif [ "${EVENT_NAME}" = "push" ] && [ "${REF}" = "refs/heads/${DEFAULT_BRANCH}" ]; then
-            PUSH="true"
-          else
-            PUSH="false"
-          fi
-
           if [ "${AUTO_RESOLVE}" = "true" ]; then
-            IMAGE_VERSION="${RESOLVED_VERSION}"
-            BUILD_DATE="${INPUT_BUILD_DATE:-${RESOLVED_BUILD_DATE}}"
             EXTRA_TAGS="${RESOLVED_EXTRA_TAGS}"
           else
-            IMAGE_VERSION="${INPUT_VERSION:-${SHA}}"
-            BUILD_DATE="${INPUT_BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
             EXTRA_TAGS="${INPUT_EXTRA_TAGS}"
           fi
 
