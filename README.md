@@ -16,6 +16,7 @@ workflows directly without needing a token.
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/actions/resolve-docker-image-tags/action.yml](.github/actions/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
 | [.github/actions/resolve-release-context/action.yml](.github/actions/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
+| [.github/actions/sync-dockerhub-description/action.yml](.github/actions/sync-dockerhub-description/action.yml) | Composite action | Validates inputs and pushes a repo's README + short description to Docker Hub via `peter-evans/dockerhub-description`. |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
 
 ---
@@ -90,6 +91,10 @@ jobs:
 | `actions_repo` | string | `blackoutsecure/platform-automation` | Repo hosting the composite action. |
 | `resolver_ref` | string | `main` | Git ref of `actions_repo` to check out. |
 | `runner_type` | string | `cloud` | `cloud` (GitHub-hosted) or `self-hosted`. |
+| `update_description` | boolean | `true` | Sync the repo README + short description to Docker Hub after a successful manifest push. No-op when not pushing. |
+| `readme_filepath` | string | `./README.md` | Path to the README uploaded as the Docker Hub full description. |
+| `short_description` | string | `''` | Docker Hub short description (max 100 chars). Empty leaves the existing one untouched. |
+| `enable_url_completion` | boolean | `true` | Convert relative URLs in the README to absolute GitHub URLs. |
 
 ### Secrets
 
@@ -148,6 +153,34 @@ for the full input list.
 
 ---
 
+## `sync-dockerhub-description` — composite action
+
+Uploads a repository README and short description to Docker Hub. Wraps
+[`peter-evans/dockerhub-description`](https://github.com/peter-evans/dockerhub-description)
+with preflight validation (README exists, credentials/repository slug
+are non-empty and single-line, short description fits Docker Hub's
+100-char cap) so failures surface with a clear message instead of a
+401 from the registry API.
+
+It is invoked automatically by the `update-description` job in
+[`docker-build-push.yml`](.github/workflows/docker-build-push.yml) after
+a successful manifest push, and can also be used standalone:
+
+```yaml
+- uses: blackoutsecure/platform-automation/.github/actions/sync-dockerhub-description@main
+  with:
+    repository: ${{ secrets.DOCKERHUB_NAMESPACE }}/my-service
+    username: ${{ secrets.DOCKERHUB_USERNAME }}
+    password: ${{ secrets.DOCKERHUB_TOKEN }}
+    readme_filepath: ./README.md
+    short_description: A short tagline shown on the Docker Hub repo page.
+```
+
+See [action.yml](.github/actions/sync-dockerhub-description/action.yml)
+for the full input list.
+
+---
+
 ## `balena-block-publish.yml` — reusable workflow
 
 Resolve a block version (same logic as the Docker workflow), optionally
@@ -189,14 +222,35 @@ for the full input/output list.
 
 ## Security notes
 
-- All user-controlled inputs reach shell via `env:` — no template
-  interpolation inside `run:` bodies, which prevents script injection.
-- `permissions: contents: read` on every job (least privilege).
-- `persist-credentials: false` on every checkout.
-- Tag, identifier, and image-name inputs are regex-validated before use.
-- `DOCKERHUB_NAMESPACE` is registered with `::add-mask::` before any log
-  that could echo it.
-- Docker Hub credentials are only used in the push and manifest jobs.
+This repository is public and these workflows run in downstream repos
+with access to their secrets, so they follow GitHub's
+[security hardening guidance](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions):
+
+- **Pinned actions.** Every `uses:` reference is pinned to a 40-char
+  commit SHA, with the human-readable version in a trailing comment.
+  [Dependabot](.github/dependabot.yml) opens grouped PRs weekly to bump
+  the SHAs as new releases ship.
+- **Injection-safe scripts.** All user-controlled inputs reach shell via
+  `env:` — no `${{ ... }}` expansion happens inside `run:` bodies,
+  eliminating the
+  [script-injection class of vulnerability](https://securitylab.github.com/research/github-actions-untrusted-input/).
+- **Least-privilege tokens.** `permissions: contents: read` at the
+  workflow level; jobs that need `contents: write` (only the
+  `sync-balena-yml` job) opt in explicitly.
+- **No credential persistence.** Every checkout uses
+  `persist-credentials: false`, except the one job that has to push a
+  commit back to the default branch.
+- **Strict input validation.** Tags, identifiers, image names, slugs,
+  Balena block names, and `actions_repo` overrides are all regex-checked
+  before use; secrets are rejected if they contain stray whitespace.
+- **Masked outputs.** `DOCKERHUB_NAMESPACE` is registered with
+  `::add-mask::` before any log line that could echo it.
+- **Concurrency safety.** Publish jobs use `cancel-in-progress: false`
+  to avoid leaving partial releases behind.
+- **No `pull_request_target`.** Untrusted PR code is never checked out
+  with elevated privileges.
+
+See [SECURITY.md](SECURITY.md) for the vulnerability-disclosure process.
 
 ---
 
@@ -208,6 +262,13 @@ for the full input/output list.
    and `shellcheck` automatically.
 4. Test end-to-end by calling the reusable workflow from a downstream
    repo with `@<your-branch>`.
+
+When adding a new third-party action, pin it to a commit SHA and append
+the version in a trailing comment, e.g.:
+
+```yaml
+- uses: owner/action@1234567890abcdef1234567890abcdef12345678 # v1.2.3
+```
 
 ### Local linting
 

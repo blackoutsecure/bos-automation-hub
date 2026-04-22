@@ -144,13 +144,15 @@ jobs:
           BALENA_NAMESPACE: ${{ inputs.balena_namespace }}
           VERSION_SOURCE: ${{ inputs.version_source }}
           VERSION: ${{ inputs.version }}
+          ACTIONS_REPO: ${{ inputs.actions_repo }}
           BALENA_API_TOKEN: ${{ secrets.BALENA_API_TOKEN }}
         run: |
           set -euo pipefail
           ERR=0
           fail() { echo "ERROR: $*" >&2; ERR=1; }
 
-          # Reject whitespace/newlines (a stray newline in a secret silently breaks GITHUB_OUTPUT).
+          # Reject whitespace/newlines — a stray newline in a secret silently
+          # truncates GITHUB_OUTPUT for any downstream job.
           check_singleline() {
             local name="$1" val="$2"
             [ -n "${val}" ] || { fail "${name} is missing"; return; }
@@ -173,6 +175,13 @@ jobs:
           check_slug       "input 'block_name'"        "${BLOCK_NAME}"
           check_slug       "input 'balena_namespace'"  "${BALENA_NAMESPACE}"
 
+          # actions_repo must be `owner/name` — prevents `org/repo/.github/...`
+          # path-traversal style overrides from sneaking past the checkout.
+          if ! printf '%s' "${ACTIONS_REPO}" \
+            | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$'; then
+            fail "input 'actions_repo' must be 'owner/name' (got '${ACTIONS_REPO}')"
+          fi
+
           case "${VERSION_SOURCE}" in
             auto|dockerfile|file|git_tag|sha) ;;
             *) fail "input 'version_source' must be one of: auto|dockerfile|file|git_tag|sha (got '${VERSION_SOURCE}')" ;;
@@ -187,12 +196,12 @@ jobs:
 
       - name: Checkout caller repo
         if: inputs.auto_resolve_version
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
       - name: Checkout composite actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: ${{ inputs.actions_repo }}
           ref: ${{ inputs.resolver_ref }}
@@ -259,7 +268,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout default branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
@@ -319,14 +328,14 @@ jobs:
       release_id: ${{ steps.deploy.outputs.release_id }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ needs.sync-balena-yml.result == 'success' && github.event.repository.default_branch || github.sha }}
           persist-credentials: false
 
       - name: Publish to balenaCloud
         id: deploy
-        uses: balena-io/deploy-to-balena-action@master
+        uses: balena-io/deploy-to-balena-action@60c9255a5329ffa07e0313b155491dc393a97fb9 # v2.1.0
         with:
           balena_token: ${{ secrets.BALENA_API_TOKEN }}
           fleet: ${{ needs.setup.outputs.fleet }}

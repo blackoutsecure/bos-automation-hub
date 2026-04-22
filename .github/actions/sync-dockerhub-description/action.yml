@@ -1,0 +1,102 @@
+name: Sync Docker Hub description
+description: >-
+  Push a repository's README and short description up to Docker Hub.
+  Thin wrapper around `peter-evans/dockerhub-description` that adds
+  preflight validation (README exists, credentials/repo are non-empty
+  and single-line) so failures surface with a clear message instead of
+  a 401 from the Docker Hub API.
+
+inputs:
+  repository:
+    description: 'Docker Hub repository as `<namespace>/<name>` (e.g. `acme/widget`).'
+    required: true
+  username:
+    description: 'Docker Hub username with write access to `repository`.'
+    required: true
+  password:
+    description: 'Docker Hub password or access token.'
+    required: true
+  readme_filepath:
+    description: 'Path to the README to upload as the full description.'
+    required: false
+    default: ./README.md
+  short_description:
+    description: >-
+      Short description (max 100 chars). Empty leaves the existing short
+      description untouched.
+    required: false
+    default: ''
+  enable_url_completion:
+    description: 'Convert relative URLs in the README to absolute GitHub URLs.'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Preflight validation
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        USERNAME: ${{ inputs.username }}
+        PASSWORD: ${{ inputs.password }}
+        README_FILEPATH: ${{ inputs.readme_filepath }}
+        SHORT_DESCRIPTION: ${{ inputs.short_description }}
+        ENABLE_URL_COMPLETION: ${{ inputs.enable_url_completion }}
+      run: |
+        set -euo pipefail
+        ERR=0
+        fail() { echo "ERROR: $*" >&2; ERR=1; }
+
+        # Reject whitespace/newlines — common cause of silent 401s when a
+        # secret was pasted with a trailing newline.
+        check_singleline() {
+          local name="$1" val="$2"
+          [ -n "${val}" ] || { fail "${name} is missing"; return; }
+          case "${val}" in
+            *[$'\n\r\t ']*) fail "${name} contains whitespace/newlines" ;;
+          esac
+        }
+
+        check_singleline "input 'repository'" "${REPOSITORY}"
+        check_singleline "input 'username'"   "${USERNAME}"
+        check_singleline "input 'password'"   "${PASSWORD}"
+
+        # repository must be `namespace/name`.
+        if ! printf '%s' "${REPOSITORY}" \
+          | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
+          fail "input 'repository' is not a valid '<namespace>/<name>': '${REPOSITORY}'"
+        fi
+
+        # Reject path traversal / absolute paths; README must live in the repo.
+        case "${README_FILEPATH}" in
+          /*|*..*) fail "input 'readme_filepath' must be a repo-relative path: '${README_FILEPATH}'" ;;
+        esac
+        [ -f "${README_FILEPATH}" ] \
+          || fail "input 'readme_filepath' not found: '${README_FILEPATH}'"
+
+        case "${ENABLE_URL_COMPLETION}" in
+          true|false) ;;
+          *) fail "input 'enable_url_completion' must be 'true' or 'false' (got '${ENABLE_URL_COMPLETION}')" ;;
+        esac
+
+        # Docker Hub caps short description at 100 chars.
+        if [ -n "${SHORT_DESCRIPTION}" ]; then
+          len=${#SHORT_DESCRIPTION}
+          if [ "${len}" -gt 100 ]; then
+            fail "input 'short_description' is ${len} chars (max 100)"
+          fi
+        fi
+
+        [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
+        echo "Preflight OK — syncing description for ${REPOSITORY}"
+
+    - name: Push description to Docker Hub
+      uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+      with:
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+        repository: ${{ inputs.repository }}
+        readme-filepath: ${{ inputs.readme_filepath }}
+        short-description: ${{ inputs.short_description }}
+        enable-url-completion: ${{ inputs.enable_url_completion }}

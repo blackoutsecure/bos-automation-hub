@@ -1,0 +1,4 @@
+# Replace with a real team handle (e.g. @blackoutsecure/platform-team) before
+# enabling — GitHub silently ignores entries that reference non-existent users
+# or teams. CODEOWNERS approvals can then be required via branch protection.
+# * @blackoutsecure/platform-team

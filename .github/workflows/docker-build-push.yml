@@ -119,6 +119,30 @@ name: Docker Build and Push (reusable)
         required: false
         type: string
         default: cloud
+      update_description:
+        description: >-
+          Sync the repo README and short description to Docker Hub after a
+          successful manifest push. No-op when not pushing.
+        required: false
+        type: boolean
+        default: true
+      readme_filepath:
+        description: 'Path to the README uploaded as the Docker Hub full description.'
+        required: false
+        type: string
+        default: ./README.md
+      short_description:
+        description: >-
+          Docker Hub short description (max 100 chars). Empty leaves the
+          existing short description untouched.
+        required: false
+        type: string
+        default: ''
+      enable_url_completion:
+        description: 'Convert relative URLs in the README to absolute GitHub URLs.'
+        required: false
+        type: boolean
+        default: true
     secrets:
       DOCKERHUB_USERNAME:
         required: true
@@ -168,6 +192,7 @@ jobs:
           EXTRA_TAGS: ${{ inputs.extra_tags }}
           DISTRO: ${{ inputs.distro }}
           RUNNER_TYPE: ${{ inputs.runner_type }}
+          ACTIONS_REPO: ${{ inputs.actions_repo }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           DOCKERHUB_NAMESPACE: ${{ secrets.DOCKERHUB_NAMESPACE }}
@@ -176,7 +201,8 @@ jobs:
           ERR=0
           fail() { echo "ERROR: $*" >&2; ERR=1; }
 
-          # Reject whitespace/newlines (a stray newline in a secret silently breaks GITHUB_OUTPUT).
+          # Reject whitespace/newlines — a stray newline in a secret silently
+          # truncates GITHUB_OUTPUT for any downstream job.
           check_singleline() {
             local name="$1" val="$2"
             [ -n "${val}" ] || { fail "${name} is missing"; return; }
@@ -198,6 +224,13 @@ jobs:
           check_singleline "secret 'DOCKERHUB_USERNAME'"  "${DOCKERHUB_USERNAME}"
           check_singleline "secret 'DOCKERHUB_TOKEN'"     "${DOCKERHUB_TOKEN}"
           check_singleline "secret 'DOCKERHUB_NAMESPACE'" "${DOCKERHUB_NAMESPACE}"
+
+          # actions_repo must be `owner/name` — prevents path-traversal style
+          # overrides from sneaking past the composite-actions checkout.
+          if ! printf '%s' "${ACTIONS_REPO}" \
+            | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$'; then
+            fail "input 'actions_repo' must be 'owner/name' (got '${ACTIONS_REPO}')"
+          fi
 
           case "${VERSION_SOURCE}" in
             auto|dockerfile|file|git_tag|sha) ;;
@@ -239,12 +272,12 @@ jobs:
 
       - name: Checkout caller repo
         if: inputs.auto_resolve_version
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
       - name: Checkout composite actions
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: ${{ inputs.actions_repo }}
           ref: ${{ inputs.resolver_ref }}
@@ -351,7 +384,7 @@ jobs:
       IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
       BUILD_DATE: ${{ needs.setup.outputs.build_date }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
@@ -374,11 +407,11 @@ jobs:
           echo "::add-mask::${NS}"
           echo "image_ref=${REG}/${NS}/${NAME}" >> "${GITHUB_OUTPUT}"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Generate image labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ steps.ref.outputs.image_ref }}
           labels: |
@@ -389,7 +422,7 @@ jobs:
 
       - name: Docker Hub login
         if: env.PUSH == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -426,7 +459,7 @@ jobs:
 
       - name: Build${{ env.PUSH == 'true' && ' and push by digest' || ' (validation only)' }}
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: ${{ inputs.build_context }}
           file: ${{ inputs.dockerfile }}
@@ -453,7 +486,7 @@ jobs:
 
       - name: Upload digest artifact
         if: env.PUSH == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.DIGEST_ARTIFACT_PREFIX }}-${{ matrix.arch }}
           path: ${{ env.DIGESTS_DIR }}/*
@@ -495,15 +528,15 @@ jobs:
           echo "::add-mask::${NS}"
           echo "image_ref=${REG}/${NS}/${NAME}" >> "${GITHUB_OUTPUT}"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Download digest artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: ${{ env.DIGESTS_DIR }}
           pattern: ${{ env.DIGEST_ARTIFACT_PREFIX }}-*
@@ -573,3 +606,55 @@ jobs:
             echo "| Latest tag  | \`${TAG_LATEST}\` |"
             echo "| Build date  | \`${BUILD_DATE}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  update-description:
+    name: Sync Docker Hub description
+    needs: [setup, manifest]
+    if: needs.setup.outputs.push == 'true' && inputs.update_description
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Checkout composite actions
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          repository: ${{ inputs.actions_repo }}
+          ref: ${{ inputs.resolver_ref }}
+          path: .platform-automation
+          token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/sync-dockerhub-description
+          sparse-checkout-cone-mode: false
+
+      - name: Compose Docker Hub repository slug
+        id: repo
+        env:
+          IMAGE_NAME: ${{ inputs.image_name }}
+          DOCKERHUB_NAMESPACE: ${{ secrets.DOCKERHUB_NAMESPACE }}
+        run: |
+          set -euo pipefail
+          trim() { printf '%s' "$1" | tr -d '[:space:]'; }
+          NS="$(trim "${DOCKERHUB_NAMESPACE}")"
+          NAME="$(trim "${IMAGE_NAME}")"
+          if [ -z "${NS}" ] || [ -z "${NAME}" ]; then
+            echo "ERROR: missing component for Docker Hub repository (namespace/image_name)" >&2
+            exit 1
+          fi
+          echo "::add-mask::${NS}"
+          echo "repository=${NS}/${NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sync description
+        uses: ./.platform-automation/.github/actions/sync-dockerhub-description
+        with:
+          repository: ${{ steps.repo.outputs.repository }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          readme_filepath: ${{ inputs.readme_filepath }}
+          short_description: ${{ inputs.short_description }}
+          enable_url_completion: ${{ inputs.enable_url_completion }}
+
