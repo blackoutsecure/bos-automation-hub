@@ -29,11 +29,12 @@ The Docker Hub namespace is **public information** (it appears in every
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
 | [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Poll an upstream repo's `latest` release, dispatch downstream workflows on change, and commit a tracking file. |
-| [.github/actions/resolve-docker-image-tags/action.yml](.github/actions/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
-| [.github/actions/resolve-release-context/action.yml](.github/actions/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
+| [.github/actions/shared/resolve-docker-image-tags/action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
+| [.github/actions/shared/resolve-release-context/action.yml](.github/actions/shared/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
 | [.github/actions/sync-dockerhub-description/action.yml](.github/actions/sync-dockerhub-description/action.yml) | Composite action | Validates inputs and pushes a repo's README + short description to Docker Hub via `peter-evans/dockerhub-description`. |
 | [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
+| [.github/workflows/openwrt-readsb-wiedehopf-bump.yml](.github/workflows/openwrt-readsb-wiedehopf-bump.yml) | Scheduled automation | Tracks new `wiedehopf/readsb` releases and proposes them upstream as a cross-repo PR to `openwrt/packages` (bumps `PKG_VERSION`/`PKG_HASH`, resets `PKG_RELEASE`) via a bot-owned fork. |
 
 ---
 
@@ -144,7 +145,7 @@ Set `runner_type: self-hosted`. The workflow expects runners labelled:
 Standalone version/tag resolver. Usable outside the reusable workflow.
 
 ```yaml
-- uses: blackoutsecure/platform-automation/.github/actions/resolve-docker-image-tags@main
+- uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-docker-image-tags@main
   id: tags
   with:
     version_source: auto            # auto | dockerfile | file | git_tag | sha
@@ -166,7 +167,7 @@ Standalone version/tag resolver. Usable outside the reusable workflow.
 - `source` — which resolver path produced the version
 - `extra_tags` — newline-separated deduplicated tag list
 
-See [action.yml](.github/actions/resolve-docker-image-tags/action.yml)
+See [action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml)
 for the full input list.
 
 ---

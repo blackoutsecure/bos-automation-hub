@@ -327,8 +327,8 @@ jobs:
           token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
           persist-credentials: false
           sparse-checkout: |
-            .github/actions/resolve-docker-image-tags
-            .github/actions/resolve-release-context
+            .github/actions/shared/resolve-docker-image-tags
+            .github/actions/shared/resolve-release-context
           sparse-checkout-cone-mode: false
 
       - name: Validate caller paths
@@ -344,7 +344,7 @@ jobs:
       - name: Resolve image tags
         id: tags
         if: inputs.auto_resolve_version
-        uses: ./.platform-automation/.github/actions/resolve-docker-image-tags
+        uses: ./.platform-automation/.github/actions/shared/resolve-docker-image-tags
         with:
           version_override: ${{ inputs.image_version }}
           version_source: ${{ inputs.version_source }}
@@ -356,7 +356,7 @@ jobs:
 
       - name: Resolve release context
         id: ctx
-        uses: ./.platform-automation/.github/actions/resolve-release-context
+        uses: ./.platform-automation/.github/actions/shared/resolve-release-context
         with:
           publish_override: ${{ inputs.push }}
           auto_resolve_version: ${{ inputs.auto_resolve_version }}
