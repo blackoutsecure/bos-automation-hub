@@ -1,0 +1,579 @@
+name: Cloudflare Pages Deploy (reusable)
+
+"on":
+  workflow_call:
+    inputs:
+      cloudflare_project_name:
+        description: 'Cloudflare Pages project name (lowercase letters, digits, hyphens; 1–58 chars).'
+        required: true
+        type: string
+      cloudflare_account_id:
+        description: >-
+          Cloudflare account ID (32-char hex). Prefer setting this via
+          a repository or organisation `vars.CLOUDFLARE_ACCOUNT_ID` —
+          account IDs appear in dashboard URLs and are not secret.
+          When empty, falls back to `secrets.CLOUDFLARE_ACCOUNT_ID`
+          for back-compat.
+        required: false
+        type: string
+        default: ''
+      deployment_environment:
+        description: >-
+          Optional GitHub Environment to bind the deploy job to. When
+          set, the job runs under that environment and inherits its
+          protection rules (required reviewers, wait timer, branch
+          policy) and environment-scoped secrets. Leave empty to skip
+          environment binding.
+        required: false
+        type: string
+        default: ''
+      site_url:
+        description: >-
+          Canonical site URL (e.g. `https://example.com`). Required when any
+          generator is enabled; otherwise optional and only used for the job
+          summary.
+        required: false
+        type: string
+        default: ''
+      public_dir:
+        description: 'Source directory in the caller repo to copy from.'
+        required: false
+        type: string
+        default: '.'
+      deploy_dir:
+        description: >-
+          Staging directory that gets uploaded to Cloudflare Pages. Created
+          on demand. Must be a repo-relative path.
+        required: false
+        type: string
+        default: './dist'
+      clean_deploy_dir:
+        description: 'Remove `deploy_dir` before staging files.'
+        required: false
+        type: boolean
+        default: true
+      copy_files:
+        description: >-
+          Newline-separated list of files (or globs) under `public_dir`
+          to copy into the root of `deploy_dir`. Globs are expanded by the
+          shell; missing entries fail the run.
+        required: false
+        type: string
+        default: ''
+      copy_dirs:
+        description: >-
+          Newline-separated list of directories to copy recursively into
+          `deploy_dir`. Each entry is `SRC` or `SRC:DEST`, where `DEST` is
+          the path inside `deploy_dir` (defaults to the basename of `SRC`).
+          Both paths must be repo-relative and must not contain `..`.
+        required: false
+        type: string
+        default: ''
+      prebuild_command:
+        description: >-
+          Optional shell command run from `working_directory` (or repo root
+          when empty) before files are staged. Useful for `npm ci && npm run build`.
+        required: false
+        type: string
+        default: ''
+      working_directory:
+        description: >-
+          Working directory used for `prebuild_command` and `wrangler-action`.
+          Empty means the repository root.
+        required: false
+        type: string
+        default: ''
+      branch:
+        description: >-
+          Branch to publish to. Cloudflare Pages treats deploys whose branch
+          matches the project's production branch as production; everything
+          else is a preview. Empty defers to wrangler's default
+          (`github.ref_name` on push events, the head ref on PRs).
+        required: false
+        type: string
+        default: ''
+      commit_message:
+        description: 'Override the commit message attached to the Pages deploy.'
+        required: false
+        type: string
+        default: ''
+      wrangler_version:
+        description: 'Pin wrangler to a specific version, range, or tag (e.g. `4`, `^4.0.0`, `latest`). Empty uses the action default.'
+        required: false
+        type: string
+        default: ''
+      extra_wrangler_args:
+        description: >-
+          Extra arguments appended (verbatim) to `wrangler pages deploy`.
+          Newlines are converted to spaces. Use with care.
+        required: false
+        type: string
+        default: ''
+      deploy:
+        description: >-
+          `'true'`/`'false'` to force the deploy step. Empty (default) deploys
+          only on push events to the repository's default branch.
+        required: false
+        type: string
+        default: ''
+      runs_on:
+        description: 'Runner label for the build/deploy job.'
+        required: false
+        type: string
+        default: ubuntu-latest
+      checkout_fetch_depth:
+        description: >-
+          `fetch-depth` passed to `actions/checkout`. Defaults to `0`
+          (full history) so generators that derive `<lastmod>` from git
+          have what they need. Set to `1` to speed up shallow clones.
+        required: false
+        type: number
+        default: 0
+
+      # ── Sitemap generator ──────────────────────────────────────────
+      generate_sitemap:
+        description: 'Run the Blackout Secure sitemap generator before deploy.'
+        required: false
+        type: boolean
+        default: false
+
+      # ── robots.txt generator ───────────────────────────────────────
+      generate_robots:
+        description: 'Run the Blackout Secure robots.txt generator before deploy.'
+        required: false
+        type: boolean
+        default: false
+
+      # ── security.txt generator ─────────────────────────────────────
+      generate_security_txt:
+        description: 'Run the Blackout Secure security.txt generator before deploy.'
+        required: false
+        type: boolean
+        default: false
+      security_contact:
+        description: >-
+          `Contact:` value written to `/.well-known/security.txt` (an email
+          address or `https://` URL). Required when `generate_security_txt`
+          is `true`.
+        required: false
+        type: string
+        default: ''
+
+      # ── Web App Manifest generator ─────────────────────────────────
+      generate_manifest:
+        description: 'Run the Blackout Secure Web Application Manifest generator before deploy.'
+        required: false
+        type: boolean
+        default: false
+      manifest_name:
+        description: 'PWA manifest `name`. Required when `generate_manifest` is `true`.'
+        required: false
+        type: string
+        default: ''
+      manifest_short_name:
+        description: 'PWA manifest `short_name`.'
+        required: false
+        type: string
+        default: ''
+      manifest_description:
+        description: 'PWA manifest `description`.'
+        required: false
+        type: string
+        default: ''
+      manifest_orientation:
+        description: 'PWA manifest `orientation` (e.g. `portrait-primary`).'
+        required: false
+        type: string
+        default: ''
+      manifest_theme_color:
+        description: 'PWA manifest `theme_color` as a CSS hex colour (`#000` or `#000000`).'
+        required: false
+        type: string
+        default: ''
+      manifest_background_color:
+        description: 'PWA manifest `background_color` as a CSS hex colour (`#000` or `#000000`).'
+        required: false
+        type: string
+        default: ''
+      manifest_lang:
+        description: 'PWA manifest `lang` (BCP 47 tag, e.g. `en-US`).'
+        required: false
+        type: string
+        default: ''
+      manifest_dir:
+        description: 'PWA manifest `dir` (`ltr`, `rtl`, or `auto`).'
+        required: false
+        type: string
+        default: ''
+      manifest_categories:
+        description: 'PWA manifest `categories` as a comma-separated list (e.g. `business,productivity`).'
+        required: false
+        type: string
+        default: ''
+      manifest_icons_dir:
+        description: 'Directory inside `deploy_dir` to scan for icon files (e.g. `/assets/`).'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: 'Cloudflare API token with `Account → Cloudflare Pages → Edit` permission on the target project.'
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: >-
+          Cloudflare account ID (32-char hex). Optional fallback when
+          `inputs.cloudflare_account_id` is empty. Account IDs appear
+          in dashboard URLs — prefer `vars.CLOUDFLARE_ACCOUNT_ID` and
+          pass it via `inputs.cloudflare_account_id` instead.
+        required: false
+    outputs:
+      deployed:
+        description: '`true` when wrangler actually pushed a deploy.'
+        value: ${{ jobs.deploy.outputs.deployed }}
+      deployment_url:
+        description: 'Primary deployment URL returned by wrangler-action.'
+        value: ${{ jobs.deploy.outputs.deployment_url }}
+      deployment_id:
+        description: 'Cloudflare Pages deployment ID.'
+        value: ${{ jobs.deploy.outputs.deployment_id }}
+      deployment_alias_url:
+        description: 'Pages deployment alias URL (set on preview/branch deploys).'
+        value: ${{ jobs.deploy.outputs.deployment_alias_url }}
+      environment:
+        description: 'Cloudflare Pages environment (`production` or `preview`).'
+        value: ${{ jobs.deploy.outputs.environment }}
+      account_id:
+        description: 'Resolved Cloudflare account ID (`inputs.cloudflare_account_id` or fallback secret).'
+        value: ${{ jobs.deploy.outputs.account_id }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Cloudflare Pages serialises deploys per project; never cancel an in-flight push.
+  group: cloudflare-pages-${{ github.workflow }}-${{ inputs.cloudflare_project_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & deploy to Cloudflare Pages
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: 30
+    environment: ${{ inputs.deployment_environment }}
+    env:
+      # Hoist inputs that several steps read so they live in one place
+      # and never get expanded inline inside `run:` bodies.
+      PROJECT_NAME: ${{ inputs.cloudflare_project_name }}
+      DEPLOYMENT_ENVIRONMENT: ${{ inputs.deployment_environment }}
+      SITE_URL: ${{ inputs.site_url }}
+      PUBLIC_DIR: ${{ inputs.public_dir }}
+      DEPLOY_DIR: ${{ inputs.deploy_dir }}
+      WORKING_DIRECTORY: ${{ inputs.working_directory }}
+      BRANCH: ${{ inputs.branch }}
+      DEPLOY_OVERRIDE: ${{ inputs.deploy }}
+      WRANGLER_VERSION: ${{ inputs.wrangler_version }}
+    outputs:
+      deployed: ${{ steps.gate.outputs.deploy }}
+      deployment_url: ${{ steps.deploy.outputs.deployment-url }}
+      deployment_id: ${{ steps.deploy.outputs.pages-deployment-id }}
+      deployment_alias_url: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+      environment: ${{ steps.deploy.outputs.pages-environment }}
+      account_id: ${{ steps.account.outputs.value }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: ${{ inputs.checkout_fetch_depth }}
+          persist-credentials: false
+
+      - name: Resolve Cloudflare account ID
+        id: account
+        uses: ./.github/actions/cloudflare-pages-resolve-account-id
+        with:
+          account_id: ${{ inputs.cloudflare_account_id }}
+          fallback_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Preflight validation
+        env:
+          # PROJECT_NAME, SITE_URL, PUBLIC_DIR, DEPLOY_DIR,
+          # WORKING_DIRECTORY, BRANCH, DEPLOY_OVERRIDE, WRANGLER_VERSION,
+          # DEPLOYMENT_ENVIRONMENT inherited from job-level env.
+          GENERATE_SITEMAP: ${{ inputs.generate_sitemap }}
+          GENERATE_ROBOTS: ${{ inputs.generate_robots }}
+          GENERATE_SECURITY_TXT: ${{ inputs.generate_security_txt }}
+          GENERATE_MANIFEST: ${{ inputs.generate_manifest }}
+          SECURITY_CONTACT: ${{ inputs.security_contact }}
+          MANIFEST_NAME: ${{ inputs.manifest_name }}
+          MANIFEST_THEME_COLOR: ${{ inputs.manifest_theme_color }}
+          MANIFEST_BACKGROUND_COLOR: ${{ inputs.manifest_background_color }}
+          MANIFEST_DIR: ${{ inputs.manifest_dir }}
+          MANIFEST_LANG: ${{ inputs.manifest_lang }}
+          MANIFEST_ORIENTATION: ${{ inputs.manifest_orientation }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          ERR=0
+          fail() { echo "ERROR: $*" >&2; ERR=1; }
+
+          # A stray newline in a secret silently truncates GITHUB_OUTPUT
+          # for any downstream step, so reject it explicitly.
+          check_singleline() {
+            local name="$1" val="$2"
+            [ -n "${val}" ] || { fail "${name} is missing"; return; }
+            case "${val}" in
+              *[$'\n\r\t ']*) fail "${name} contains whitespace/newlines" ;;
+            esac
+          }
+
+          # Repo-relative path: no leading slash, no '..' segment, no NUL.
+          check_relpath() {
+            local name="$1" val="$2"
+            [ -n "${val}" ] || { fail "${name} is empty"; return; }
+            case "${val}" in
+              /*)        fail "${name} must be a repo-relative path (got '${val}')" ;;
+              *..*)      fail "${name} must not contain '..' (got '${val}')" ;;
+              *[$'\n\r']*) fail "${name} must not contain newlines" ;;
+            esac
+          }
+
+          # Cloudflare Pages project names: lowercase a-z, 0-9 and '-',
+          # 1-58 chars, can't start or end with '-'.
+          if ! printf '%s' "${PROJECT_NAME}" \
+            | grep -Eq '^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$'; then
+            fail "input 'cloudflare_project_name' is not a valid Pages project name: '${PROJECT_NAME}'"
+          fi
+
+          check_singleline "secret 'CLOUDFLARE_API_TOKEN'"  "${CLOUDFLARE_API_TOKEN}"
+
+          # GitHub Environment names: 1–255 chars, no control chars or '/'.
+          if [ -n "${DEPLOYMENT_ENVIRONMENT}" ]; then
+            check_singleline "input 'deployment_environment'" "${DEPLOYMENT_ENVIRONMENT}"
+            if ! printf '%s' "${DEPLOYMENT_ENVIRONMENT}" \
+              | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$'; then
+              fail "input 'deployment_environment' is not a valid GitHub Environment name: '${DEPLOYMENT_ENVIRONMENT}'"
+            fi
+          fi
+
+          check_relpath "input 'public_dir'" "${PUBLIC_DIR}"
+          check_relpath "input 'deploy_dir'" "${DEPLOY_DIR}"
+          if [ -n "${WORKING_DIRECTORY}" ]; then
+            check_relpath "input 'working_directory'" "${WORKING_DIRECTORY}"
+          fi
+
+          if [ -n "${BRANCH}" ]; then
+            check_singleline "input 'branch'" "${BRANCH}"
+            # Allow git-ref shape: letters, digits, '/', '-', '_', '.'.
+            if ! printf '%s' "${BRANCH}" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$'; then
+              fail "input 'branch' is not a valid branch name: '${BRANCH}'"
+            fi
+          fi
+
+          if [ -n "${DEPLOY_OVERRIDE}" ]; then
+            case "${DEPLOY_OVERRIDE}" in
+              true|false) ;;
+              *) fail "input 'deploy' must be empty, 'true', or 'false' (got '${DEPLOY_OVERRIDE}')" ;;
+            esac
+          fi
+
+          if [ -n "${WRANGLER_VERSION}" ]; then
+            check_singleline "input 'wrangler_version'" "${WRANGLER_VERSION}"
+          fi
+
+          # Anything that gets baked into static asset URLs must be a
+          # well-formed absolute http(s) URL.
+          needs_url=false
+          [ "${GENERATE_SITEMAP}"       = "true" ] && needs_url=true
+          [ "${GENERATE_ROBOTS}"        = "true" ] && needs_url=true
+          [ "${GENERATE_SECURITY_TXT}"  = "true" ] && needs_url=true
+          if [ "${needs_url}" = "true" ]; then
+            [ -n "${SITE_URL}" ] || fail "input 'site_url' is required when any generator is enabled"
+            if [ -n "${SITE_URL}" ] && ! printf '%s' "${SITE_URL}" \
+              | grep -Eq '^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[^[:space:]]*)?$'; then
+              fail "input 'site_url' must be an http(s) URL (got '${SITE_URL}')"
+            fi
+          elif [ -n "${SITE_URL}" ]; then
+            # Still validate when supplied.
+            if ! printf '%s' "${SITE_URL}" \
+              | grep -Eq '^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[^[:space:]]*)?$'; then
+              fail "input 'site_url' must be an http(s) URL (got '${SITE_URL}')"
+            fi
+          fi
+
+          if [ "${GENERATE_SECURITY_TXT}" = "true" ]; then
+            [ -n "${SECURITY_CONTACT}" ] \
+              || fail "input 'security_contact' is required when 'generate_security_txt' is true"
+            if [ -n "${SECURITY_CONTACT}" ] && ! printf '%s' "${SECURITY_CONTACT}" \
+              | grep -Eq '^(mailto:[^[:space:]@]+@[^[:space:]@]+|https?://[^[:space:]]+|[^[:space:]@]+@[^[:space:]@]+)$'; then
+              fail "input 'security_contact' must be an email or http(s) URL (got '${SECURITY_CONTACT}')"
+            fi
+          fi
+
+          if [ "${GENERATE_MANIFEST}" = "true" ]; then
+            [ -n "${MANIFEST_NAME}" ] \
+              || fail "input 'manifest_name' is required when 'generate_manifest' is true"
+
+            for color_name in MANIFEST_THEME_COLOR MANIFEST_BACKGROUND_COLOR; do
+              eval "color_val=\${$color_name}"
+              if [ -n "${color_val}" ] \
+                && ! printf '%s' "${color_val}" | grep -Eq '^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$'; then
+                fail "input '$(echo "${color_name}" | tr '[:upper:]' '[:lower:]')' must be a CSS hex colour (got '${color_val}')"
+              fi
+            done
+
+            if [ -n "${MANIFEST_DIR}" ]; then
+              case "${MANIFEST_DIR}" in
+                ltr|rtl|auto) ;;
+                *) fail "input 'manifest_dir' must be 'ltr', 'rtl', or 'auto' (got '${MANIFEST_DIR}')" ;;
+              esac
+            fi
+
+            if [ -n "${MANIFEST_LANG}" ] && ! printf '%s' "${MANIFEST_LANG}" \
+              | grep -Eq '^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$'; then
+              fail "input 'manifest_lang' is not a BCP 47 tag (got '${MANIFEST_LANG}')"
+            fi
+
+            if [ -n "${MANIFEST_ORIENTATION}" ]; then
+              case "${MANIFEST_ORIENTATION}" in
+                any|natural|landscape|landscape-primary|landscape-secondary|portrait|portrait-primary|portrait-secondary) ;;
+                *) fail "input 'manifest_orientation' is not a valid PWA orientation (got '${MANIFEST_ORIENTATION}')" ;;
+              esac
+            fi
+          fi
+
+          [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
+          echo "Preflight OK."
+
+      - name: Resolve deploy gate
+        id: gate
+        env:
+          # DEPLOY_OVERRIDE inherited from job-level env.
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DEPLOY_OVERRIDE}" ]; then
+            DECISION="${DEPLOY_OVERRIDE}"
+          elif [ "${EVENT_NAME}" = "push" ] && [ "${REF}" = "refs/heads/${DEFAULT_BRANCH}" ]; then
+            DECISION="true"
+          else
+            DECISION="false"
+          fi
+          echo "deploy=${DECISION}" >> "${GITHUB_OUTPUT}"
+          echo "deploy=${DECISION}"
+
+      - name: Run prebuild command
+        if: inputs.prebuild_command != ''
+        env:
+          PREBUILD_COMMAND: ${{ inputs.prebuild_command }}
+          # WORKING_DIRECTORY inherited from job-level env.
+        run: |
+          set -euo pipefail
+          if [ -n "${WORKING_DIRECTORY}" ]; then
+            cd "${WORKING_DIRECTORY}"
+          fi
+          # Caller-provided command is run verbatim under bash.
+          bash -eo pipefail -c "${PREBUILD_COMMAND}"
+
+      - name: Stage deploy directory
+        uses: ./.github/actions/shared/stage-deploy-dir
+        with:
+          public_dir: ${{ inputs.public_dir }}
+          deploy_dir: ${{ inputs.deploy_dir }}
+          clean: ${{ inputs.clean_deploy_dir }}
+          copy_files: ${{ inputs.copy_files }}
+          copy_dirs: ${{ inputs.copy_dirs }}
+
+      # ──────────────────────────────────────────────────────────────
+      # Generators (each opt-in). Pinned by SHA — Dependabot bumps
+      # them together with the rest of the actions in this repo.
+      # ──────────────────────────────────────────────────────────────
+
+      - name: Generate sitemap
+        if: inputs.generate_sitemap
+        uses: blackoutsecure/bos-sitemap-generator@5ec7fbce9a419a47c2e7d58bcb0ae28c02c84cda # v1.0.1
+        with:
+          site_url: ${{ inputs.site_url }}
+          public_dir: ${{ inputs.deploy_dir }}
+
+      - name: Generate Web App Manifest
+        if: inputs.generate_manifest
+        uses: blackoutsecure/bos-web-application-manifest-generator@80a4378040f636d8ce2941026f47aad22bb75256 # v1.0.8
+        with:
+          name: ${{ inputs.manifest_name }}
+          short_name: ${{ inputs.manifest_short_name }}
+          description: ${{ inputs.manifest_description }}
+          orientation: ${{ inputs.manifest_orientation }}
+          theme_color: ${{ inputs.manifest_theme_color }}
+          background_color: ${{ inputs.manifest_background_color }}
+          lang: ${{ inputs.manifest_lang }}
+          dir: ${{ inputs.manifest_dir }}
+          categories: ${{ inputs.manifest_categories }}
+          public_dir: ${{ inputs.deploy_dir }}
+          icons_dir: ${{ inputs.manifest_icons_dir }}
+
+      - name: Generate robots.txt
+        if: inputs.generate_robots
+        uses: blackoutsecure/bos-robotstxt-generator@0a4523ab7fd22579799d5406247f7724b6728293 # v1.2.0
+        with:
+          site_url: ${{ inputs.site_url }}
+          public_dir: ${{ inputs.deploy_dir }}
+
+      - name: Generate security.txt
+        if: inputs.generate_security_txt
+        uses: blackoutsecure/bos-securitytxt-generator@7ca9d802b9ff2fff07e4e514c72cc8f241b2494f # v1.2.0
+        with:
+          security_contact: ${{ inputs.security_contact }}
+          site_url: ${{ inputs.site_url }}
+          public_dir: ${{ inputs.deploy_dir }}
+
+      - name: Compose wrangler command
+        id: cmd
+        if: steps.gate.outputs.deploy == 'true'
+        uses: ./.github/actions/cloudflare-pages-compose-command
+        with:
+          deploy_dir: ${{ inputs.deploy_dir }}
+          project_name: ${{ inputs.cloudflare_project_name }}
+          branch: ${{ inputs.branch }}
+          commit_message: ${{ inputs.commit_message }}
+          extra_args: ${{ inputs.extra_wrangler_args }}
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        if: steps.gate.outputs.deploy == 'true'
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ steps.account.outputs.value }}
+          wranglerVersion: ${{ inputs.wrangler_version }}
+          workingDirectory: ${{ inputs.working_directory }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: ${{ steps.cmd.outputs.command }}
+
+      - name: Job summary
+        if: always()
+        env:
+          DEPLOYED: ${{ steps.gate.outputs.deploy }}
+          # PROJECT_NAME, DEPLOY_DIR, BRANCH, SITE_URL,
+          # DEPLOYMENT_ENVIRONMENT inherited from job-level env.
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+          DEPLOYMENT_ID: ${{ steps.deploy.outputs.pages-deployment-id }}
+          DEPLOYMENT_ALIAS: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+          PAGES_ENVIRONMENT: ${{ steps.deploy.outputs.pages-environment }}
+        run: |
+          {
+            echo "## Cloudflare Pages Deploy"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Project          | \`${PROJECT_NAME}\` |"
+            echo "| Deployed         | \`${DEPLOYED}\` |"
+            echo "| Deploy dir       | \`${DEPLOY_DIR}\` |"
+            echo "| Branch           | \`${BRANCH:-<wrangler default>}\` |"
+            echo "| GitHub env       | \`${DEPLOYMENT_ENVIRONMENT:-<none>}\` |"
+            echo "| Pages env        | \`${PAGES_ENVIRONMENT:-n/a}\` |"
+            echo "| Site URL         | ${SITE_URL:-n/a} |"
+            echo "| Deployment URL   | ${DEPLOYMENT_URL:-n/a} |"
+            echo "| Alias URL        | ${DEPLOYMENT_ALIAS:-n/a} |"
+            echo "| Deployment ID    | \`${DEPLOYMENT_ID:-n/a}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"

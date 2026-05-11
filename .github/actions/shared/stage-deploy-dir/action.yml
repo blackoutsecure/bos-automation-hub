@@ -1,0 +1,145 @@
+name: Stage deploy directory
+description: >-
+  Stage a deploy directory by copying caller-listed files and
+  directories from a source directory. Validates every path against
+  traversal (no leading slash, no `..`, no NUL/newlines), expands
+  globs, supports `SRC:DEST` rewrites, and optionally wipes the
+  destination first. Re-validates inputs even when called from a
+  workflow that already validated them (defence in depth).
+
+inputs:
+  public_dir:
+    description: >-
+      Repo-relative source directory the entries in `copy_files` and
+      `copy_dirs` are resolved against. Defaults to the repo root.
+    required: false
+    default: '.'
+  deploy_dir:
+    description: >-
+      Repo-relative staging directory created on demand. Must not be
+      absolute and must not contain `..`.
+    required: false
+    default: './dist'
+  clean:
+    description: 'Remove `deploy_dir` (if present) before staging.'
+    required: false
+    default: 'true'
+  copy_files:
+    description: >-
+      Newline-separated list of files (or globs) under `public_dir` to
+      copy into the root of `deploy_dir`. Each entry must resolve to at
+      least one existing path.
+    required: false
+    default: ''
+  copy_dirs:
+    description: >-
+      Newline-separated list of directories under `public_dir` to copy
+      recursively into `deploy_dir`. Each entry is `SRC` or `SRC:DEST`,
+      where `DEST` is the path inside `deploy_dir` (defaults to the
+      basename of `SRC`). Both paths must be repo-relative without `..`.
+    required: false
+    default: ''
+
+outputs:
+  deploy_dir:
+    description: 'Echoed `deploy_dir` for downstream-step convenience.'
+    value: ${{ inputs.deploy_dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Stage
+      shell: bash
+      env:
+        PUBLIC_DIR: ${{ inputs.public_dir }}
+        DEPLOY_DIR: ${{ inputs.deploy_dir }}
+        CLEAN: ${{ inputs.clean }}
+        COPY_FILES: ${{ inputs.copy_files }}
+        COPY_DIRS: ${{ inputs.copy_dirs }}
+      run: |
+        set -euo pipefail
+
+        # ── Validate top-level paths (defence in depth) ──────────────
+        for var in PUBLIC_DIR DEPLOY_DIR; do
+          eval "val=\${$var}"
+          case "${val}" in
+            ''|/*|*..*|*$'\n'*|*$'\r'*)
+              echo "ERROR: ${var} must be a non-empty, repo-relative path without '..' or newlines (got '${val}')" >&2
+              exit 1 ;;
+          esac
+        done
+        case "${CLEAN}" in
+          true|false) ;;
+          *) echo "ERROR: input 'clean' must be 'true' or 'false' (got '${CLEAN}')" >&2; exit 1 ;;
+        esac
+
+        if [ "${CLEAN}" = "true" ] && [ -d "${DEPLOY_DIR}" ]; then
+          echo "Cleaning ${DEPLOY_DIR}"
+          rm -rf -- "${DEPLOY_DIR}"
+        fi
+        mkdir -p -- "${DEPLOY_DIR}"
+
+        # Reject path traversal in any caller-supplied entry.
+        assert_safe_relpath() {
+          local kind="$1" val="$2"
+          case "${val}" in
+            ''|/*|*..*|*$'\n'*|*$'\r'*)
+              echo "ERROR: ${kind} entry '${val}' is empty, absolute, contains '..', or has newlines" >&2
+              exit 1 ;;
+          esac
+        }
+
+        # ── Files (with glob expansion) ──────────────────────────────
+        if [ -n "${COPY_FILES}" ]; then
+          while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -z "${entry}" ] && continue
+            assert_safe_relpath "copy_files" "${entry}"
+
+            matched=0
+            # shellcheck disable=SC2086 # intentional glob expansion
+            for src in ${PUBLIC_DIR}/${entry}; do
+              if [ -e "${src}" ]; then
+                matched=1
+                echo "  cp ${src} -> ${DEPLOY_DIR}/"
+                cp -- "${src}" "${DEPLOY_DIR}/"
+              fi
+            done
+            if [ "${matched}" -eq 0 ]; then
+              echo "ERROR: copy_files entry '${entry}' matched nothing under '${PUBLIC_DIR}'" >&2
+              exit 1
+            fi
+          done <<< "${COPY_FILES}"
+        fi
+
+        # ── Directories (with optional SRC:DEST rewrite) ─────────────
+        if [ -n "${COPY_DIRS}" ]; then
+          while IFS= read -r entry; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [ -z "${entry}" ] && continue
+
+            src="${entry%%:*}"
+            if [ "${entry}" = "${src}" ]; then
+              dest="$(basename -- "${src}")"
+            else
+              dest="${entry#*:}"
+            fi
+            assert_safe_relpath "copy_dirs (src)"  "${src}"
+            assert_safe_relpath "copy_dirs (dest)" "${dest}"
+
+            src_path="${PUBLIC_DIR}/${src}"
+            dest_path="${DEPLOY_DIR}/${dest}"
+            if [ ! -d "${src_path}" ]; then
+              echo "ERROR: copy_dirs source '${src_path}' is not a directory" >&2
+              exit 1
+            fi
+            echo "  cp -r ${src_path} -> ${dest_path}"
+            mkdir -p -- "$(dirname -- "${dest_path}")"
+            cp -r -- "${src_path}" "${dest_path}"
+          done <<< "${COPY_DIRS}"
+        fi
+
+        echo "Staged contents of ${DEPLOY_DIR}:"
+        ls -la -- "${DEPLOY_DIR}"

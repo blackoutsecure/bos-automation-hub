@@ -1,0 +1,105 @@
+name: Compose wrangler pages deploy command
+description: >-
+  Build the argv for `wrangler pages deploy` from validated inputs and
+  emit it as a single shell-quoted string suitable for the `command:`
+  input of `cloudflare/wrangler-action`. Re-validates `deploy_dir` and
+  `project_name` so a runtime change cannot smuggle shell metacharacters
+  through. Free-form `extra_args` are accepted but each token is added
+  to argv via `set --` so quoting is preserved.
+
+inputs:
+  deploy_dir:
+    description: 'Repo-relative directory uploaded to Cloudflare Pages (positional arg).'
+    required: true
+  project_name:
+    description: 'Cloudflare Pages project name (must match `^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$`).'
+    required: true
+  branch:
+    description: 'Optional `--branch` value. Empty leaves it to wrangler''s default.'
+    required: false
+    default: ''
+  commit_message:
+    description: 'Optional `--commit-message` value. Empty leaves the wrangler default.'
+    required: false
+    default: ''
+  extra_args:
+    description: >-
+      Optional newline-separated extra arguments appended verbatim
+      (each line is split on whitespace into argv tokens).
+    required: false
+    default: ''
+
+outputs:
+  command:
+    description: 'Shell-quoted argv string starting with `pages deploy`.'
+    value: ${{ steps.compose.outputs.command }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compose
+      id: compose
+      shell: bash
+      env:
+        DEPLOY_DIR: ${{ inputs.deploy_dir }}
+        PROJECT_NAME: ${{ inputs.project_name }}
+        BRANCH: ${{ inputs.branch }}
+        COMMIT_MESSAGE: ${{ inputs.commit_message }}
+        EXTRA_ARGS: ${{ inputs.extra_args }}
+      run: |
+        set -euo pipefail
+
+        # Re-validate (the workflow may have run preflight, but treat
+        # this action as a stand-alone trust boundary).
+        case "${DEPLOY_DIR}" in
+          ''|/*|*..*|*$'\n'*|*$'\r'*)
+            echo "ERROR: deploy_dir must be a non-empty, repo-relative path without '..' (got '${DEPLOY_DIR}')" >&2
+            exit 1 ;;
+        esac
+        if ! printf '%s' "${PROJECT_NAME}" \
+          | grep -Eq '^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$'; then
+          echo "ERROR: refusing to compose wrangler command with unsafe project name '${PROJECT_NAME}'" >&2
+          exit 1
+        fi
+        if [ -n "${BRANCH}" ]; then
+          case "${BRANCH}" in
+            *$'\n'*|*$'\r'*|*$'\t'*|*' '*)
+              echo "ERROR: branch must not contain whitespace (got '${BRANCH}')" >&2
+              exit 1 ;;
+          esac
+        fi
+
+        set --
+        set -- "$@" pages deploy "${DEPLOY_DIR}"
+        set -- "$@" --project-name "${PROJECT_NAME}"
+
+        if [ -n "${BRANCH}" ]; then
+          set -- "$@" --branch "${BRANCH}"
+        fi
+        if [ -n "${COMMIT_MESSAGE}" ]; then
+          set -- "$@" --commit-message "${COMMIT_MESSAGE}"
+        fi
+
+        # Append free-form extra args, one line at a time, splitting on
+        # whitespace into argv tokens.
+        if [ -n "${EXTRA_ARGS}" ]; then
+          while IFS= read -r line; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            [ -z "${line}" ] && continue
+            # shellcheck disable=SC2086 # intentional word splitting
+            set -- "$@" ${line}
+          done <<< "${EXTRA_ARGS}"
+        fi
+
+        # Render argv as a single shell-quoted string (POSIX single-quote
+        # escape: ' -> '\''). wrangler-action passes this through
+        # `eval set --`, so quoting MUST round-trip cleanly.
+        CMD=""
+        for a in "$@"; do
+          q=$(printf "%s" "$a" | sed "s/'/'\\\\''/g")
+          CMD="${CMD} '${q}'"
+        done
+        CMD="${CMD# }"
+        echo "command=${CMD}"
+        echo "command=${CMD}" >> "${GITHUB_OUTPUT}"

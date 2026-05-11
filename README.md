@@ -29,6 +29,7 @@ The Docker Hub namespace is **public information** (it appears in every
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
 | [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Poll an upstream repo's `latest` release, dispatch downstream workflows on change, and commit a tracking file. |
+| [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
 | [.github/actions/shared/resolve-docker-image-tags/action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
 | [.github/actions/shared/resolve-release-context/action.yml](.github/actions/shared/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
 | [.github/actions/sync-dockerhub-description/action.yml](.github/actions/sync-dockerhub-description/action.yml) | Composite action | Validates inputs and pushes a repo's README + short description to Docker Hub via `peter-evans/dockerhub-description`. |
@@ -328,6 +329,237 @@ to trigger another workflow, pass a fine-scoped PAT or GitHub App
 token via the `DISPATCH_TOKEN` secret.
 
 See [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml)
+for the full input/output list.
+
+---
+
+## `deploy-cloudflare-pages.yml` — reusable workflow
+
+Stage a static-site build into a deploy directory, optionally generate
+SEO/PWA companion files (`sitemap.xml`, `robots.txt`,
+`/.well-known/security.txt`, Web App Manifest), and publish to
+[Cloudflare Pages](https://developers.cloudflare.com/pages/) via
+[`cloudflare/wrangler-action`](https://github.com/cloudflare/wrangler-action).
+
+### Minimal caller (organisation-shared pattern)
+
+Configure the project name and account ID once at the org or repo
+level, then any caller stays free of literals:
+
+```yaml
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pages:
+    uses: blackoutsecure/platform-automation/.github/workflows/deploy-cloudflare-pages.yml@main
+    with:
+      cloudflare_project_name: ${{ vars.CLOUDFLARE_PROJECT_NAME }}
+      cloudflare_account_id:   ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      copy_files: |
+        index.html
+        favicon.ico
+      copy_dirs: |
+        assets
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+```
+
+Already storing the account ID as `secrets.CLOUDFLARE_ACCOUNT_ID`?
+Pass it through the `secrets:` block instead — `inputs.cloudflare_account_id`
+falls back to the secret for back-compat.
+
+### Default behaviour
+
+- **Deploy trigger:** the workflow deploys only on `push` events to the
+  repository's default branch. Override with `deploy: 'true'` /
+  `deploy: 'false'`, or branch-target via `branch:`.
+- **Staging model:** files listed in `copy_files` and directories
+  listed in `copy_dirs` are copied from `public_dir` (default `.`) into
+  `deploy_dir` (default `./dist`), which is wiped first when
+  `clean_deploy_dir: true`. A `prebuild_command` may run beforehand
+  (e.g. `npm ci && npm run build`).
+- **Generators are opt-in.** Each of `generate_sitemap`,
+  `generate_robots`, `generate_security_txt`, and `generate_manifest`
+  defaults to `false`. Enabling any of the first three requires
+  `site_url:` to be set; enabling `generate_security_txt` additionally
+  requires `security_contact:`; enabling `generate_manifest` requires
+  `manifest_name:`.
+- **Concurrency:** Cloudflare Pages serialises deploys per project, so
+  in-progress runs are never cancelled.
+- **Production vs preview:** wrangler treats the deploy as a production
+  release when `branch:` matches the project's production branch in
+  Cloudflare Pages; otherwise it's a preview. The resolved environment
+  is reported as the `environment` output and in the job summary.
+- **Production gating via GitHub Environments.** Set
+  `deployment_environment: production` (or any environment name) to
+  bind the deploy job to a [GitHub Environment](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment)
+  and inherit its required-reviewer rules, wait timer, branch policy,
+  and environment-scoped secrets. Required reviewers approve from the
+  Actions UI before wrangler runs.
+
+### Caller-side configuration
+
+The same `vars:` vs `secrets:` model used by the Docker workflow
+applies here:
+
+| Kind         | Name                       | Used for |
+|--------------|----------------------------|----------|
+| **Variable** | `CLOUDFLARE_PROJECT_NAME`  | Pages project name. Pass through `inputs.cloudflare_project_name`. |
+| **Variable** | `CLOUDFLARE_ACCOUNT_ID`    | 32-char hex account ID (appears in dashboard URLs — not secret). Pass through `inputs.cloudflare_account_id`. |
+| **Secret**   | `CLOUDFLARE_API_TOKEN`     | Cloudflare API token with `Account → Cloudflare Pages → Edit` on the project. |
+| Secret       | `CLOUDFLARE_ACCOUNT_ID`    | **Optional / back-compat.** Used only if `inputs.cloudflare_account_id` is empty. Prefer the `vars.` form. |
+
+Set `vars.CLOUDFLARE_PROJECT_NAME` and `vars.CLOUDFLARE_ACCOUNT_ID`
+once at the **organisation** level for shared defaults, override at
+the repo level when a project differs.
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cloudflare_project_name` | string | **required** | Pages project name (lowercase, digits, `-`; 1–58 chars). |
+| `cloudflare_account_id` | string | `''` | 32-char hex account ID. Falls back to `secrets.CLOUDFLARE_ACCOUNT_ID`. |
+| `deployment_environment` | string | `''` | GitHub Environment name to bind the deploy job to (production gates, env-scoped secrets). |
+| `site_url` | string | `''` | Canonical site URL. Required when any generator is enabled. |
+| `public_dir` | string | `.` | Source root in the caller repo. |
+| `deploy_dir` | string | `./dist` | Staging directory uploaded to Pages. |
+| `clean_deploy_dir` | boolean | `true` | Remove `deploy_dir` before staging. |
+| `copy_files` | string | `''` | Newline-separated files/globs (relative to `public_dir`) copied to `deploy_dir/`. |
+| `copy_dirs` | string | `''` | Newline-separated `SRC[:DEST]` directory entries (relative to `public_dir`). |
+| `prebuild_command` | string | `''` | Shell command run from `working_directory` before staging. |
+| `working_directory` | string | `''` | Working dir for `prebuild_command` and wrangler. |
+| `branch` | string | `''` | Override the deploy branch passed to `wrangler pages deploy`. |
+| `commit_message` | string | `''` | Override the Pages deploy commit message. |
+| `wrangler_version` | string | `''` | Pin wrangler (e.g. `4`, `^4.0.0`, `latest`). |
+| `extra_wrangler_args` | string | `''` | Extra args appended to `wrangler pages deploy` (newlines = spaces). |
+| `deploy` | string | `''` | `'true'`/`'false'` to force; empty deploys only on default-branch pushes. |
+| `runs_on` | string | `ubuntu-latest` | Runner label. |
+| `checkout_fetch_depth` | number | `0` | `fetch-depth` for `actions/checkout`. |
+| `generate_sitemap` | boolean | `false` | Run `bos-sitemap-generator`. |
+| `generate_robots` | boolean | `false` | Run `bos-robotstxt-generator`. |
+| `generate_security_txt` | boolean | `false` | Run `bos-securitytxt-generator`. |
+| `security_contact` | string | `''` | Email or `https://` URL written to `security.txt`. |
+| `generate_manifest` | boolean | `false` | Run `bos-web-application-manifest-generator`. |
+| `manifest_name` | string | `''` | PWA manifest `name` (required when generating). |
+| `manifest_short_name` | string | `''` | PWA manifest `short_name`. |
+| `manifest_description` | string | `''` | PWA manifest `description`. |
+| `manifest_orientation` | string | `''` | PWA manifest `orientation`. |
+| `manifest_theme_color` | string | `''` | PWA manifest `theme_color` (CSS hex). |
+| `manifest_background_color` | string | `''` | PWA manifest `background_color` (CSS hex). |
+| `manifest_lang` | string | `''` | PWA manifest `lang` (BCP 47 tag). |
+| `manifest_dir` | string | `''` | PWA manifest `dir` (`ltr`/`rtl`/`auto`). |
+| `manifest_categories` | string | `''` | PWA manifest `categories` (comma-separated). |
+| `manifest_icons_dir` | string | `''` | Directory inside `deploy_dir` to scan for icons. |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `deployed` | `true` when wrangler pushed a deploy. |
+| `deployment_url` | Primary deployment URL. |
+| `deployment_id` | Cloudflare Pages deployment ID. |
+| `deployment_alias_url` | Deployment alias URL (preview/branch deploys). |
+| `environment` | `production` or `preview`. |
+| `account_id` | Resolved Cloudflare account ID (input or fallback secret). |
+
+### Production gating with GitHub Environments
+
+Bind the deploy to a protected environment so production pushes
+require human approval, and store the API token + account ID at the
+**environment** scope so they're only readable when that environment
+is targeted:
+
+```yaml
+jobs:
+  pages:
+    uses: blackoutsecure/platform-automation/.github/workflows/deploy-cloudflare-pages.yml@main
+    with:
+      cloudflare_project_name: ${{ vars.CLOUDFLARE_PROJECT_NAME }}
+      cloudflare_account_id:   ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      deployment_environment:  production
+      branch: main
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+```
+
+The deploy job inherits the `production` environment's required
+reviewers, wait timer, and branch policy — wrangler doesn't run until
+the gate is satisfied.
+
+### Composite actions consumed by this workflow
+
+Three steps are split out into local composite actions so they can be
+audited independently and reused on their own:
+
+| Action | Path | Purpose |
+|--------|------|---------|
+| `cloudflare-pages-resolve-account-id` | [.github/actions/cloudflare-pages-resolve-account-id/action.yml](.github/actions/cloudflare-pages-resolve-account-id/action.yml) | Picks the account ID from the input or fallback secret, validates the 32-char hex shape, and registers `::add-mask::` so the value is redacted from later logs. |
+| `stage-deploy-dir` | [.github/actions/shared/stage-deploy-dir/action.yml](.github/actions/shared/stage-deploy-dir/action.yml) | Generic deploy-directory stager (`copy_files` + `copy_dirs` with `SRC:DEST` rewrite, glob expansion, and path-traversal rejection). Lives under `shared/` because it's not Cloudflare-specific — any static-site deploy can reuse it. |
+| `cloudflare-pages-compose-command` | [.github/actions/cloudflare-pages-compose-command/action.yml](.github/actions/cloudflare-pages-compose-command/action.yml) | Builds the `wrangler pages deploy` argv as a properly shell-quoted string for `cloudflare/wrangler-action`'s `command:` input. |
+
+Use them directly from any workflow when you don't need the full
+reusable workflow — for example, the resolver works with any wrangler
+command, not just `pages deploy`:
+
+```yaml
+- uses: actions/checkout@v4
+  with: { persist-credentials: false }
+- id: account
+  uses: blackoutsecure/platform-automation/.github/actions/cloudflare-pages-resolve-account-id@main
+  with:
+    account_id:          ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+    fallback_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+- uses: cloudflare/wrangler-action@v3
+  with:
+    apiToken:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    accountId: ${{ steps.account.outputs.value }}
+    command:   r2 object list my-bucket
+```
+
+### Security notes specific to this workflow
+
+- All third-party actions (including the `blackoutsecure/bos-*`
+  generators and `cloudflare/wrangler-action`) are SHA-pinned with the
+  resolved tag in a trailing comment; Dependabot rolls them weekly.
+- The three composite actions consumed by this workflow live in this
+  repository (referenced as `./.github/actions/...`) so they're
+  versioned together with the workflow and require no extra trust
+  boundary.
+- `public_dir`, `deploy_dir`, `working_directory`, and every entry in
+  `copy_files`/`copy_dirs` are rejected if they're absolute, empty,
+  contain `..`, or contain newlines — so a misconfigured caller cannot
+  exfiltrate files from outside the workspace into the deploy bundle.
+  The check runs in both the preflight step and the staging composite
+  action (defence in depth).
+- `cloudflare_project_name` is regex-validated *twice* (once at
+  preflight, once again inside the compose-command action right before
+  the wrangler argv is built) so a runtime change cannot smuggle shell
+  metacharacters through.
+- `cloudflare_account_id` (or its `CLOUDFLARE_ACCOUNT_ID` fallback) is
+  required to be a 32-char hex string. The resolver registers it with
+  `::add-mask::` so it never appears verbatim in subsequent logs.
+- `CLOUDFLARE_API_TOKEN` is rejected if it contains whitespace
+  (newlines in a secret silently truncate `GITHUB_OUTPUT`).
+- `deployment_environment` is regex-validated against GitHub's
+  environment-name shape before being bound to the job.
+- The wrangler command is assembled as a properly shell-quoted argv
+  string from validated inputs — no caller value reaches `bash -c`
+  unquoted. The argv round-trip through `eval set --` is covered by
+  smoke tests in CI.
+- Every `${{ … }}` template expansion is funnelled through an `env:`
+  block (job-level for hot inputs like `PROJECT_NAME` and `DEPLOY_DIR`,
+  step-level for the rest) — caller values never appear inline in any
+  `run:` body, eliminating the script-injection class of bug.
+
+See [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml)
 for the full input/output list.
 
 ---
