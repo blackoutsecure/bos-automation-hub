@@ -1,22 +1,20 @@
 name: Resolve Cloudflare account ID
 description: >-
-  Resolve a Cloudflare account ID from an explicit input, falling back
-  to a back-compat secret when the input is empty. Validates the
-  32-char hex shape, registers the value with `::add-mask::` so it is
-  redacted from subsequent step logs, and exposes it as the `value`
-  output for downstream wrangler/REST calls.
+  Resolve a Cloudflare account ID from an input (preferred) or a back-compat
+  secret, validate the 32-char hex shape, and mask the value in later step
+  logs via `::add-mask::`.
 
 inputs:
   account_id:
     description: >-
       Cloudflare account ID (32-char lowercase hex). Preferred source.
-      In a workflow, pass `${{ vars.CLOUDFLARE_ACCOUNT_ID }}` so the
-      caller stays free of literals.
+      In a workflow, pass `vars.CLOUDFLARE_ACCOUNT_ID` so the caller
+      stays free of literals.
     required: false
     default: ''
   fallback_account_id:
     description: >-
-      Optional back-compat fallback (e.g. `${{ secrets.CLOUDFLARE_ACCOUNT_ID }}`).
+      Optional back-compat fallback (e.g. `secrets.CLOUDFLARE_ACCOUNT_ID`).
       Used only when `account_id` is empty.
     required: false
     default: ''

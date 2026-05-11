@@ -1,11 +1,8 @@
 name: Compose wrangler pages deploy command
 description: >-
-  Build the argv for `wrangler pages deploy` from validated inputs and
-  emit it as a single shell-quoted string suitable for the `command:`
-  input of `cloudflare/wrangler-action`. Re-validates `deploy_dir` and
-  `project_name` so a runtime change cannot smuggle shell metacharacters
-  through. Free-form `extra_args` are accepted but each token is added
-  to argv via `set --` so quoting is preserved.
+  Build the argv for `wrangler pages deploy` from validated inputs and emit
+  it as a single shell-quoted string for the `command:` input of
+  `cloudflare/wrangler-action`.
 
 inputs:
   deploy_dir:
