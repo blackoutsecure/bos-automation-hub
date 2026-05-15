@@ -14,8 +14,8 @@
 # normally driven by a tag push, a `release` event, or a `workflow_dispatch`
 # from a sibling trigger workflow such as `monitor-upstream-release.yml`.
 # It is intended to be called from a thin caller workflow in a product repo
-# (see `.github/workflow-templates/release.yml`) and is **not** intended to
-# be triggered directly on this repo.
+# (see the "Quick start" section of this repo's README) and is **not**
+# intended to be triggered directly on this repo.
 name: Release pipeline (reusable meta-workflow)
 
 "on":
@@ -85,6 +85,59 @@ name: Release pipeline (reusable meta-workflow)
         required: false
         type: boolean
         default: true
+
+      # ----- Docker Scout (forwarded to docker-build-push.yml) -------------
+      docker_enable_scout:
+        description: >-
+          Run Docker Scout against the image. Default `true` — every
+          release is scanned and (on success) the SARIF report is
+          uploaded to GitHub code scanning.
+        required: false
+        type: boolean
+        default: true
+      docker_scout_command:
+        description: 'Scout command (default `cves`). Comma-separated for multiple.'
+        required: false
+        type: string
+        default: cves
+      docker_scout_severities:
+        description: 'Severities to keep.'
+        required: false
+        type: string
+        default: 'critical,high'
+      docker_scout_only_fixed:
+        description: 'Filter to CVEs with a fix available.'
+        required: false
+        type: boolean
+        default: false
+      docker_scout_ignore_base:
+        description: 'Ignore vulnerabilities inherited from the base image.'
+        required: false
+        type: boolean
+        default: false
+      docker_scout_organization:
+        description: 'Scout organization (Docker Hub namespace). Required for env-related features.'
+        required: false
+        type: string
+        default: ''
+      docker_scout_record_environment:
+        description: >-
+          When set, record the published image into this Scout
+          environment (e.g. `production`) — enables `compare` against
+          the live release on later PRs.
+        required: false
+        type: string
+        default: ''
+      docker_scout_sarif_upload:
+        description: 'Upload the SARIF report to GitHub code scanning.'
+        required: false
+        type: boolean
+        default: true
+      docker_scout_exit_code:
+        description: 'Fail the Docker stage if Scout finds matching vulnerabilities.'
+        required: false
+        type: boolean
+        default: false
 
       # ----- Balena stage inputs -------------------------------------------
       block_name:
@@ -256,17 +309,34 @@ jobs:
     name: Docker Hub
     if: ${{ inputs.docker }}
     needs: resolve
+    permissions:
+      contents: read
+      # Forwarded to docker-build-push.yml so Scout can post PR comments
+      # and upload SARIF reports — no-op for `release.yml` push events
+      # but keeps the job topology consistent if release.yml is ever
+      # called from a PR-driven flow.
+      pull-requests: write
+      security-events: write
     uses: blackoutsecure/platform-automation/.github/workflows/docker-build-push.yml@main
     with:
-      image_name:          ${{ inputs.image_name }}
-      dockerhub_namespace: ${{ inputs.dockerhub_namespace }}
-      image_version:       ${{ needs.resolve.outputs.version }}
-      push:                'true'
-      latest:              ${{ inputs.docker_latest }}
-      multi_arch:          ${{ inputs.docker_multi_arch }}
-      extra_tags:          ${{ inputs.docker_extra_tags }}
-      short_description:   ${{ inputs.docker_short_description }}
-      update_description:  ${{ inputs.docker_update_description }}
+      image_name:                ${{ inputs.image_name }}
+      dockerhub_namespace:       ${{ inputs.dockerhub_namespace }}
+      image_version:             ${{ needs.resolve.outputs.version }}
+      push:                      'true'
+      latest:                    ${{ inputs.docker_latest }}
+      multi_arch:                ${{ inputs.docker_multi_arch }}
+      extra_tags:                ${{ inputs.docker_extra_tags }}
+      short_description:         ${{ inputs.docker_short_description }}
+      update_description:        ${{ inputs.docker_update_description }}
+      enable_scout:              ${{ inputs.docker_enable_scout }}
+      scout_command:             ${{ inputs.docker_scout_command }}
+      scout_severities:          ${{ inputs.docker_scout_severities }}
+      scout_only_fixed:          ${{ inputs.docker_scout_only_fixed }}
+      scout_ignore_base:         ${{ inputs.docker_scout_ignore_base }}
+      scout_organization:        ${{ inputs.docker_scout_organization }}
+      scout_record_environment:  ${{ inputs.docker_scout_record_environment }}
+      scout_sarif_upload:        ${{ inputs.docker_scout_sarif_upload }}
+      scout_exit_code:           ${{ inputs.docker_scout_exit_code }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}

@@ -19,12 +19,18 @@ In scope:
 
 - The reusable workflows in [`.github/workflows/`](.github/workflows/).
 - The composite actions in [`.github/actions/`](.github/actions/).
+- The OS administration scripts under [`linux/`](linux/) and
+  [`macos/`](macos/) — they run as root on managed endpoints, so
+  command-injection, privilege-escalation, and TOCTOU bugs are in scope.
 
 Out of scope:
 
 - Vulnerabilities in upstream actions we depend on (please report to the
   maintaining org). We pin every third-party action to a commit SHA;
   Dependabot opens PRs for new releases.
+- Vulnerabilities in upstream packages installed by the OS scripts
+  (NodeSource, Docker, Homebrew, Plex, Sublime Text, …) — please report
+  those to the upstream project.
 - Misconfiguration in downstream repositories that consume these workflows.
 
 ## Hardening summary

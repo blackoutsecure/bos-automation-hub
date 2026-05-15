@@ -1,10 +1,20 @@
 # platform-automation
 
-Reusable GitHub Actions workflows and composite actions shared across
-**blackoutsecure** repositories.
+> Maintained by [Blackout Secure](https://blackoutsecure.app)
+
+Two things live in this repo:
+
+1. **Reusable GitHub Actions workflows and composite actions** under
+   [`.github/`](.github/), shared across **blackoutsecure** repositories
+   (Docker build/push, Balena block publish, Cloudflare Pages deploy,
+   GitHub release rendering, upstream-release monitoring, …).
+2. **OS administration scripts** under [`linux/`](linux/) and
+   [`macos/`](macos/) — idempotent, MDM-friendly install/configure
+   scripts for managed Ubuntu, OpenWrt/GL.iNet, and macOS endpoints.
 
 This repo is public so any repository (including forks) can call these
-workflows directly without needing a token.
+workflows directly without needing a token, and any host can fetch the
+scripts directly with `wget`/`curl`.
 
 ### Configuration model
 
@@ -55,22 +65,358 @@ one job; leave it empty to inherit.
 
 | Path | Kind | Purpose |
 |------|------|---------|
-| [.github/workflows/docker-build-push.yml](.github/workflows/docker-build-push.yml) | Reusable workflow | Multi-arch Docker build, push-by-digest, and single-manifest publish to Docker Hub. |
+| [.github/workflows/docker-build-push.yml](.github/workflows/docker-build-push.yml) | Reusable workflow | Multi-arch Docker build, push-by-digest, and single-manifest publish to Docker Hub. Includes default-on Docker Scout CVE scanning (PR comment + SARIF upload to code scanning). |
+| [.github/workflows/docker-scout-scan.yml](.github/workflows/docker-scout-scan.yml) | Reusable workflow | Standalone Docker Scout scan of an already-published image (e.g. scheduled re-scan of `:latest`). Uploads SARIF to code scanning. |
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/workflows/balena-fleet-deploy.yml](.github/workflows/balena-fleet-deploy.yml) | Reusable workflow | Render a per-fleet `balena.yml` from inputs and deploy the same block to one or more balenaCloud fleets in a matrix. |
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
 | [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Poll an upstream repo's `latest` release, dispatch downstream workflows on change, and commit a tracking file. |
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
+| [.github/workflows/release-from-upstream.yml](.github/workflows/release-from-upstream.yml) | Reusable **meta-workflow** | Schedule-driven "follow upstream" loop. Composes `monitor-upstream-release.yml` → `release.yml`: detects a new upstream release and runs the full Docker → Balena → GitHub Release pipeline against the new version, in one caller workflow. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
 | [.github/actions/shared/resolve-docker-image-tags/action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
 | [.github/actions/shared/resolve-release-context/action.yml](.github/actions/shared/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
 | [.github/actions/shared/resolve-upstream-version/action.yml](.github/actions/shared/resolve-upstream-version/action.yml) | Composite action | Shallow-clones an upstream git repo at a ref and resolves a version (file → `git describe` → short SHA), commit SHA, and commit date. |
 | [.github/actions/shared/docker-multiarch-manifest/action.yml](.github/actions/shared/docker-multiarch-manifest/action.yml) | Composite action | Assembles a multi-arch Docker manifest from per-arch digest artifacts and pushes it under one or more tags, with retry on transient registry failures. |
 | [.github/actions/sync-dockerhub-description/action.yml](.github/actions/sync-dockerhub-description/action.yml) | Composite action | Validates inputs and pushes a repo's README + short description to Docker Hub via `peter-evans/dockerhub-description`. |
+| [.github/actions/shared/docker-scout-scan/action.yml](.github/actions/shared/docker-scout-scan/action.yml) | Composite action | Wraps `docker/scout-action` with input validation, Docker Hub login, and optional SARIF upload to GitHub code scanning. Used by both the embedded scan in `docker-build-push.yml` and the standalone `docker-scout-scan.yml`. |
 | [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
 | [.github/workflows/openwrt-readsb-wiedehopf-bump.yml](.github/workflows/openwrt-readsb-wiedehopf-bump.yml) | Scheduled automation | Tracks new `wiedehopf/readsb` releases and proposes them upstream as a cross-repo PR to `openwrt/packages` (bumps `PKG_VERSION`/`PKG_HASH`, resets `PKG_RELEASE`) via a bot-owned fork. |
-| [.github/workflow-templates/](.github/workflow-templates/) | Starter workflows | GitHub-format starter workflows (`*.yml` + sibling `*.properties.json`, `$default-branch` placeholders) that thinly wrap the reusable workflows above. See [.github/workflow-templates/README.md](.github/workflow-templates/README.md). |
+| [linux/](linux/) | OS administration scripts | Distribution-grouped install/configure scripts for managed Linux endpoints (Ubuntu, OpenWrt / GL.iNet). See [linux/README.md](linux/README.md). |
+| [macos/](macos/) | OS administration scripts | Application/lifecycle scripts for managed macOS endpoints (MDM-friendly: Intune, Jamf, Kandji, Mosyle, Workspace ONE). See [macos/README.md](macos/README.md). |
+
+---
+
+## Quick start — caller wiring
+
+Consumer repos wire themselves up by committing a small caller
+workflow under `.github/workflows/` that calls one of the reusable
+workflows in this repo. The patterns below are the canonical ones —
+copy the relevant block, drop it into your repo, set the listed
+`vars` / `secrets`, and commit.
+
+> **Why no starter-workflow templates?** GitHub's "Suggested
+> workflows" picker only auto-populates from
+> `<org>/.github/workflow-templates/`, which is a *separate* repo
+> from this one. Maintaining a parallel set of thin wrapper files
+> here that drift from the reusable workflows they call (different
+> input names, missing toggles, stale comments) is a strictly
+> negative-value engineering tax. The reusable workflows themselves
+> are the contract; this section is the reference for wiring them
+> up. If you want the picker UX, mirror these snippets into
+> `blackoutsecure/.github/workflow-templates/` once — they don't
+> need to track per-input changes there.
+
+### 1. Tag-driven release (Docker → Balena → GitHub Release)
+
+Calls the [`release.yml`](#releaseyml--reusable-meta-workflow)
+meta-workflow on every SemVer tag push, on `release: published`, and
+from a manual dispatch. One file in the consumer repo drives all
+three publish stages; turn any stage off with `docker: false`,
+`balena: false`, or `github_release: false`.
+
+Required `vars`: `IMAGE_NAME`, `DOCKERHUB_NAMESPACE`,
+`BALENA_BLOCK_NAME`, `BALENA_NAMESPACE`.
+Required `secrets`: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`,
+`BALENA_API_TOKEN`.
+
+```yaml
+# .github/workflows/release.yml
+name: Release (tag-driven)
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g. v1.2.3).'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      contents: write   # balena commit-back + GitHub Release publish
+    uses: blackoutsecure/platform-automation/.github/workflows/release.yml@main
+    with:
+      tag_name:                 ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || '' }}
+      image_name:               ${{ vars.IMAGE_NAME }}
+      dockerhub_namespace:      ${{ vars.DOCKERHUB_NAMESPACE }}
+      docker_extra_tags:        sha-${{ github.sha }}
+      docker_short_description: ${{ github.event.repository.description }}
+      block_name:               ${{ vars.BALENA_BLOCK_NAME }}
+      balena_namespace:         ${{ vars.BALENA_NAMESPACE }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
+```
+
+### 2. Upstream-tracked release (poll upstream, then run the same pipeline)
+
+Calls the [`release-from-upstream.yml`](#release-from-upstreamyml--reusable-meta-workflow)
+meta-workflow on a 6-hourly cron. When the tracked upstream repo cuts
+a new release, the full Docker → Balena → GitHub Release pipeline runs
+against `v<upstream_version>` automatically — no tag push required in
+the consumer repo.
+
+Required `vars`: `UPSTREAM_REPO`, `IMAGE_NAME`, `DOCKERHUB_NAMESPACE`,
+`BALENA_BLOCK_NAME`, `BALENA_NAMESPACE`.
+Required `secrets`: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`,
+`BALENA_API_TOKEN`.
+
+```yaml
+# .github/workflows/release-from-upstream.yml
+name: Release from upstream
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'   # stagger off :00 to dodge org cron pile-ups
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: Run the release pipeline even if upstream is unchanged.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-from-upstream-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      contents: write   # monitor commit + balena commit-back + GitHub Release
+    uses: blackoutsecure/platform-automation/.github/workflows/release-from-upstream.yml@main
+    with:
+      upstream_repo:            ${{ vars.UPSTREAM_REPO }}
+      force_release:            ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
+      image_name:               ${{ vars.IMAGE_NAME }}
+      dockerhub_namespace:      ${{ vars.DOCKERHUB_NAMESPACE }}
+      docker_extra_tags:        sha-${{ github.sha }}
+      docker_short_description: ${{ github.event.repository.description }}
+      block_name:               ${{ vars.BALENA_BLOCK_NAME }}
+      balena_namespace:         ${{ vars.BALENA_NAMESPACE }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
+```
+
+### 3. Scheduled Docker Scout re-scan
+
+Calls the [`docker-scout-scan.yml`](#docker-scout-scanyml--reusable-workflow)
+reusable workflow daily so newly disclosed CVEs in already-published
+images surface in the **Security** tab even when no commits land.
+
+Required `vars`: `IMAGE_NAME`, `DOCKERHUB_NAMESPACE`.
+Required `secrets`: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+
+```yaml
+# .github/workflows/docker-scout.yml
+name: Docker Scout (scheduled)
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # 06:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Tag to scan (default: latest).'
+        required: false
+        type: string
+        default: 'latest'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-scout-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scout:
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    uses: blackoutsecure/platform-automation/.github/workflows/docker-scout-scan.yml@main
+    with:
+      image: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.IMAGE_NAME }}:${{ inputs.image_tag || 'latest' }}
+      command: cves
+      severities: critical,high
+      sarif: true
+      sarif_upload: true
+      summary: true
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+### 4. Monitor upstream and dispatch other workflows in this repo
+
+Use this when the consumer repo *isn't* a Docker/Balena/Release product
+and you just want to fan out to one or more existing local workflows
+on every upstream version change. For Docker/Balena/Release products,
+prefer pattern (2) above — it composes the monitor and the release
+pipeline in one job graph and avoids the extra `workflow_dispatch`
+hop.
+
+```yaml
+# .github/workflows/monitor-upstream.yml
+name: Monitor upstream release
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_dispatch:
+        description: Dispatch downstream workflows even if upstream is unchanged.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitor-upstream-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    permissions:
+      contents: write   # commit the tracking file
+      actions:  write   # dispatch the target workflows
+    uses: blackoutsecure/platform-automation/.github/workflows/monitor-upstream-release.yml@main
+    with:
+      upstream_repo:    actions/runner
+      track_file:       .github/upstream/actions-runner.json
+      target_workflows: |
+        publish.yml
+        release.yml
+      force_dispatch: ${{ github.event_name == 'workflow_dispatch' && inputs.force_dispatch && 'true' || 'false' }}
+```
+
+### 5. Multi-arch Docker build only
+
+For a repo that just builds and pushes a Docker image (no Balena, no
+GitHub Release), call [`docker-build-push.yml`](#docker-build-pushyml--reusable-workflow)
+directly — see the [Minimal caller](#minimal-caller) example in that
+section.
+
+### 6. Multi-fleet balenaBlock deploy
+
+For a block deployed to multiple fleets that differ only by device
+type, use [`balena-fleet-deploy.yml`](#balena-fleet-deployyml--reusable-workflow)
+— see the [Minimal caller](#minimal-caller-1) example in that
+section. (This is a different topology from `balena-block-publish.yml`
+and is **not** part of the `release.yml` pipeline.)
+
+### 7. Cloudflare Pages deploy
+
+For static-site repos, use [`deploy-cloudflare-pages.yml`](#deploy-cloudflare-pagesyml--reusable-workflow)
+— see the [Minimal caller](#minimal-caller-organisation-shared-pattern)
+example in that section.
+
+### Topology
+
+The reusable workflows split cleanly into **trigger**, **orchestrator**,
+and **stage** layers. Consumer repos pick a trigger and let it drive
+the orchestrator, which fans out to the per-task stage workflows.
+
+```mermaid
+flowchart LR
+    cron([cron schedule]):::trigger --> rfu
+    tag([git tag push / release]):::trigger --> release
+    dispatch([workflow_dispatch]):::trigger --> release
+
+    rfu["release-from-upstream.yml<br/><i>composes monitor + release</i>"]:::orchestrator
+    release["release.yml<br/><i>release pipeline</i>"]:::orchestrator
+
+    rfu --> release
+
+    release --> docker["docker-build-push.yml"]:::stage
+    release --> balena["balena-block-publish.yml"]:::stage
+    release --> ghr["github-release.yml"]:::stage
+
+    classDef trigger fill:#e8f0fe,stroke:#1a73e8,color:#000
+    classDef orchestrator fill:#fff4e5,stroke:#f29900,color:#000
+    classDef stage fill:#e6f4ea,stroke:#137333,color:#000
+```
+
+Stage workflows are also reusable on their own — a consumer that only
+needs `docker-build-push.yml` calls it directly without the
+orchestrator.
+
+---
+
+## OS administration scripts
+
+`linux/` and `macos/` hold idempotent shell scripts intended for
+managed-deployment tooling (Ansible, Intune for Linux, Chef, Puppet,
+Salt, and the macOS MDMs listed above). They are independent of the
+reusable workflows above — every script is self-contained, runs as
+root, logs to `/var/log/<script>.log`, and exits non-zero on failure.
+
+### Layout
+
+```
+linux/
+  ubuntu/                # Ubuntu desktop / server / endpoint scripts
+    application-management/   nodejs
+    container-runtime/        rootless-docker
+    power-management/         no-suspend
+    storage-optimization/     usb-boot
+    system-configuration/     cgroups-v1, sh-to-bash
+  openwrt/               # OpenWrt 21.02+ and GL.iNet firmware
+    network-security/         wireguard-ipv4-only
+macos/
+  application-management/     homebrew, plex-media-server, sublime-text
+```
+
+### Conventions
+
+| Aspect | Rule |
+|---|---|
+| Path layout | `<os>/<distribution-or-category>/<area>/<target>/<action>-<target>.sh` |
+| Shell | `#!/bin/bash` on Linux/macOS; POSIX `sh` (BusyBox `ash`) on OpenWrt. |
+| Privilege | Require `EUID 0`; refuse to run otherwise. |
+| Logging | Tee stdout+stderr to `/var/log/<script>.log` and the console. |
+| Idempotency | Re-running an `install` / `apply` is always safe. |
+| Modes (where supported) | `apply` (default) and `--check` (read-only audit). Exit `0` on PASS, `2` on drift, `1` on error. |
+| Backups | Configuration-touching scripts snapshot the affected files into a timestamped backup directory before mutating them. |
+
+### Adding a new script
+
+1. Create the folder `<os>/<distribution>/<category>/<target>/`.
+2. Add `<action>-<target>.sh` (typically `install-<target>.sh` or
+   `configure-<target>.sh`). Copy the header / mode-handling / logging
+   pattern from any existing sibling script.
+3. Add a `README.md` covering: what it does, modes, usage (manual +
+   managed deployment), idempotency, verification, reverting, and any
+   security notes.
+4. Update the parent category `README.md` table so the new target is
+   discoverable.
+
+`shellcheck` runs against every shell script via the `actionlint` job
+in [.github/workflows/lint.yml](.github/workflows/lint.yml) (the
+`raven-actions/actionlint` action invokes `shellcheck` on `run:` blocks
+and adjacent shell files). Keep new scripts shellcheck-clean.
 
 ---
 
@@ -146,6 +492,19 @@ jobs:
 | `readme_filepath` | string | `./README.md` | Path to the README uploaded as the Docker Hub full description. |
 | `short_description` | string | `''` | Docker Hub short description (max 100 chars). Empty leaves the existing one untouched. |
 | `enable_url_completion` | boolean | `true` | Convert relative URLs in the README to absolute GitHub URLs. |
+| `enable_scout` | boolean | `true` | Run Docker Scout against the image (PR comment on PRs, SARIF upload on pushes). See **Docker Scout** below. |
+| `scout_command` | string | `cves` | Scout command, or comma-separated list (`quickview`, `cves`, `compare`, `recommendations`, `sbom`, `environment`). |
+| `scout_severities` | string | `critical,high` | Severities to keep. |
+| `scout_only_fixed` | boolean | `false` | Filter to CVEs that have a fix available. |
+| `scout_ignore_base` | boolean | `false` | Ignore vulnerabilities inherited from the base image (`cves` only). |
+| `scout_ignore_unchanged` | boolean | `true` | Filter out unchanged packages (`compare` only). |
+| `scout_to` / `scout_to_env` / `scout_to_latest` / `scout_organization` | mixed | `''` / `''` / `false` / `''` | `compare`-mode targets. Mutually exclusive (validated). |
+| `scout_record_environment` | string | `''` | Publish-mode only: when set, also run `environment` to record the image into this Scout environment (requires `scout_organization`). |
+| `scout_sarif_upload` | boolean | `true` | Publish-mode only: upload the SARIF report to GitHub code scanning. |
+| `scout_write_comment` | boolean | `true` | PR-mode only: post the Scout output as a PR comment. |
+| `scout_keep_previous_comments` | boolean | `false` | PR-mode only: keep previous Scout comments hidden instead of updating one in place. |
+| `scout_exit_code` | boolean | `false` | Fail the Scout job on findings. |
+| `scout_exit_on` | string | `''` | `compare`-mode worsening conditions to fail on (`vulnerability,policy`). |
 
 ### Secrets
 
@@ -168,10 +527,57 @@ jobs:
 See [Runner resolution](#runner-resolution) for the global model. In this
 workflow specifically:
 
-- **setup**, **manifest**, **update-description** → `vars.DEFAULT_RUNNER`
-  (fallback `ubuntu-latest`).
-- Per-arch **build** matrix → `vars.RUNNER_X64` / `vars.RUNNER_ARM64`
-  (fallbacks `ubuntu-latest` / `ubuntu-latest-arm64`).
+- **setup**, **manifest**, **update-description**, **scout-published** →
+  `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`).
+- Per-arch **build** matrix and **scout-pr** → `vars.RUNNER_X64` /
+  `vars.RUNNER_ARM64` (fallbacks `ubuntu-latest` / `ubuntu-latest-arm64`).
+  `scout-pr` always runs on x64 — Scout indexes one architecture per
+  scan, and the matrix already covers arm64 on its own runner.
+
+### Docker Scout
+
+When `enable_scout: true` (the default), the workflow runs
+[`docker/scout-action`](https://github.com/docker/scout-action) against
+the image. The behaviour differs by trigger:
+
+- **Pull request / non-publish run** — a parallel `scout-pr` job builds
+  the amd64 image with `outputs: type=docker` (reusing the matrix's
+  `cache-from: type=gha,scope=amd64` for a near-instant load) and runs
+  Scout against the locally-loaded image. Findings are posted as a PR
+  comment via `docker/scout-action`'s built-in commenter. SARIF upload
+  is **disabled** in PR mode because GitHub code scanning rejects SARIF
+  uploads from forked PRs.
+- **Publish run** — a `scout-published` job runs after the multi-arch
+  manifest is pushed. It scans the registry image at the resolved
+  version tag, and (when `scout_sarif_upload: true`, the default)
+  uploads a SARIF report to the GitHub code-scanning alerts surface so
+  CVEs in shipped artifacts are visible in the **Security** tab.
+- **Recording for later `compare`** — set
+  `scout_record_environment: production` (and `scout_organization`)
+  on a publish run to record the image into a Scout environment.
+  Subsequent PR builds can then `compare` against `to_env: production`
+  to show only newly-introduced CVEs.
+
+Scout uses the existing `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`
+secrets — no extra credentials are required. The Scout API itself is
+free for public Docker Hub repos and included in paid Hub plans for
+private ones.
+
+To opt out for a single repo, pass `enable_scout: false`. To opt out
+just on PRs, leave `enable_scout: true` and set
+`scout_write_comment: false` and `scout_sarif_upload: false`.
+
+For ad-hoc / scheduled scans of an image not produced by this
+workflow, use the standalone
+[`docker-scout-scan.yml`](.github/workflows/docker-scout-scan.yml)
+reusable workflow.
+
+#### Permissions
+
+When `enable_scout: true` the caller's job needs the standard
+`contents: read` plus, for the PR scan, `pull-requests: write`. The
+publish-time SARIF upload elevates `security-events: write` inside
+the called workflow itself — callers do not need to grant it.
 
 ---
 
@@ -294,6 +700,115 @@ for full details.
 
 ---
 
+## `docker-scout-scan.yml` — reusable workflow
+
+Standalone Docker Scout scan of an already-published image. Use it
+when the build-time scan in [`docker-build-push.yml`](.github/workflows/docker-build-push.yml)
+isn't enough — most commonly:
+
+- **Scheduled re-scans** of `:latest` (or any other long-lived tag) so
+  newly disclosed CVEs surface in GitHub code scanning even when no
+  commits land. See [Quick start](#quick-start--caller-wiring) for a
+  copy-paste daily-cron caller.
+- **Out-of-band** scans of an image not built by this org's pipeline
+  (e.g. a third-party base image you depend on).
+- Recording an image into a Scout `environment` from a deploy job
+  that lives outside `docker-build-push.yml`.
+
+This workflow does **not** build anything — for build → push → scan
+wire-up, use `docker-build-push.yml`, which embeds the same scan
+inline so the PR comment renders against the exact image the matrix
+build produced.
+
+### Minimal usage
+
+```yaml
+jobs:
+  scout:
+    permissions:
+      contents: read
+      security-events: write   # SARIF upload
+      pull-requests: write     # PR comment (if invoked from a PR)
+    uses: blackoutsecure/platform-automation/.github/workflows/docker-scout-scan.yml@main
+    with:
+      image: docker.io/acme/widget:latest
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+### Inputs (selected — see the workflow file for the full list)
+
+- `image` (**required**) — image reference to scan. Accepts an
+  optional Scout prefix (`registry://`, `local://`, `oci-dir://`,
+  `archive://`, `fs://`, `sbom://`).
+- `command` — `quickview`, `cves` (default), `compare`,
+  `recommendations`, `sbom`, or `environment`. Comma-separate to
+  chain commands.
+- `severities` — comma-separated severities to keep. Default
+  `critical,high`.
+- `only_fixed`, `only_unfixed`, `only_cisa_kev`, `ignore_base`,
+  `ignore_unchanged` — standard Scout filters.
+- `to`, `to_env`, `to_latest`, `organization` — `compare`-mode
+  targets. Mutually exclusive (validated in preflight).
+- `environment`, `organization` — `environment`-mode targets.
+- `sarif`, `sarif_upload`, `sarif_category` — control SARIF
+  generation and upload to GitHub code scanning.
+- `summary`, `write_comment`, `keep_previous_comments` — control how
+  results are surfaced.
+- `exit_code`, `exit_on` — control whether the job fails on findings.
+- `registry` — non–Docker Hub registry to additionally log in to
+  (paired with `secrets.REGISTRY_USERNAME` / `REGISTRY_PASSWORD`).
+- `runs_on`, `timeout_minutes` — runner / timeout overrides.
+
+### Required secrets
+
+- `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` — Scout's vulnerability API
+  is gated behind Docker Hub auth even for local image scans.
+
+### Permissions
+
+The caller job needs:
+
+- `contents: read`
+- `security-events: write` if `sarif_upload: true` (default).
+- `pull-requests: write` if `write_comment: true` (default) and the
+  workflow is invoked from a PR.
+
+---
+
+## `docker-scout-scan` — composite action
+
+Direct wrapper around
+[`docker/scout-action`](https://github.com/docker/scout-action) used
+by both `docker-scout-scan.yml` and the embedded scan jobs in
+`docker-build-push.yml`. Reach for it directly when you need to weave
+Scout into a custom job topology — e.g. scanning an image you've
+already built and loaded earlier in the same job, or running multiple
+Scout commands sharing a single login.
+
+```yaml
+- uses: blackoutsecure/platform-automation/.github/actions/shared/docker-scout-scan@main
+  with:
+    image: local://acme/widget:scan-${{ github.sha }}
+    command: cves
+    severities: critical,high
+    sarif_file: scout.sarif.json   # empty disables SARIF
+    dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+    dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+The action runs preflight validation (allow-list checks for
+`command` / `severities` / `exit_on`, slug regex on `environment` /
+`organization`, mutex check between `to` / `to_env` / `to_latest`,
+path-traversal check on `sarif_file`) before invoking Scout, so
+malformed inputs fail fast with an actionable error.
+
+See [action.yml](.github/actions/shared/docker-scout-scan/action.yml)
+for the full input/output surface.
+
+---
+
 ## `resolve-upstream-version` — composite action
 
 Shallow-clone an upstream git repo at a branch, tag, or commit and emit
@@ -348,6 +863,18 @@ for full details.
 Resolve a block version (same logic as the Docker workflow), optionally
 sync the version back into `balena.yml`, and publish to balenaCloud via
 [`balena-io/deploy-to-balena-action`](https://github.com/balena-io/deploy-to-balena-action).
+
+> **Why no Docker Scout integration here?** The Balena workflows
+> (`balena-block-publish.yml` and `balena-fleet-deploy.yml`) build
+> images **inside balenaCloud's builders**, not on the GitHub runner.
+> No Docker artifact ever lands on the runner for Scout to scan. The
+> recommended pattern is to publish the same image to Docker Hub via
+> [`docker-build-push.yml`](.github/workflows/docker-build-push.yml)
+> first (Scout runs there by default), then call the Balena workflow
+> as the second stage of [`release.yml`](.github/workflows/release.yml).
+> If you only ship via balenaCloud, schedule a periodic
+> [`docker-scout-scan.yml`](.github/workflows/docker-scout-scan.yml)
+> against the published Hub image to keep code-scanning alerts current.
 
 ### Required configuration on the caller repo
 
@@ -683,8 +1210,11 @@ jobs:
       BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
 ```
 
-A drop-in starter is provided at
-[.github/workflow-templates/release.yml](.github/workflow-templates/release.yml).
+A drop-in caller is shown in [Quick start](#quick-start--caller-wiring)
+below. To wire the same pipeline to an upstream-tracked schedule
+instead of a tag push, use the
+[`release-from-upstream.yml`](#release-from-upstreamyml--reusable-meta-workflow)
+meta-workflow.
 
 ### Stage skipping semantics
 
@@ -702,6 +1232,12 @@ the authoritative list. High-level groups:
 - **Docker:** `image_name`, `dockerhub_namespace`, `docker_extra_tags`,
   `docker_short_description`, `docker_latest`, `docker_multi_arch`,
   `docker_update_description`
+- **Docker Scout** (forwarded to `docker-build-push.yml`):
+  `docker_enable_scout` (default `true`), `docker_scout_command`,
+  `docker_scout_severities`, `docker_scout_only_fixed`,
+  `docker_scout_ignore_base`, `docker_scout_organization`,
+  `docker_scout_record_environment`, `docker_scout_sarif_upload`,
+  `docker_scout_exit_code`
 - **Balena:** `block_name`, `balena_namespace`, `balena_sync_yml`,
   `balena_draft`
 - **GitHub Release:** `release_template_path`, `release_extra_context`,
@@ -723,6 +1259,101 @@ the authoritative list. High-level groups:
 | `version` | Resolved version (tag with leading `v` stripped). |
 | `image` | Fully qualified Docker image reference (when the docker stage ran). |
 | `release_url` | GitHub Release HTML URL (when the github-release stage ran). |
+
+---
+
+## `release-from-upstream.yml` — reusable **meta-workflow**
+
+Schedule-driven "follow upstream" loop. Composes two reusable
+workflows in this repo into one end-to-end pipeline so consumer repos
+that wrap an upstream project can drive everything from a single
+~25-line caller workflow:
+
+1. [`monitor-upstream-release.yml`](#monitor-upstream-releaseyml--reusable-workflow) —
+   poll the upstream `latest` release, commit a tracking JSON file,
+   emit a `changed` flag.
+2. [`release.yml`](#releaseyml--reusable-meta-workflow) — when
+   upstream changed, run the full Docker → Balena → GitHub Release
+   pipeline against `v<upstream_version>`.
+
+The two stages are wired together with a job-level `needs:` (no
+`workflow_dispatch` hop, so no `DISPATCH_TOKEN` PAT is required).
+All [`release.yml`](#releaseyml--reusable-meta-workflow) inputs that
+matter for the upstream-tracked use case are surfaced as inputs on
+this workflow so consumers don't need to fork it to tweak Scout
+settings, stage toggles, release templates, etc.
+
+### Tag and version resolution
+
+The release tag is always `v<upstream_version>` — i.e. the upstream
+version with `v` stripped (the monitor's `strip_v_prefix: true`
+default), then re-prefixed by this workflow. Upstream tags must be
+SemVer (`X.Y.Z[-suffix]`); the release stage rejects calendar-versioned
+or otherwise non-SemVer tags.
+
+### Caller example
+
+See [Quick start §2](#2-upstream-tracked-release-poll-upstream-then-run-the-same-pipeline)
+for the canonical caller. The minimum viable shape is:
+
+```yaml
+jobs:
+  release:
+    permissions:
+      contents: write
+    uses: blackoutsecure/platform-automation/.github/workflows/release-from-upstream.yml@main
+    with:
+      upstream_repo:       wiedehopf/readsb
+      image_name:          ${{ vars.IMAGE_NAME }}
+      dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
+      block_name:          ${{ vars.BALENA_BLOCK_NAME }}
+      balena_namespace:    ${{ vars.BALENA_NAMESPACE }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
+```
+
+### Inputs
+
+See [.github/workflows/release-from-upstream.yml](.github/workflows/release-from-upstream.yml)
+for the authoritative list. High-level groups:
+
+- **Monitor stage:** `upstream_repo`, `track_file`, `force_release`
+- **Stage toggles:** `docker`, `balena`, `github_release` (forwarded)
+- **Docker / Scout / Balena / GitHub Release:** every `release.yml`
+  input is proxied through with the same name so it works as a
+  drop-in replacement for `release.yml` callers that want
+  upstream-driven scheduling instead of tag-driven.
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `changed` | `true` when the upstream version differed from the tracked file. |
+| `upstream_version` | Latest upstream version (with `v` stripped). |
+| `upstream_tag` | Raw upstream tag name. |
+| `upstream_commit` | Resolved upstream commit SHA at the release tag. |
+| `tag_name` | Resolved release tag (with `v` prefix). |
+| `version` | Resolved version (tag with leading `v` stripped). |
+| `image` | Fully qualified Docker image reference (when the docker stage ran). |
+| `release_url` | GitHub Release HTML URL (when the github-release stage ran). |
+
+### Release-notes integration
+
+The monitor's resolved upstream metadata is appended to the release
+template's `extra_context` automatically:
+
+```text
+UPSTREAM_REPO=<owner/repo>
+UPSTREAM_TAG=<raw upstream tag>
+UPSTREAM_COMMIT=<resolved commit SHA>
+```
+
+These are available to the release-notes template as
+`{{ UPSTREAM_REPO }}`, `{{ UPSTREAM_TAG }}`, and
+`{{ UPSTREAM_COMMIT }}`. Caller-supplied `release_extra_context:` is
+appended after them and can override them or add additional keys.
 
 ---
 
@@ -957,6 +1588,166 @@ for the full input/output list.
 
 ---
 
+## Best practices — design principles for this repo
+
+These are the principles the workflows here follow, and the rationale
+for each. Read this section before extending the repo, before adding
+a new caller workflow in a downstream repo, or before debating
+whether a new behaviour belongs in the orchestrator vs a stage.
+
+### 1. One reusable workflow per task; one orchestrator per pipeline
+
+Each `*-build-push.yml` / `*-publish.yml` / `github-release.yml` does
+**one** thing and exposes a clean input/output contract. The
+*pipelines* — [`release.yml`](#releaseyml--reusable-meta-workflow) and
+[`release-from-upstream.yml`](#release-from-upstreamyml--reusable-meta-workflow) —
+are thin meta-workflows that compose those single-purpose stages with
+job-level `needs:` and forward inputs/secrets through. The same stage
+workflow is reusable on its own (e.g. a Docker-only repo calls
+`docker-build-push.yml` directly without `release.yml`).
+
+This keeps the blast radius of any change small (a tweak to the
+Balena stage doesn't touch the Docker stage), and means the
+orchestrator never re-implements stage logic — it just wires existing
+contracts together.
+
+### 2. Caller workflows should be ≤ ~30 lines
+
+Every consumer-repo workflow under `.github/workflows/` should be a
+thin caller that does three things and three things only:
+
+1. Declare the trigger (`on:` block).
+2. Read repo-scoped `vars:` and `secrets:` and forward them.
+3. Call exactly one reusable workflow from this repo.
+
+If you find yourself writing `steps:` in a consumer repo for any of
+the supported pipelines (Docker / Balena / GitHub Release / Cloudflare
+Pages / upstream-tracked release), the missing capability belongs in
+this repo's reusable workflow — not in the caller. Consumer repos
+should never need editing when this repo's pipeline gains a new
+stage, a new Scout knob, or a new SDK release; everything they call
+into is by name (`vars.IMAGE_NAME`, `secrets.DOCKERHUB_TOKEN`).
+
+### 3. No starter-workflow templates duplicating reusable contracts
+
+This repo deliberately does **not** ship a `.github/workflow-templates/`
+directory. The reasons:
+
+- GitHub's "Suggested workflows" picker only auto-populates from
+  `<org>/.github/workflow-templates/` (a *separate* repo). Templates
+  shipped in this repo never appear in the picker anyway.
+- Maintaining starter files that are thin wrappers around the
+  reusable workflows means **two** sources of truth for every input
+  contract. They drift (renamed inputs, missing toggles, stale
+  comments) the moment the underlying workflow evolves.
+- The [Quick start](#quick-start--caller-wiring) section above is the
+  reference. It's discovered by the same readers and updated in the
+  same PR as the workflow it documents — no second source to keep in
+  sync.
+
+If the picker UX is desired, the [Quick start](#quick-start--caller-wiring)
+snippets can be mirrored into `<org>/.github/workflow-templates/`
+once. Picker templates are setup boilerplate, not the long-term
+contract.
+
+### 4. Trigger logic stays in the caller; orchestrators are trigger-agnostic
+
+`release.yml` accepts an explicit `tag_name:` and falls back to
+inferring it from the calling event — but it doesn't *bind* itself to
+any particular trigger. This lets the same pipeline be driven by a
+tag push, a `release: published` event, a manual dispatch, or another
+reusable workflow's `needs:` (which is exactly how
+`release-from-upstream.yml` calls it).
+
+When adding a new pipeline, follow the same split:
+
+- **Trigger workflows** (cron, tag, dispatch) live in *consumer*
+  repos. They are tiny and rarely change.
+- **Orchestrator workflows** here accept the resolved tag/version as
+  an input. They never look at `github.event_name` to decide *what*
+  to do — only as a fallback to fill in inputs the caller didn't pass.
+
+### 5. Stage toggles, not stage forks
+
+Every orchestrator stage has an on/off boolean (`docker: true|false`,
+`balena: true|false`, `github_release: true|false`). One pipeline
+file powers Docker-only releases, Balena-only releases, or any
+combination — there is no `release-docker-only.yml` /
+`release-balena-only.yml` fork. Adding the next variant is a
+boolean, not a copy.
+
+### 6. `vars:` for identity, `secrets:` for access
+
+- **`vars:`** — what you're publishing (image name, namespace,
+  block name, upstream repo). Set once at the **org** level so every
+  consumer repo inherits it; override at the repo level when a
+  product differs. Public information that ends up in URLs anyway
+  (Docker Hub namespace, Cloudflare account ID) belongs here, not in
+  `secrets:`.
+- **`secrets:`** — credentials that grant access (`DOCKERHUB_TOKEN`,
+  `BALENA_API_TOKEN`, `CLOUDFLARE_API_TOKEN`).
+- **Runner labels** (`vars.DEFAULT_RUNNER`, `vars.RUNNER_X64`,
+  `vars.RUNNER_ARM64`) are also `vars` so self-hosted-runner targeting
+  is an org-level decision — see [Runner resolution](#runner-resolution).
+
+### 7. Concurrency is set at the orchestrator, not the stage
+
+Each orchestrator (`release.yml`, `release-from-upstream.yml`,
+`monitor-upstream-release.yml`) declares its own `concurrency:` group
+and **never** sets `cancel-in-progress: true` for publish-side runs.
+A partial release can leave the registry / fleet in a half-published
+state that the next reconciler run cleans up — cancelling mid-flight
+is strictly worse than serialising. Stage workflows inherit the
+caller's concurrency context, so consumers don't need to think about
+it.
+
+CI-style local jobs (`lint.yml`) are the only place
+`cancel-in-progress: true` is appropriate.
+
+### 8. Pin third-party actions by SHA; first-party calls use `@main`
+
+- **Third-party actions** (`docker/login-action`,
+  `softprops/action-gh-release`, `cloudflare/wrangler-action`, …) are
+  SHA-pinned with the resolved tag in a trailing comment. Dependabot
+  rolls them weekly. This guards against tag-mutation supply-chain
+  attacks.
+- **Calls between workflows in *this* repo** use `@main`. The repo
+  is public, lint-gated, and the meta-workflows must always pick up
+  fixes immediately. Consumers that need a frozen release surface
+  should pin their `uses:` to a major-version tag once one is
+  published (see below).
+
+### 9. Versioning consumer pins (planned)
+
+Today every consumer pins `@main`. To give product repos a stable
+release surface without losing the "edit-once, propagate-everywhere"
+property, the longer-term plan is:
+
+- Cut a `v1` major-version branch / tag on this repo when the input
+  contracts stabilise.
+- Consumers pin `@v1`. Non-breaking changes land on `main` and are
+  fast-forwarded onto `v1` weekly; breaking changes ship behind a
+  `v2` and consumers migrate explicitly.
+- Critical fixes are back-ported to `v1` immediately.
+
+Until then, treat `@main` as the contract and rely on lint + the
+hardening practices in [SECURITY.md](SECURITY.md) to catch
+regressions before they land.
+
+### 10. Renaming workflows is breaking — don't
+
+Workflow filenames (e.g. `release.yml`) are part of the public
+contract: every consumer repo `uses:` the workflow by path. Renames
+are silently breaking — there is no redirect mechanism, and consumer
+repos won't notice until their next release. Prefer adding a new
+workflow alongside the old one (with the new behaviour) and
+deprecating the old in the README, rather than renaming in place.
+
+This is why `release.yml` keeps its name even though
+`release-pipeline.yml` would be marginally more descriptive.
+
+---
+
 ## Security notes
 
 This repository is public and these workflows run in downstream repos
@@ -994,3 +1785,9 @@ the version in a trailing comment, e.g.:
 bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
 ./actionlint -color
 ```
+
+---
+
+## Copyright
+
+Copyright (c) 2026 [Blackout Secure](https://blackoutsecure.app). Licensed under the Apache 2.0 License. See [LICENSE](LICENSE) for the full terms.

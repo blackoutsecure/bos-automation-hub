@@ -1,0 +1,408 @@
+name: Run Docker Scout
+description: >-
+  Run Docker Scout against an image and (optionally) upload the SARIF
+  result to GitHub code scanning. Thin wrapper around
+  `docker/scout-action` that adds preflight validation (single-line
+  credentials, allow-listed commands, normalised severities,
+  validated environment / organization slugs) so failures surface with
+  a clear message instead of a generic Scout backend error.
+
+  The caller is responsible for ensuring the image is reachable —
+  for `local://` / loaded-store scans the image must already be in
+  the runner's docker daemon, and for registry pulls the runner must
+  have credentials for that registry.
+
+inputs:
+  image:
+    description: >-
+      Image to scan. May include a Scout prefix (`image://`,
+      `local://`, `registry://`, `oci-dir://`, `archive://`,
+      `fs://`, `sbom://`). When empty Scout falls back to the most
+      recently built image on the runner.
+    required: false
+    default: ''
+  command:
+    description: >-
+      Single Scout command, or a comma-separated list executed in
+      order. Allowed: `quickview`, `cves`, `compare`,
+      `recommendations`, `sbom`, `environment`. The `attestation-add`
+      command is intentionally not exposed — use `docker/scout-action`
+      directly for that workflow.
+    required: false
+    default: cves
+  to:
+    description: >-
+      `compare` only: image reference to compare *against* (e.g.
+      `docker.io/acme/widget:latest`). Mutually exclusive with
+      `to_env` / `to_latest`.
+    required: false
+    default: ''
+  to_env:
+    description: >-
+      `compare` only: name of a Docker Scout environment to compare
+      against (e.g. `production`). Requires `organization`. Mutually
+      exclusive with `to` / `to_latest`.
+    required: false
+    default: ''
+  to_latest:
+    description: >-
+      `compare` only: compare against the latest indexed image for
+      the same repository. Requires `organization`. Mutually
+      exclusive with `to` / `to_env`.
+    required: false
+    default: 'false'
+  environment:
+    description: >-
+      `environment` command only: name of the environment to record
+      the image into (e.g. `production`).
+    required: false
+    default: ''
+  organization:
+    description: >-
+      Docker Scout organization (Docker Hub namespace). Required
+      when comparing against an environment / `to_latest` and when
+      recording an image to an environment.
+    required: false
+    default: ''
+  platform:
+    description: 'Platform of the image to analyze (e.g. `linux/amd64`).'
+    required: false
+    default: ''
+  severities:
+    description: >-
+      Comma-separated CVE severities to keep. Allowed values:
+      `critical`, `high`, `medium`, `low`, `unspecified`. Empty
+      keeps every severity.
+    required: false
+    default: 'critical,high'
+  only_fixed:
+    description: 'Filter to CVEs that have a fix available.'
+    required: false
+    default: 'false'
+  only_unfixed:
+    description: 'Filter to CVEs that have no fix available.'
+    required: false
+    default: 'false'
+  only_cisa_kev:
+    description: 'Filter to CVEs in the CISA Known Exploited Vulnerabilities catalogue.'
+    required: false
+    default: 'false'
+  ignore_base:
+    description: 'Ignore vulnerabilities inherited from the base image (`cves` only).'
+    required: false
+    default: 'false'
+  ignore_unchanged:
+    description: 'Filter out unchanged packages (`compare` only).'
+    required: false
+    default: 'true'
+  exit_code:
+    description: 'Exit non-zero (2) if Scout finds matching vulnerabilities / changes.'
+    required: false
+    default: 'false'
+  exit_on:
+    description: >-
+      `compare` only: comma-separated conditions that fail the step
+      when worsened. Allowed values: `vulnerability`, `policy`. Empty
+      disables.
+    required: false
+    default: ''
+  sarif_file:
+    description: >-
+      Path to write a SARIF report to (`cves` only). Empty disables
+      SARIF output. When set and `sarif_upload: true`, the file is
+      uploaded to GitHub code scanning.
+    required: false
+    default: ''
+  sarif_upload:
+    description: >-
+      Upload `sarif_file` to GitHub code scanning. No-op when
+      `sarif_file` is empty. Requires `security-events: write` on the
+      caller job.
+    required: false
+    default: 'true'
+  sarif_category:
+    description: 'SARIF category — disambiguates parallel uploads on the same ref.'
+    required: false
+    default: 'docker-scout'
+  summary:
+    description: 'Render the Scout output as a job summary.'
+    required: false
+    default: 'true'
+  write_comment:
+    description: >-
+      Write the Scout output as a PR comment when the trigger is
+      `pull_request`. Requires `pull-requests: write`.
+    required: false
+    default: 'true'
+  keep_previous_comments:
+    description: 'Keep previous Scout comments hidden instead of updating one in place.'
+    required: false
+    default: 'false'
+  github_token:
+    description: 'GitHub token used to publish the PR comment. Defaults to `github.token`.'
+    required: false
+    default: ${{ github.token }}
+  dockerhub_username:
+    description: >-
+      Docker Hub username (Scout requires Hub auth even for local
+      image scans because it queries the Scout vulnerability API).
+    required: true
+  dockerhub_token:
+    description: 'Docker Hub access token (PAT, not the password).'
+    required: true
+  registry_username:
+    description: >-
+      Optional username for a non–Docker Hub registry that hosts
+      `image` / `to`. Empty skips the extra login.
+    required: false
+    default: ''
+  registry_password:
+    description: 'Optional password/PAT for `registry_username`.'
+    required: false
+    default: ''
+  registry:
+    description: >-
+      Hostname of the non–Docker Hub registry to log in to. Required
+      when `registry_username` is set.
+    required: false
+    default: ''
+  skip_login:
+    description: >-
+      Skip the Docker Hub `docker/login-action` step. Set to `true`
+      when the caller has already logged in earlier in the same job.
+    required: false
+    default: 'false'
+
+outputs:
+  sarif_file:
+    description: 'Path to the SARIF file written by Scout (empty when SARIF was disabled).'
+    value: ${{ inputs.sarif_file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Preflight validation
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        COMMAND: ${{ inputs.command }}
+        TO: ${{ inputs.to }}
+        TO_ENV: ${{ inputs.to_env }}
+        TO_LATEST: ${{ inputs.to_latest }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        ORGANIZATION: ${{ inputs.organization }}
+        PLATFORM: ${{ inputs.platform }}
+        SEVERITIES: ${{ inputs.severities }}
+        ONLY_FIXED: ${{ inputs.only_fixed }}
+        ONLY_UNFIXED: ${{ inputs.only_unfixed }}
+        ONLY_CISA_KEV: ${{ inputs.only_cisa_kev }}
+        IGNORE_BASE: ${{ inputs.ignore_base }}
+        IGNORE_UNCHANGED: ${{ inputs.ignore_unchanged }}
+        EXIT_CODE: ${{ inputs.exit_code }}
+        EXIT_ON: ${{ inputs.exit_on }}
+        SARIF_FILE: ${{ inputs.sarif_file }}
+        SARIF_UPLOAD: ${{ inputs.sarif_upload }}
+        SARIF_CATEGORY: ${{ inputs.sarif_category }}
+        SUMMARY: ${{ inputs.summary }}
+        WRITE_COMMENT: ${{ inputs.write_comment }}
+        KEEP_PREVIOUS_COMMENTS: ${{ inputs.keep_previous_comments }}
+        SKIP_LOGIN: ${{ inputs.skip_login }}
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub_username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub_token }}
+        REGISTRY: ${{ inputs.registry }}
+        REGISTRY_USERNAME: ${{ inputs.registry_username }}
+        REGISTRY_PASSWORD: ${{ inputs.registry_password }}
+      run: |
+        set -euo pipefail
+        ERR=0
+        fail() { echo "ERROR: $*" >&2; ERR=1; }
+
+        # A stray newline silently truncates GITHUB_OUTPUT for any
+        # downstream job and breaks Scout's argv quoting.
+        check_singleline() {
+          local name="$1" val="$2"
+          [ -n "${val}" ] || { fail "${name} is missing"; return; }
+          case "${val}" in
+            *[$'\n\r\t ']*) fail "${name} contains whitespace/newlines" ;;
+          esac
+        }
+
+        check_bool() {
+          local name="$1" val="$2"
+          case "${val}" in
+            true|false) ;;
+            *) fail "${name} must be 'true' or 'false' (got '${val}')" ;;
+          esac
+        }
+
+        check_singleline "input 'dockerhub_username'" "${DOCKERHUB_USERNAME}"
+        check_singleline "input 'dockerhub_token'"    "${DOCKERHUB_TOKEN}"
+
+        # ---- command list ---------------------------------------------------
+        ALLOWED_CMDS="quickview cves compare recommendations sbom environment"
+        [ -n "${COMMAND}" ] || fail "input 'command' is empty"
+        # Scout accepts a comma-separated command list executed in order.
+        IFS=',' read -r -a _cmds <<< "${COMMAND}"
+        WANTS_COMPARE=0
+        WANTS_ENVIRONMENT=0
+        for raw in "${_cmds[@]}"; do
+          c="$(printf '%s' "${raw}" | tr -d '[:space:]')"
+          [ -n "${c}" ] || { fail "input 'command' has an empty list entry"; continue; }
+          case " ${ALLOWED_CMDS} " in
+            *" ${c} "*) ;;
+            *) fail "input 'command' entry '${c}' is not allowed (allowed: ${ALLOWED_CMDS})" ;;
+          esac
+          [ "${c}" = "compare" ] && WANTS_COMPARE=1
+          [ "${c}" = "environment" ] && WANTS_ENVIRONMENT=1
+        done
+
+        # ---- compare target -------------------------------------------------
+        if [ "${WANTS_COMPARE}" -eq 1 ]; then
+          set_count=0
+          [ -n "${TO}" ]      && set_count=$((set_count + 1))
+          [ -n "${TO_ENV}" ]  && set_count=$((set_count + 1))
+          [ "${TO_LATEST}" = "true" ] && set_count=$((set_count + 1))
+          if [ "${set_count}" -ne 1 ]; then
+            fail "compare requires exactly one of 'to', 'to_env', or 'to_latest: true' (got ${set_count})"
+          fi
+          if { [ -n "${TO_ENV}" ] || [ "${TO_LATEST}" = "true" ]; } && [ -z "${ORGANIZATION}" ]; then
+            fail "comparing against an environment / latest requires 'organization'"
+          fi
+        fi
+
+        # ---- environment command --------------------------------------------
+        if [ "${WANTS_ENVIRONMENT}" -eq 1 ]; then
+          [ -n "${ENVIRONMENT}" ]  || fail "command 'environment' requires input 'environment'"
+          [ -n "${ORGANIZATION}" ] || fail "command 'environment' requires input 'organization'"
+        fi
+
+        # ---- environment / organization slug shape --------------------------
+        SLUG_RE='^[a-z0-9]+([._-][a-z0-9]+)*$'
+        if [ -n "${TO_ENV}" ]       && ! printf '%s' "${TO_ENV}"       | grep -Eq "${SLUG_RE}"; then fail "input 'to_env' is not a valid Scout environment name: '${TO_ENV}'"; fi
+        if [ -n "${ENVIRONMENT}" ]  && ! printf '%s' "${ENVIRONMENT}"  | grep -Eq "${SLUG_RE}"; then fail "input 'environment' is not a valid Scout environment name: '${ENVIRONMENT}'"; fi
+        if [ -n "${ORGANIZATION}" ] && ! printf '%s' "${ORGANIZATION}" | grep -Eq "${SLUG_RE}"; then fail "input 'organization' is not a valid Docker Hub namespace: '${ORGANIZATION}'"; fi
+
+        # ---- platform -------------------------------------------------------
+        if [ -n "${PLATFORM}" ] && ! printf '%s' "${PLATFORM}" | grep -Eq '^[a-z0-9]+(/[a-z0-9_]+){1,2}$'; then
+          fail "input 'platform' is not a valid platform string: '${PLATFORM}'"
+        fi
+
+        # ---- severities -----------------------------------------------------
+        if [ -n "${SEVERITIES}" ]; then
+          ALLOWED_SEV="critical high medium low unspecified"
+          IFS=',' read -r -a _sev <<< "${SEVERITIES}"
+          for raw in "${_sev[@]}"; do
+            s="$(printf '%s' "${raw}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+            [ -n "${s}" ] || { fail "input 'severities' has an empty list entry"; continue; }
+            case " ${ALLOWED_SEV} " in
+              *" ${s} "*) ;;
+              *) fail "input 'severities' entry '${s}' is not allowed (allowed: ${ALLOWED_SEV})" ;;
+            esac
+          done
+        fi
+
+        # ---- exit_on (compare only) -----------------------------------------
+        if [ -n "${EXIT_ON}" ]; then
+          ALLOWED_EXIT="vulnerability policy"
+          IFS=',' read -r -a _eo <<< "${EXIT_ON}"
+          for raw in "${_eo[@]}"; do
+            e="$(printf '%s' "${raw}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+            [ -n "${e}" ] || { fail "input 'exit_on' has an empty list entry"; continue; }
+            case " ${ALLOWED_EXIT} " in
+              *" ${e} "*) ;;
+              *) fail "input 'exit_on' entry '${e}' is not allowed (allowed: ${ALLOWED_EXIT})" ;;
+            esac
+          done
+        fi
+
+        # ---- boolean inputs -------------------------------------------------
+        check_bool "input 'only_fixed'"             "${ONLY_FIXED}"
+        check_bool "input 'only_unfixed'"           "${ONLY_UNFIXED}"
+        check_bool "input 'only_cisa_kev'"          "${ONLY_CISA_KEV}"
+        check_bool "input 'ignore_base'"            "${IGNORE_BASE}"
+        check_bool "input 'ignore_unchanged'"       "${IGNORE_UNCHANGED}"
+        check_bool "input 'exit_code'"              "${EXIT_CODE}"
+        check_bool "input 'sarif_upload'"           "${SARIF_UPLOAD}"
+        check_bool "input 'summary'"                "${SUMMARY}"
+        check_bool "input 'write_comment'"          "${WRITE_COMMENT}"
+        check_bool "input 'keep_previous_comments'" "${KEEP_PREVIOUS_COMMENTS}"
+        check_bool "input 'skip_login'"             "${SKIP_LOGIN}"
+        check_bool "input 'to_latest'"              "${TO_LATEST}"
+
+        # ---- sarif_file path ------------------------------------------------
+        if [ -n "${SARIF_FILE}" ]; then
+          case "${SARIF_FILE}" in
+            /*|*..*) fail "input 'sarif_file' must be a workspace-relative path: '${SARIF_FILE}'" ;;
+          esac
+        fi
+
+        # ---- sarif_category -------------------------------------------------
+        if [ -n "${SARIF_CATEGORY}" ] && ! printf '%s' "${SARIF_CATEGORY}" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+          fail "input 'sarif_category' must match ^[A-Za-z0-9._/-]+\$ (got '${SARIF_CATEGORY}')"
+        fi
+
+        # ---- non-Hub registry login -----------------------------------------
+        if [ -n "${REGISTRY_USERNAME}" ] || [ -n "${REGISTRY_PASSWORD}" ]; then
+          [ -n "${REGISTRY_USERNAME}" ]  || fail "input 'registry_username' is required when 'registry_password' is set"
+          [ -n "${REGISTRY_PASSWORD}" ]  || fail "input 'registry_password' is required when 'registry_username' is set"
+          [ -n "${REGISTRY}" ]           || fail "input 'registry' is required when 'registry_username' is set"
+          if [ -n "${REGISTRY}" ]; then
+            check_singleline "input 'registry'"          "${REGISTRY}"
+            check_singleline "input 'registry_username'" "${REGISTRY_USERNAME}"
+            check_singleline "input 'registry_password'" "${REGISTRY_PASSWORD}"
+          fi
+        fi
+
+        [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
+        echo "Preflight OK — running Docker Scout '${COMMAND}'."
+
+    - name: Docker Hub login
+      if: inputs.skip_login != 'true'
+      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      with:
+        username: ${{ inputs.dockerhub_username }}
+        password: ${{ inputs.dockerhub_token }}
+
+    - name: Login to non–Docker Hub registry
+      if: inputs.registry_username != ''
+      uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ inputs.registry_username }}
+        password: ${{ inputs.registry_password }}
+
+    - name: Run Docker Scout
+      id: scout
+      uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
+      with:
+        command: ${{ inputs.command }}
+        image: ${{ inputs.image }}
+        to: ${{ inputs.to }}
+        to-env: ${{ inputs.to_env }}
+        to-latest: ${{ inputs.to_latest }}
+        environment: ${{ inputs.environment }}
+        organization: ${{ inputs.organization }}
+        platform: ${{ inputs.platform }}
+        only-severities: ${{ inputs.severities }}
+        only-fixed: ${{ inputs.only_fixed }}
+        only-unfixed: ${{ inputs.only_unfixed }}
+        only-cisa-kev: ${{ inputs.only_cisa_kev }}
+        ignore-base: ${{ inputs.ignore_base }}
+        ignore-unchanged: ${{ inputs.ignore_unchanged }}
+        exit-code: ${{ inputs.exit_code }}
+        exit-on: ${{ inputs.exit_on }}
+        sarif-file: ${{ inputs.sarif_file }}
+        summary: ${{ inputs.summary }}
+        write-comment: ${{ inputs.write_comment }}
+        keep-previous-comments: ${{ inputs.keep_previous_comments }}
+        github-token: ${{ inputs.github_token }}
+
+    - name: Upload SARIF to code scanning
+      # Only when the caller asked for SARIF *and* opted into upload.
+      # codeql-action/upload-sarif requires `security-events: write`
+      # on the caller job — we cannot grant that from a composite.
+      if: ${{ inputs.sarif_file != '' && inputs.sarif_upload == 'true' && always() }}
+      uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+      with:
+        sarif_file: ${{ inputs.sarif_file }}
+        category: ${{ inputs.sarif_category }}

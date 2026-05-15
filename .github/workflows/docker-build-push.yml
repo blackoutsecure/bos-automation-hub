@@ -128,6 +128,119 @@ name: Docker Build and Push (reusable)
         required: false
         type: boolean
         default: true
+
+      # ---- Docker Scout ---------------------------------------------------
+      enable_scout:
+        description: >-
+          Run Docker Scout against the built image. On `pull_request`
+          triggers (and any other non-push run), the `amd64` image is
+          loaded into the runner's local store and scanned, with the
+          result posted as a PR comment. On a publishing run, the
+          published image is scanned in the registry and (when
+          `scout_sarif_upload: true`) the SARIF report is uploaded to
+          GitHub code scanning. Scout uses the existing
+          `DOCKERHUB_USERNAME`/`DOCKERHUB_TOKEN` secrets — no new
+          credentials are required.
+        required: false
+        type: boolean
+        default: true
+      scout_command:
+        description: >-
+          Single Scout command, or a comma-separated list executed in
+          order. Allowed: `quickview`, `cves`, `compare`,
+          `recommendations`, `sbom`, `environment`. Applied to both
+          the PR-time and publish-time scans.
+        required: false
+        type: string
+        default: cves
+      scout_severities:
+        description: 'Comma-separated severities to keep (`critical,high,medium,low,unspecified`).'
+        required: false
+        type: string
+        default: 'critical,high'
+      scout_only_fixed:
+        description: 'Filter to CVEs that have a fix available.'
+        required: false
+        type: boolean
+        default: false
+      scout_ignore_base:
+        description: 'Ignore vulnerabilities inherited from the base image (`cves` only).'
+        required: false
+        type: boolean
+        default: false
+      scout_ignore_unchanged:
+        description: 'Filter out unchanged packages (`compare` only).'
+        required: false
+        type: boolean
+        default: true
+      scout_to:
+        description: '`compare` only: explicit image reference to compare against.'
+        required: false
+        type: string
+        default: ''
+      scout_to_env:
+        description: >-
+          `compare` only: Scout environment to compare against (e.g.
+          `production`). Requires `scout_organization`. Mutually
+          exclusive with `scout_to` / `scout_to_latest`.
+        required: false
+        type: string
+        default: ''
+      scout_to_latest:
+        description: >-
+          `compare` only: compare against the latest indexed image
+          for the same repository. Requires `scout_organization`.
+          Mutually exclusive with `scout_to` / `scout_to_env`.
+        required: false
+        type: boolean
+        default: false
+      scout_organization:
+        description: >-
+          Docker Scout organization (Docker Hub namespace). Required
+          when `scout_to_env` / `scout_to_latest` are set, or when
+          `scout_record_environment` is non-empty.
+        required: false
+        type: string
+        default: ''
+      scout_record_environment:
+        description: >-
+          Publish-mode only: when set, run `docker scout environment`
+          to record the published image into this environment (e.g.
+          `production`) so later PR builds can `compare` against it.
+          Requires `scout_organization`.
+        required: false
+        type: string
+        default: ''
+      scout_sarif_upload:
+        description: >-
+          Publish-mode only: upload the Scout SARIF report to GitHub
+          code scanning so CVEs surface in the Security tab. The
+          publishing job opts into `security-events: write` itself —
+          the caller does not need to grant it.
+        required: false
+        type: boolean
+        default: true
+      scout_write_comment:
+        description: 'PR-mode only: post the Scout output as a PR comment.'
+        required: false
+        type: boolean
+        default: true
+      scout_keep_previous_comments:
+        description: 'PR-mode only: keep previous Scout comments hidden instead of updating one in place.'
+        required: false
+        type: boolean
+        default: false
+      scout_exit_code:
+        description: 'Exit non-zero (and fail the job) if Scout finds matching vulnerabilities / changes.'
+        required: false
+        type: boolean
+        default: false
+      scout_exit_on:
+        description: '`compare` only: comma-separated worsening conditions to fail on (`vulnerability,policy`).'
+        required: false
+        type: string
+        default: ''
+
       dockerhub_namespace:
         description: >-
           Docker Hub namespace (org or user) that owns the image. Prefer
@@ -593,4 +706,218 @@ jobs:
           readme_filepath: ${{ inputs.readme_filepath }}
           short_description: ${{ inputs.short_description }}
           enable_url_completion: ${{ inputs.enable_url_completion }}
+
+  # ---------------------------------------------------------------------------
+  # Docker Scout — PR / non-publish branch.
+  #
+  # Builds a single-arch (amd64) image with `outputs: type=docker` so it lands
+  # in the runner's local image store, then runs `docker/scout-action`. The
+  # build piggy-backs on the matrix's GHA cache, so this is effectively a
+  # local-load step rather than a second build.
+  #
+  # Runs in parallel to the matrix `build` job (no `needs: build`) so the PR
+  # author gets the Scout comment as fast as possible. A failed matrix build
+  # does not block the scan — Scout's output is still useful in that case.
+  # ---------------------------------------------------------------------------
+  scout-pr:
+    name: Docker Scout (PR)
+    needs: setup
+    if: needs.setup.outputs.push != 'true' && inputs.enable_scout
+    # The amd64 leg always runs on x64 hardware — Scout doesn't need
+    # the arm64 leg, so we hard-pin x64 here regardless of the matrix.
+    runs-on: ${{ vars.RUNNER_X64 || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      IMAGE_REF: ${{ needs.setup.outputs.image }}
+      # A throwaway tag scoped to this commit so Scout has something to
+      # name the local image by. Never pushed.
+      SCAN_TAG: scan-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Compose build args
+        id: args
+        env:
+          USER_BUILD_ARGS: ${{ inputs.build_args }}
+          VERSION_BUILD_ARG: ${{ inputs.version_build_arg }}
+          INJECT_OCI: ${{ inputs.inject_oci_build_args }}
+          IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
+          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
+          VCS_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          {
+            echo "build_args<<__EOF__"
+            [ -n "${VERSION_BUILD_ARG}" ] && echo "${VERSION_BUILD_ARG}=${IMAGE_VERSION}"
+            if [ "${INJECT_OCI}" = "true" ]; then
+              echo "BUILD_DATE=${BUILD_DATE}"
+              echo "VCS_REF=${GITHUB_SHA}"
+              echo "VCS_URL=${VCS_URL}"
+            fi
+            [ -n "${USER_BUILD_ARGS}" ] && printf '%s\n' "${USER_BUILD_ARGS}"
+            echo "__EOF__"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build amd64 and load locally
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ inputs.build_context }}
+          file: ${{ inputs.dockerfile }}
+          # Scout indexes a single architecture per scan; the matrix
+          # build covers arm64 on its own runner.
+          platforms: linux/amd64
+          pull: true
+          provenance: false
+          sbom: false
+          # Same scope as the matrix amd64 leg → near-instant cache hit.
+          cache-from: type=gha,scope=amd64
+          cache-to: type=gha,mode=max,scope=amd64
+          build-args: ${{ steps.args.outputs.build_args }}
+          load: true
+          tags: ${{ env.IMAGE_REF }}:${{ env.SCAN_TAG }}
+
+      - name: Run Docker Scout
+        uses: blackoutsecure/platform-automation/.github/actions/shared/docker-scout-scan@main
+        with:
+          # `local://` forces Scout to use the loaded image and skip
+          # any registry round-trip — important because the tag does
+          # not exist on Docker Hub yet.
+          image: local://${{ env.IMAGE_REF }}:${{ env.SCAN_TAG }}
+          command: ${{ inputs.scout_command }}
+          to: ${{ inputs.scout_to }}
+          to_env: ${{ inputs.scout_to_env }}
+          to_latest: ${{ inputs.scout_to_latest }}
+          organization: ${{ inputs.scout_organization }}
+          platform: linux/amd64
+          severities: ${{ inputs.scout_severities }}
+          only_fixed: ${{ inputs.scout_only_fixed }}
+          ignore_base: ${{ inputs.scout_ignore_base }}
+          ignore_unchanged: ${{ inputs.scout_ignore_unchanged }}
+          exit_code: ${{ inputs.scout_exit_code }}
+          exit_on: ${{ inputs.scout_exit_on }}
+          # No SARIF in PR mode — code scanning rejects uploads from
+          # untrusted PRs (no `security-events: write` for forks).
+          sarif_file: ''
+          sarif_upload: 'false'
+          summary: 'true'
+          write_comment: ${{ inputs.scout_write_comment }}
+          keep_previous_comments: ${{ inputs.scout_keep_previous_comments }}
+          dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Job summary
+        if: always()
+        env:
+          IMAGE: ${{ env.IMAGE_REF }}:${{ env.SCAN_TAG }}
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Docker Scout (PR)"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Image      | \`${IMAGE}\` |"
+            echo "| Command    | \`${{ inputs.scout_command }}\` |"
+            echo "| Severities | \`${{ inputs.scout_severities }}\` |"
+            echo "| Status     | \`${STATUS}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ---------------------------------------------------------------------------
+  # Docker Scout — publish branch.
+  #
+  # Runs after the multi-arch manifest is published. Scans the registry
+  # image at the resolved version tag, optionally uploads the SARIF report
+  # to GitHub code scanning, and (when `scout_record_environment` is set)
+  # records the image into a Scout environment so later PR builds can
+  # `compare` against it.
+  # ---------------------------------------------------------------------------
+  scout-published:
+    name: Docker Scout (published)
+    needs: [setup, manifest]
+    if: needs.setup.outputs.push == 'true' && inputs.enable_scout && needs.manifest.result == 'success'
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # required by github/codeql-action/upload-sarif
+      security-events: write
+    env:
+      IMAGE_REF: ${{ needs.setup.outputs.image }}
+      IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Run Docker Scout (CVEs)
+        uses: blackoutsecure/platform-automation/.github/actions/shared/docker-scout-scan@main
+        with:
+          # `registry://` forces a registry pull — the runner's local
+          # store is empty here (the matrix build pushed by digest from
+          # a different runner).
+          image: registry://${{ env.IMAGE_REF }}:${{ env.IMAGE_VERSION }}
+          command: ${{ inputs.scout_command }}
+          to: ${{ inputs.scout_to }}
+          to_env: ${{ inputs.scout_to_env }}
+          to_latest: ${{ inputs.scout_to_latest }}
+          organization: ${{ inputs.scout_organization }}
+          severities: ${{ inputs.scout_severities }}
+          only_fixed: ${{ inputs.scout_only_fixed }}
+          ignore_base: ${{ inputs.scout_ignore_base }}
+          ignore_unchanged: ${{ inputs.scout_ignore_unchanged }}
+          exit_code: ${{ inputs.scout_exit_code }}
+          exit_on: ${{ inputs.scout_exit_on }}
+          sarif_file: ${{ inputs.scout_sarif_upload && 'scout.sarif.json' || '' }}
+          sarif_upload: ${{ inputs.scout_sarif_upload }}
+          sarif_category: docker-scout-${{ inputs.image_name }}
+          summary: 'true'
+          # Push events have no PR to comment on.
+          write_comment: 'false'
+          dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Record image to Scout environment
+        if: inputs.scout_record_environment != ''
+        uses: blackoutsecure/platform-automation/.github/actions/shared/docker-scout-scan@main
+        with:
+          image: registry://${{ env.IMAGE_REF }}:${{ env.IMAGE_VERSION }}
+          command: environment
+          environment: ${{ inputs.scout_record_environment }}
+          organization: ${{ inputs.scout_organization }}
+          # Re-using the login from the previous step in this job.
+          skip_login: 'true'
+          # `environment` produces no findings to comment / upload.
+          sarif_file: ''
+          sarif_upload: 'false'
+          summary: 'true'
+          write_comment: 'false'
+          dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Job summary
+        if: always()
+        env:
+          IMAGE: ${{ env.IMAGE_REF }}:${{ env.IMAGE_VERSION }}
+          STATUS: ${{ job.status }}
+          RECORD_ENV: ${{ inputs.scout_record_environment }}
+        run: |
+          {
+            echo "## Docker Scout (published)"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Image          | \`${IMAGE}\` |"
+            echo "| Command        | \`${{ inputs.scout_command }}\` |"
+            echo "| Severities     | \`${{ inputs.scout_severities }}\` |"
+            echo "| SARIF uploaded | \`${{ inputs.scout_sarif_upload }}\` |"
+            echo "| Recorded to    | \`${RECORD_ENV:-n/a}\` |"
+            echo "| Status         | \`${STATUS}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
 

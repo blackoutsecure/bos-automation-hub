@@ -1,0 +1,333 @@
+# Upstream-tracked release pipeline (reusable meta-workflow).
+#
+# Composes two reusable workflows in this repo into a single end-to-end loop
+# so consumer repos that wrap an upstream project can drive the full
+# "detect new upstream release → cut a downstream release" pipeline from a
+# single ~15-line caller workflow:
+#
+#   1. monitor-upstream-release.yml  — poll upstream `latest`, commit a
+#                                      tracking file, emit `changed` flag
+#   2. release.yml                   — Docker → Balena → GitHub Release
+#                                      against the new upstream version
+#
+# Trigger model: this workflow is intended to be called from a thin
+# scheduled caller in a product repo (typically a 6h cron). It is **not**
+# intended to be triggered directly on this repo. See the README "Quick
+# start" section for a copy-paste caller example.
+#
+# Constraints:
+#   * Upstream tag must be SemVer (`X.Y.Z[-suffix]`, optionally `v`-prefixed).
+#     The release stage rejects calendar-versioned or non-SemVer tags.
+#   * The release stage creates a GitHub Release whose tag is `v<upstream_version>`,
+#     pointing at the default-branch HEAD that the monitor ran on.
+#
+# Stage toggles (`docker`, `balena`, `github_release`) are forwarded to the
+# release pipeline so the same wrapper can power Docker-only / Balena-only /
+# any-combination releases of an upstream project.
+name: Release-from-upstream pipeline (reusable meta-workflow)
+
+"on":
+  workflow_call:
+    inputs:
+      # ----- Monitor stage --------------------------------------------------
+      upstream_repo:
+        description: 'Upstream repo to track, as `owner/name` (e.g. `wiedehopf/readsb`).'
+        required: true
+        type: string
+      track_file:
+        description: 'Repo-relative path to the tracking JSON file.'
+        required: false
+        type: string
+        default: .github/upstream/tracked-release.json
+      force_release:
+        description: >-
+          When `true`, run the release pipeline even if the upstream version
+          is unchanged. Forwards `force_dispatch` to the monitor stage and
+          unconditionally runs the release job. Intended for
+          `workflow_dispatch` callers re-triggering on demand.
+        required: false
+        type: boolean
+        default: false
+
+      # ----- Release pipeline: stage toggles -------------------------------
+      docker:
+        description: 'Run the docker-build-push stage.'
+        required: false
+        type: boolean
+        default: true
+      balena:
+        description: 'Run the balena-block-publish stage.'
+        required: false
+        type: boolean
+        default: true
+      github_release:
+        description: 'Run the github-release publish stage.'
+        required: false
+        type: boolean
+        default: true
+
+      # ----- Release pipeline: Docker stage --------------------------------
+      image_name:
+        description: 'Docker image name (no namespace). Required when `docker: true`.'
+        required: false
+        type: string
+        default: ''
+      dockerhub_namespace:
+        description: 'Docker Hub namespace. Required when `docker: true`.'
+        required: false
+        type: string
+        default: ''
+      docker_extra_tags:
+        description: 'Newline-separated extra tags applied to the manifest.'
+        required: false
+        type: string
+        default: ''
+      docker_short_description:
+        description: 'Docker Hub short description (<=100 chars). Empty leaves it untouched.'
+        required: false
+        type: string
+        default: ''
+      docker_latest:
+        description: 'Also tag :latest when pushing.'
+        required: false
+        type: boolean
+        default: true
+      docker_multi_arch:
+        description: 'Build linux/amd64 + linux/arm64.'
+        required: false
+        type: boolean
+        default: true
+      docker_update_description:
+        description: 'Sync the README + short description to Docker Hub after a successful push.'
+        required: false
+        type: boolean
+        default: true
+
+      # ----- Release pipeline: Docker Scout (forwarded to release.yml) -----
+      docker_enable_scout:
+        description: 'Run Docker Scout against the published image.'
+        required: false
+        type: boolean
+        default: true
+      docker_scout_command:
+        description: 'Scout command (default `cves`). Comma-separated for multiple.'
+        required: false
+        type: string
+        default: cves
+      docker_scout_severities:
+        description: 'Severities to keep.'
+        required: false
+        type: string
+        default: 'critical,high'
+      docker_scout_only_fixed:
+        description: 'Filter to CVEs with a fix available.'
+        required: false
+        type: boolean
+        default: false
+      docker_scout_ignore_base:
+        description: 'Ignore vulnerabilities inherited from the base image.'
+        required: false
+        type: boolean
+        default: false
+      docker_scout_organization:
+        description: 'Scout organization (Docker Hub namespace).'
+        required: false
+        type: string
+        default: ''
+      docker_scout_record_environment:
+        description: 'Scout environment to record the image into (e.g. `production`).'
+        required: false
+        type: string
+        default: ''
+      docker_scout_sarif_upload:
+        description: 'Upload the SARIF report to GitHub code scanning.'
+        required: false
+        type: boolean
+        default: true
+      docker_scout_exit_code:
+        description: 'Fail the Docker stage if Scout finds matching vulnerabilities.'
+        required: false
+        type: boolean
+        default: false
+
+      # ----- Release pipeline: Balena stage --------------------------------
+      block_name:
+        description: 'Balena block slug (without namespace). Required when `balena: true`.'
+        required: false
+        type: string
+        default: ''
+      balena_namespace:
+        description: 'Balena namespace (user/org). Required when `balena: true`.'
+        required: false
+        type: string
+        default: ''
+      balena_sync_yml:
+        description: 'Rewrite balena.yml `version:` and commit it back when publishing.'
+        required: false
+        type: boolean
+        default: true
+      balena_draft:
+        description: 'Publish as a draft (sets `finalize: false`).'
+        required: false
+        type: boolean
+        default: false
+
+      # ----- Release pipeline: GitHub Release stage ------------------------
+      release_template_path:
+        description: 'Path to a Markdown template inside the caller repo.'
+        required: false
+        type: string
+        default: ''
+      release_extra_context:
+        description: >-
+          Newline-separated `KEY=VALUE` pairs interpolated into the release
+          notes template. Resolved upstream metadata (`UPSTREAM_REPO`,
+          `UPSTREAM_TAG`, `UPSTREAM_COMMIT`) is appended automatically and
+          available to the template even if you pass nothing here.
+        required: false
+        type: string
+        default: ''
+      generate_release_notes:
+        description: "Append GitHub's auto-generated PR/contributor notes after the rendered body."
+        required: false
+        type: boolean
+        default: true
+      release_files:
+        description: 'Newline-separated globs of artifacts to attach to the release.'
+        required: false
+        type: string
+        default: ''
+      release_draft:
+        description: 'Create the release as a draft.'
+        required: false
+        type: boolean
+        default: false
+      release_prerelease:
+        description: "`true`/`false` to force the pre-release flag. Empty auto-detects."
+        required: false
+        type: string
+        default: ''
+
+      # ----- Shared / advanced ---------------------------------------------
+      platforms:
+        description: 'Platform list reported in release notes.'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
+
+    secrets:
+      DOCKERHUB_USERNAME:
+        description: 'Docker Hub username. Required when `docker: true`.'
+        required: false
+      DOCKERHUB_TOKEN:
+        description: 'Docker Hub access token. Required when `docker: true`.'
+        required: false
+      BALENA_API_TOKEN:
+        description: 'balenaCloud API token. Required when `balena: true`.'
+        required: false
+
+    outputs:
+      changed:
+        description: '`true` when the upstream version differed from the tracked file.'
+        value: ${{ jobs.monitor.outputs.changed }}
+      upstream_version:
+        description: 'Latest upstream version (with `v` stripped).'
+        value: ${{ jobs.monitor.outputs.upstream_version }}
+      upstream_tag:
+        description: 'Raw upstream tag name.'
+        value: ${{ jobs.monitor.outputs.upstream_tag }}
+      upstream_commit:
+        description: 'Resolved upstream commit SHA at the release tag.'
+        value: ${{ jobs.monitor.outputs.upstream_commit }}
+      tag_name:
+        description: 'Resolved release tag (with `v` prefix).'
+        value: ${{ jobs.release.outputs.tag_name }}
+      version:
+        description: 'Resolved version (tag with leading `v` stripped).'
+        value: ${{ jobs.release.outputs.version }}
+      image:
+        description: 'Fully qualified Docker image reference (when the docker stage ran).'
+        value: ${{ jobs.release.outputs.image }}
+      release_url:
+        description: 'GitHub Release HTML URL (when the github-release stage ran).'
+        value: ${{ jobs.release.outputs.release_url }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Single in-flight upstream-tracked release per ref. We never cancel —
+  # a partial release can leave the registry / fleet in a half-published
+  # state that subsequent re-runs reconcile.
+  group: release-from-upstream-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1 — detect upstream change (commits tracking file on the default branch).
+  # `target_workflows` is left empty so we chain to the release job via `needs:`
+  # instead of dispatching a separate workflow run (no DISPATCH_TOKEN needed).
+  # ---------------------------------------------------------------------------
+  monitor:
+    name: Monitor ${{ inputs.upstream_repo }}
+    permissions:
+      contents: write   # commit the tracking file
+    uses: blackoutsecure/platform-automation/.github/workflows/monitor-upstream-release.yml@main
+    with:
+      upstream_repo:    ${{ inputs.upstream_repo }}
+      track_file:       ${{ inputs.track_file }}
+      target_workflows: ''
+      force_dispatch:   ${{ inputs.force_release && 'true' || 'false' }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 — run the full release pipeline against the new upstream version.
+  # Skipped when nothing changed unless the operator passed `force_release`.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Release v${{ needs.monitor.outputs.upstream_version }}
+    needs: monitor
+    if: >-
+      needs.monitor.outputs.changed == 'true' || inputs.force_release
+    permissions:
+      contents: write   # balena sync_balena_yml + GitHub Release publish
+    uses: blackoutsecure/platform-automation/.github/workflows/release.yml@main
+    with:
+      tag_name:                        v${{ needs.monitor.outputs.upstream_version }}
+      docker:                          ${{ inputs.docker }}
+      balena:                          ${{ inputs.balena }}
+      github_release:                  ${{ inputs.github_release }}
+      image_name:                      ${{ inputs.image_name }}
+      dockerhub_namespace:             ${{ inputs.dockerhub_namespace }}
+      docker_extra_tags:               ${{ inputs.docker_extra_tags }}
+      docker_short_description:        ${{ inputs.docker_short_description }}
+      docker_latest:                   ${{ inputs.docker_latest }}
+      docker_multi_arch:               ${{ inputs.docker_multi_arch }}
+      docker_update_description:       ${{ inputs.docker_update_description }}
+      docker_enable_scout:             ${{ inputs.docker_enable_scout }}
+      docker_scout_command:            ${{ inputs.docker_scout_command }}
+      docker_scout_severities:         ${{ inputs.docker_scout_severities }}
+      docker_scout_only_fixed:         ${{ inputs.docker_scout_only_fixed }}
+      docker_scout_ignore_base:        ${{ inputs.docker_scout_ignore_base }}
+      docker_scout_organization:       ${{ inputs.docker_scout_organization }}
+      docker_scout_record_environment: ${{ inputs.docker_scout_record_environment }}
+      docker_scout_sarif_upload:       ${{ inputs.docker_scout_sarif_upload }}
+      docker_scout_exit_code:          ${{ inputs.docker_scout_exit_code }}
+      block_name:                      ${{ inputs.block_name }}
+      balena_namespace:                ${{ inputs.balena_namespace }}
+      balena_sync_yml:                 ${{ inputs.balena_sync_yml }}
+      balena_draft:                    ${{ inputs.balena_draft }}
+      release_template_path:           ${{ inputs.release_template_path }}
+      release_extra_context: |
+        UPSTREAM_REPO=${{ inputs.upstream_repo }}
+        UPSTREAM_TAG=${{ needs.monitor.outputs.upstream_tag }}
+        UPSTREAM_COMMIT=${{ needs.monitor.outputs.upstream_commit }}
+        ${{ inputs.release_extra_context }}
+      generate_release_notes:          ${{ inputs.generate_release_notes }}
+      release_files:                   ${{ inputs.release_files }}
+      release_draft:                   ${{ inputs.release_draft }}
+      release_prerelease:              ${{ inputs.release_prerelease }}
+      platforms:                       ${{ inputs.platforms }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
