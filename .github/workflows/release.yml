@@ -1,19 +1,22 @@
-# Tag-driven release **meta-workflow**.
+# Tag-driven release **pipeline** (reusable meta-workflow).
 #
-# Composes the three single-purpose reusable workflows in this repo into one
-# end-to-end release pipeline:
+# Acts as the orchestrator / "guider" for a release: composes the three
+# single-purpose reusable workflows in this repo into one end-to-end pipeline.
 #
-#   1. docker-build-push.yml   — multi-arch image to Docker Hub
+#   1. docker-build-push.yml    — multi-arch image to Docker Hub
 #   2. balena-block-publish.yml — publish source tree as a balenaBlock
 #   3. github-release.yml       — create/update the GitHub Release
 #
-# Each stage is independently togglable so the same meta-workflow can power a
+# Each stage is independently togglable so the same pipeline can power a
 # Docker-only release, a Balena-only release, or any combination.
 #
-# This workflow is intended to be called from a thin caller workflow in a
-# product repo (see `.github/workflow-templates/release.yml`). It is **not**
-# intended to be triggered directly on this repo.
-name: Release (reusable meta)
+# Trigger model: this workflow is the *outcome* side of a release. It is
+# normally driven by a tag push, a `release` event, or a `workflow_dispatch`
+# from a sibling trigger workflow such as `monitor-upstream-release.yml`.
+# It is intended to be called from a thin caller workflow in a product repo
+# (see `.github/workflow-templates/release.yml`) and is **not** intended to
+# be triggered directly on this repo.
+name: Release pipeline (reusable meta-workflow)
 
 "on":
   workflow_call:
@@ -185,7 +188,7 @@ jobs:
   # ---------------------------------------------------------------------------
   resolve:
     name: Resolve tag
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 2
     outputs:
       tag_name: ${{ steps.tag.outputs.value }}

@@ -73,6 +73,11 @@ name: Cloudflare Pages Deploy (reusable)
         description: >-
           Optional shell command run from `working_directory` (or repo root
           when empty) before files are staged. Useful for `npm ci && npm run build`.
+          ⚠️ SECURITY: this string is executed verbatim under `bash -c`. NEVER
+          interpolate untrusted data into it (PR titles, issue bodies,
+          `github.event.*` strings, repository_dispatch payloads, etc.) —
+          doing so is a shell-injection sink. Only pass commands authored by
+          the calling workflow itself.
         required: false
         type: string
         default: ''
@@ -117,10 +122,16 @@ name: Cloudflare Pages Deploy (reusable)
         type: string
         default: ''
       runs_on:
-        description: 'Runner label for the build/deploy job.'
+        description: >-
+          Optional runner override for the build/deploy job. When empty
+          (the default), resolves from the org-shared `vars.DEFAULT_RUNNER`
+          (a JSON array of labels, e.g. `["self-hosted","Linux","ARM64"]`);
+          falls back to the GitHub-hosted `ubuntu-latest` runner when the
+          var is unset. Pass a literal label or JSON-array string to force
+          a specific runner.
         required: false
         type: string
-        default: ubuntu-latest
+        default: ''
       checkout_fetch_depth:
         description: >-
           `fetch-depth` passed to `actions/checkout`. Defaults to `0`
@@ -257,7 +268,10 @@ concurrency:
 jobs:
   deploy:
     name: Build & deploy to Cloudflare Pages
-    runs-on: ${{ inputs.runs_on }}
+    # Resolve runner: explicit `inputs.runs_on` override beats org-shared
+    # `vars.DEFAULT_RUNNER`; both fall through to the GitHub-hosted
+    # `ubuntu-latest` runner.
+    runs-on: ${{ inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     environment: ${{ inputs.deployment_environment }}
     env:
@@ -472,7 +486,12 @@ jobs:
           if [ -n "${WORKING_DIRECTORY}" ]; then
             cd "${WORKING_DIRECTORY}"
           fi
-          # Caller-provided command is run verbatim under bash.
+          # ⚠️ SECURITY: the caller-provided command is executed verbatim under
+          # bash. The caller workflow is responsible for ensuring nothing
+          # untrusted (PR titles, issue bodies, github.event.* strings,
+          # repository_dispatch payloads, etc.) is interpolated into
+          # `inputs.prebuild_command` — doing so would be a shell-injection
+          # sink. See the input description for the full warning.
           bash -eo pipefail -c "${PREBUILD_COMMAND}"
 
       - name: Stage deploy directory

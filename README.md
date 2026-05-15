@@ -19,6 +19,36 @@ The Docker Hub namespace is **public information** (it appears in every
 `inputs.dockerhub_namespace` rather than a secret. The legacy
 `secrets.DOCKERHUB_NAMESPACE` is still accepted for back-compat.
 
+### Runner resolution
+
+Every `runs-on:` in this repo is resolved from one of three
+org-shared variables, with a hard-coded fallback to the matching
+GitHub-hosted runner. Set the vars at the **organisation** level
+(Settings → Variables → Actions) and every reusable workflow
+automatically picks them up — no caller changes needed.
+
+| Variable | Used for | Fallback |
+|----------|----------|----------|
+| `vars.DEFAULT_RUNNER` | Lightweight orchestration jobs (lint, setup, plan, manifest, release publish, etc.) | `ubuntu-latest` |
+| `vars.RUNNER_X64` | The amd64 leg of the multi-arch Docker build matrix in `docker-build-push.yml` | `ubuntu-latest` |
+| `vars.RUNNER_ARM64` | The arm64 leg of the multi-arch Docker build matrix in `docker-build-push.yml` | `ubuntu-latest-arm64` |
+
+Values may be either a single bare label (e.g. `ubuntu-latest`) or a
+JSON array of labels for self-hosted runner targeting:
+
+```text
+["self-hosted","Linux","ARM64"]
+```
+
+GitHub Actions parses array-shaped strings in `runs-on:` automatically,
+so no `fromJSON()` is needed in caller workflows.
+
+**Per-call overrides:** workflows that ship a deploy-style step expose
+a `runs_on` input (currently `deploy-cloudflare-pages.yml`,
+`balena-block-publish.yml`, `balena-fleet-deploy.yml`). Pass a literal
+label or JSON-array string to override `vars.DEFAULT_RUNNER` for that
+one job; leave it empty to inherit.
+
 ---
 
 ## Contents
@@ -112,7 +142,6 @@ jobs:
 | `build_date` | string | `''` | Override ISO-8601 build date. |
 | `manifest_retries` | number | `3` | Retry attempts for manifest creation. |
 | `manifest_retry_delay` | number | `15` | Seconds between manifest retries. |
-| `runner_type` | string | `cloud` | `cloud` (GitHub-hosted) or `self-hosted`. |
 | `update_description` | boolean | `true` | Sync the repo README + short description to Docker Hub after a successful manifest push. No-op when not pushing. |
 | `readme_filepath` | string | `./README.md` | Path to the README uploaded as the Docker Hub full description. |
 | `short_description` | string | `''` | Docker Hub short description (max 100 chars). Empty leaves the existing one untouched. |
@@ -134,12 +163,15 @@ jobs:
 | `image_version` | Resolved version tag. |
 | `namespace` | Effective Docker Hub namespace. |
 
-### Self-hosted runners
+### Runner targeting
 
-Set `runner_type: self-hosted`. The workflow expects runners labelled:
+See [Runner resolution](#runner-resolution) for the global model. In this
+workflow specifically:
 
-- amd64: `self-hosted, Linux, x64`
-- arm64: `self-hosted, Linux, ARM64`
+- **setup**, **manifest**, **update-description** → `vars.DEFAULT_RUNNER`
+  (fallback `ubuntu-latest`).
+- Per-arch **build** matrix → `vars.RUNNER_X64` / `vars.RUNNER_ARM64`
+  (fallbacks `ubuntu-latest` / `ubuntu-latest-arm64`).
 
 ---
 
@@ -429,7 +461,7 @@ jobs:
 | `layer_cache` | boolean | `true` | Forwarded to `deploy-to-balena-action`. |
 | `debug` | boolean | `false` | Forwarded to `deploy-to-balena-action`. |
 | `draft` | boolean | `false` | Publish as a draft (sets `finalize: false`). |
-| `runs_on` | string | `ubuntu-latest` | Runner label. |
+| `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","ARM64"]`) to override. See [Runner resolution](#runner-resolution). |
 | `timeout_minutes` | number | `60` | Per-deploy job timeout. |
 
 ### Target object schema
@@ -802,7 +834,7 @@ the repo level when a project differs.
 | `wrangler_version` | string | `''` | Pin wrangler (e.g. `4`, `^4.0.0`, `latest`). |
 | `extra_wrangler_args` | string | `''` | Extra args appended to `wrangler pages deploy` (newlines = spaces). |
 | `deploy` | string | `''` | `'true'`/`'false'` to force; empty deploys only on default-branch pushes. |
-| `runs_on` | string | `ubuntu-latest` | Runner label. |
+| `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","ARM64"]`) to override. See [Runner resolution](#runner-resolution). |
 | `checkout_fetch_depth` | number | `0` | `fetch-depth` for `actions/checkout`. |
 | `generate_sitemap` | boolean | `false` | Run `bos-sitemap-generator`. |
 | `generate_robots` | boolean | `false` | Run `bos-robotstxt-generator`. |

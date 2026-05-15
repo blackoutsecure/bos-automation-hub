@@ -94,7 +94,7 @@ concurrency:
 jobs:
   monitor:
     name: Monitor ${{ inputs.upstream_repo }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: write

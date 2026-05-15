@@ -65,7 +65,7 @@ env:
 jobs:
   bump:
     name: Bump readsb-wiedehopf in openwrt/packages
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 15
     steps:
       - name: Preflight validation

@@ -104,11 +104,6 @@ name: Docker Build and Push (reusable)
         required: false
         type: number
         default: 15
-      runner_type:
-        description: '`cloud` (GitHub-hosted) or `self-hosted`.'
-        required: false
-        type: string
-        default: cloud
       update_description:
         description: >-
           Sync the repo README and short description to Docker Hub after a
@@ -176,7 +171,7 @@ env:
 jobs:
   setup:
     name: Setup
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     outputs:
       matrix: ${{ steps.resolve.outputs.matrix }}
       push: ${{ steps.resolve.outputs.push }}
@@ -202,6 +197,15 @@ jobs:
             echo "ERROR: dockerhub_namespace is not a valid Docker Hub namespace: '${NS}'" >&2
             exit 1
           fi
+          # Deprecation: registering the namespace as a *secret* causes the
+          # GitHub Actions secret-scrubber to mask any later occurrence of
+          # the same string (e.g. when DOCKERHUB_USERNAME == namespace),
+          # which silently empties downstream `GITHUB_OUTPUT` values.
+          # The warning intentionally does NOT include the namespace value
+          # itself — printing it would cause the same masking collision.
+          if [ -z "${INPUT_NS}" ] && [ -n "${SECRET_NS}" ]; then
+            echo "::warning::secrets.DOCKERHUB_NAMESPACE is deprecated. Pass the 'dockerhub_namespace' input (preferably from 'vars.DOCKERHUB_NAMESPACE') instead. Registering a namespace as a secret can collide with the Actions secret-scrubber and break downstream outputs."
+          fi
           echo "value=${NS}" >> "${GITHUB_OUTPUT}"
 
       - name: Compose image reference
@@ -224,7 +228,6 @@ jobs:
           IMAGE_VERSION: ${{ inputs.image_version }}
           EXTRA_TAGS: ${{ inputs.extra_tags }}
           DISTRO: ${{ inputs.distro }}
-          RUNNER_TYPE: ${{ inputs.runner_type }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
@@ -258,11 +261,6 @@ jobs:
           case "${VERSION_SOURCE}" in
             auto|dockerfile|file|git_tag|sha) ;;
             *) fail "input 'version_source' must be one of: auto|dockerfile|file|git_tag|sha (got '${VERSION_SOURCE}')" ;;
-          esac
-
-          case "${RUNNER_TYPE}" in
-            cloud|self-hosted) ;;
-            *) fail "input 'runner_type' must be 'cloud' or 'self-hosted' (got '${RUNNER_TYPE}')" ;;
           esac
 
           if ! printf '%s' "${IMAGE_NAME}" | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*$'; then
@@ -340,9 +338,14 @@ jobs:
           BUILD_DATE: ${{ steps.ctx.outputs.build_date }}
           INPUT_EXTRA_TAGS: ${{ inputs.extra_tags }}
           INPUT_MULTI_ARCH: ${{ inputs.multi_arch }}
-          RUNNER_TYPE: ${{ inputs.runner_type }}
           AUTO_RESOLVE: ${{ inputs.auto_resolve_version }}
           RESOLVED_EXTRA_TAGS: ${{ steps.tags.outputs.extra_tags }}
+          # Per-arch runner resolution. Org-shared vars take precedence;
+          # empty strings trigger the GitHub-hosted fallback. A var may
+          # be either a JSON array of labels (e.g.
+          # `["self-hosted","Linux","X64"]`) or a single bare label.
+          VARS_RUNNER_X64: ${{ vars.RUNNER_X64 }}
+          VARS_RUNNER_ARM64: ${{ vars.RUNNER_ARM64 }}
         run: |
           set -euo pipefail
 
@@ -352,13 +355,33 @@ jobs:
             EXTRA_TAGS="${INPUT_EXTRA_TAGS}"
           fi
 
-          if [ "${RUNNER_TYPE}" = "self-hosted" ]; then
-            AMD64='{"arch":"amd64","runner":["self-hosted","Linux","x64"],"platform":"linux/amd64"}'
-            ARM64='{"arch":"arm64","runner":["self-hosted","Linux","ARM64"],"platform":"linux/arm64"}'
-          else
-            AMD64='{"arch":"amd64","runner":"ubuntu-latest","platform":"linux/amd64"}'
-            ARM64='{"arch":"arm64","runner":"ubuntu-latest-arm64","platform":"linux/arm64"}'
-          fi
+          # Embed a runner spec into the matrix JSON. JSON-array values
+          # are passed through verbatim after a shape check; bare labels
+          # are JSON-quoted. Malformed values fail fast here rather than
+          # producing a downstream "no runner matching label" error.
+          to_json_runner() {
+            local raw="$1" name="$2" fallback="$3" val
+            val="${raw:-${fallback}}"
+            case "${val}" in
+              \[*)
+                printf '%s' "${val}" | python3 -c 'import json,sys; v=json.loads(sys.stdin.read()); sys.exit(0 if isinstance(v,list) and v and all(isinstance(x,str) and x for x in v) else 1)' \
+                  || { echo "ERROR: ${name}='${val}' is not a non-empty JSON array of label strings" >&2; exit 1; }
+                printf '%s' "${val}"
+                ;;
+              *)
+                printf '%s' "${val}" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*$' \
+                  || { echo "ERROR: ${name}='${val}' is not a valid runner label" >&2; exit 1; }
+                printf '"%s"' "${val}"
+                ;;
+            esac
+          }
+
+          AMD64_RUNNER="$(to_json_runner "${VARS_RUNNER_X64}"   "vars.RUNNER_X64"   "ubuntu-latest")"
+          ARM64_RUNNER="$(to_json_runner "${VARS_RUNNER_ARM64}" "vars.RUNNER_ARM64" "ubuntu-latest-arm64")"
+
+          AMD64="{\"arch\":\"amd64\",\"runner\":${AMD64_RUNNER},\"platform\":\"linux/amd64\"}"
+          ARM64="{\"arch\":\"arm64\",\"runner\":${ARM64_RUNNER},\"platform\":\"linux/arm64\"}"
+
           if [ "${INPUT_MULTI_ARCH}" = "true" ]; then
             MATRIX="{\"include\":[${AMD64},${ARM64}]}"
           else
@@ -486,7 +509,7 @@ jobs:
     name: Publish manifest
     needs: [setup, build]
     if: needs.setup.outputs.push == 'true' && needs.build.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     env:
       IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
@@ -553,7 +576,7 @@ jobs:
     name: Sync Docker Hub description
     needs: [setup, manifest]
     if: needs.setup.outputs.push == 'true' && inputs.update_description
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
       - name: Checkout caller repo

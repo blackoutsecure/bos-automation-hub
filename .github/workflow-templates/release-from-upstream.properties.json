@@ -1,0 +1,7 @@
+{
+  "name": "Release from upstream (Docker Hub + Balena + GitHub Release)",
+  "description": "Polls an upstream GitHub repo's latest release on a schedule and runs the full release pipeline (Docker Hub + Balena block + GitHub Release) against the new version, via the org's platform-automation reusable workflows.",
+  "iconName": "rocket",
+  "categories": ["Deployment", "Containers", "IoT", "Automation"],
+  "filePatterns": ["balena.yml$", "Dockerfile$"]
+}

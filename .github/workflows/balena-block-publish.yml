@@ -85,10 +85,16 @@ name: Balena Block Publish (reusable)
         type: boolean
         default: false
       runs_on:
-        description: 'Runner label for the publish job.'
+        description: >-
+          Optional runner override for the publish job. When empty (the
+          default), resolves from the org-shared `vars.DEFAULT_RUNNER`
+          (a JSON array of labels, e.g. `["self-hosted","Linux","ARM64"]`);
+          falls back to the GitHub-hosted `ubuntu-latest` runner when the
+          var is unset. Pass a literal label or JSON-array string to force
+          a specific runner.
         required: false
         type: string
-        default: ubuntu-latest
+        default: ''
     secrets:
       BALENA_API_TOKEN:
         required: true
@@ -117,7 +123,7 @@ concurrency:
 jobs:
   setup:
     name: Setup
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     outputs:
       publish: ${{ steps.resolve.outputs.publish }}
@@ -228,7 +234,7 @@ jobs:
       && inputs.sync_balena_yml
       && github.event_name == 'push'
       && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
       contents: write
@@ -288,7 +294,10 @@ jobs:
       && needs.setup.result == 'success'
       && needs.setup.outputs.publish == 'true'
       && (needs.sync-balena-yml.result == 'success' || needs.sync-balena-yml.result == 'skipped')
-    runs-on: ${{ inputs.runs_on }}
+    # Resolve runner: explicit `inputs.runs_on` override beats org-shared
+    # `vars.DEFAULT_RUNNER`; both fall through to the GitHub-hosted
+    # `ubuntu-latest` runner.
+    runs-on: ${{ inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     outputs:
       release_id: ${{ steps.deploy.outputs.release_id }}

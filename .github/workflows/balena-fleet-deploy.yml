@@ -90,10 +90,16 @@ name: Balena Fleet Deploy (reusable)
         type: boolean
         default: false
       runs_on:
-        description: 'Runner label for the deploy job.'
+        description: >-
+          Optional runner override for the deploy job. When empty (the
+          default), resolves from the org-shared `vars.DEFAULT_RUNNER`
+          (a JSON array of labels, e.g. `["self-hosted","Linux","ARM64"]`);
+          falls back to the GitHub-hosted `ubuntu-latest` runner when the
+          var is unset. Pass a literal label or JSON-array string to force
+          a specific runner.
         required: false
         type: string
-        default: ubuntu-latest
+        default: ''
       timeout_minutes:
         description: 'Per-deploy job timeout in minutes.'
         required: false
@@ -117,7 +123,7 @@ permissions:
 jobs:
   plan:
     name: Plan
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.build.outputs.matrix }}
@@ -300,7 +306,10 @@ jobs:
     name: Deploy ${{ matrix.name }} (${{ matrix.fleet }})
     needs: plan
     if: needs.plan.outputs.count != '0'
-    runs-on: ${{ inputs.runs_on }}
+    # Resolve runner: explicit `inputs.runs_on` override beats org-shared
+    # `vars.DEFAULT_RUNNER`; both fall through to the GitHub-hosted
+    # `ubuntu-latest` runner.
+    runs-on: ${{ inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     strategy:
       fail-fast: false

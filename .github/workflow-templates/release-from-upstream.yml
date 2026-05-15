@@ -1,0 +1,100 @@
+# Upstream-tracked release pipeline.
+#
+# Single-file "follow upstream" loop. Polls an upstream GitHub repo's `latest`
+# release on a schedule. When the version changes, runs the org's release
+# pipeline against the new version — building/pushing the Docker image,
+# publishing the balenaBlock, and creating the GitHub Release in one go.
+#
+# Composes two reusable workflows from blackoutsecure/platform-automation:
+#
+#   1. monitor-upstream-release.yml — detects the upstream version change
+#                                     and commits a tracking JSON file
+#   2. release.yml                  — runs the full Docker → Balena → GitHub
+#                                     Release pipeline for the new version
+#
+# Source: blackoutsecure/platform-automation/.github/workflow-templates/release-from-upstream.yml
+#
+# Required repo configuration:
+#   vars     UPSTREAM_REPO        Upstream repo to track, as `owner/name`
+#            IMAGE_NAME           Docker image name (no namespace)
+#            DOCKERHUB_NAMESPACE  Docker Hub namespace for the image
+#            BALENA_BLOCK_NAME    Balena block slug (without namespace)
+#            BALENA_NAMESPACE     Balena user/org that owns the block
+#   secrets  DOCKERHUB_USERNAME   Docker Hub user with write access
+#            DOCKERHUB_TOKEN      Docker Hub access token (never the password)
+#            BALENA_API_TOKEN     balenaCloud API token
+#
+# Constraints:
+#   * The upstream tag must be SemVer (`X.Y.Z[-suffix]`, optionally `v`-prefixed).
+#     The release pipeline rejects calendar-versioned or non-SemVer tags.
+#   * The release stage creates a GitHub Release whose tag is `v<upstream_version>`,
+#     pointing at the default-branch HEAD that the monitor ran on.
+#
+# Disable a stage by setting `docker: false`, `balena: false`, or
+# `github_release: false` on the `release` job below.
+name: Release from upstream
+
+on:
+  schedule:
+    # Stagger off :00 to avoid org-wide cron pile-ups.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: Run the release pipeline even if the upstream version is unchanged.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Single in-flight upstream-tracked release per ref.
+  group: release-from-upstream-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1 — detect upstream change (commits tracking file on the default branch).
+  # `target_workflows` is left empty so we chain to the release job via `needs`
+  # instead of dispatching a separate workflow run (no DISPATCH_TOKEN needed).
+  # ---------------------------------------------------------------------------
+  monitor:
+    uses: blackoutsecure/platform-automation/.github/workflows/monitor-upstream-release.yml@main
+    permissions:
+      contents: write   # commit the tracking file
+    with:
+      upstream_repo:    ${{ vars.UPSTREAM_REPO }}
+      track_file:       .github/upstream/tracked-release.json
+      target_workflows: ''
+      force_dispatch:   'false'
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 — run the full release pipeline against the new upstream version.
+  # Skipped when nothing changed unless the operator passed `force_release`.
+  # ---------------------------------------------------------------------------
+  release:
+    name: Release v${{ needs.monitor.outputs.upstream_version }}
+    needs: monitor
+    if: >-
+      needs.monitor.outputs.changed == 'true'
+      || (github.event_name == 'workflow_dispatch' && inputs.force_release)
+    permissions:
+      contents: write   # balena sync_balena_yml + GitHub Release publish
+    uses: blackoutsecure/platform-automation/.github/workflows/release.yml@main
+    with:
+      tag_name:                 v${{ needs.monitor.outputs.upstream_version }}
+      image_name:               ${{ vars.IMAGE_NAME }}
+      dockerhub_namespace:      ${{ vars.DOCKERHUB_NAMESPACE }}
+      docker_extra_tags:        sha-${{ github.sha }}
+      docker_short_description: ${{ github.event.repository.description }}
+      block_name:               ${{ vars.BALENA_BLOCK_NAME }}
+      balena_namespace:         ${{ vars.BALENA_NAMESPACE }}
+      release_extra_context: |
+        UPSTREAM_REPO=${{ vars.UPSTREAM_REPO }}
+        UPSTREAM_TAG=${{ needs.monitor.outputs.upstream_tag }}
+        UPSTREAM_COMMIT=${{ needs.monitor.outputs.upstream_commit }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}

@@ -1,7 +1,0 @@
-{
-  "name": "Balena Block Publish",
-  "description": "Build and publish a balenaBlock to balenaCloud via the org's platform-automation reusable workflow, with optional balena.yml version sync.",
-  "iconName": "balena",
-  "categories": ["Deployment", "Containers", "IoT"],
-  "filePatterns": ["balena.yml$"]
-}
