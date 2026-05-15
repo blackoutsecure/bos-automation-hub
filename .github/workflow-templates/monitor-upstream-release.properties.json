@@ -1,7 +1,0 @@
-{
-  "name": "Monitor upstream release",
-  "description": "Poll an upstream GitHub repo's latest release on a schedule and dispatch downstream workflows when the version changes, via the org's platform-automation reusable workflow.",
-  "iconName": "octoface",
-  "categories": ["Automation", "Continuous integration"],
-  "filePatterns": []
-}

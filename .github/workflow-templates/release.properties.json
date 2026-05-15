@@ -1,7 +1,0 @@
-{
-  "name": "Release (tag-driven: Docker Hub + Balena + GitHub Release)",
-  "description": "Tag-driven release pipeline: pushes a multi-arch image to Docker Hub, publishes the source tree as a balenaBlock, and creates/updates the GitHub Release with rendered notes via the org's platform-automation release meta-workflow.",
-  "iconName": "rocket",
-  "categories": ["Deployment", "Containers", "IoT"],
-  "filePatterns": ["balena.yml$", "Dockerfile$"]
-}
