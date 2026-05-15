@@ -78,20 +78,6 @@ name: GitHub Release (reusable)
         required: false
         type: string
         default: ''
-      actions_repo:
-        description: 'Repo hosting the `render-release-notes` composite action.'
-        required: false
-        type: string
-        default: blackoutsecure/platform-automation
-      resolver_ref:
-        description: 'Git ref of `actions_repo` to checkout.'
-        required: false
-        type: string
-        default: main
-    secrets:
-      ACTIONS_REPO_TOKEN:
-        description: 'Optional. Only needed if `actions_repo` is private; falls back to `GITHUB_TOKEN`.'
-        required: false
     outputs:
       release_id:
         description: 'GitHub Release ID.'
@@ -128,7 +114,6 @@ jobs:
           TAG_NAME: ${{ inputs.tag_name }}
           PRERELEASE: ${{ inputs.prerelease }}
           MAKE_LATEST: ${{ inputs.make_latest }}
-          ACTIONS_REPO: ${{ inputs.actions_repo }}
         run: |
           set -euo pipefail
           ERR=0
@@ -151,11 +136,6 @@ jobs:
             *) fail "input 'make_latest' must be 'true', 'false', or 'legacy' (got '${MAKE_LATEST}')" ;;
           esac
 
-          if ! printf '%s' "${ACTIONS_REPO}" \
-            | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$'; then
-            fail "input 'actions_repo' must be 'owner/name' (got '${ACTIONS_REPO}')"
-          fi
-
           [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
 
       - name: Checkout caller repo
@@ -163,21 +143,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout composite actions
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          repository: ${{ inputs.actions_repo }}
-          ref: ${{ inputs.resolver_ref }}
-          path: .platform-automation
-          token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
-          persist-credentials: false
-          sparse-checkout: |
-            .github/actions/render-release-notes
-          sparse-checkout-cone-mode: false
-
       - name: Render release body
         id: render
-        uses: ./.platform-automation/.github/actions/render-release-notes
+        uses: blackoutsecure/platform-automation/.github/actions/render-release-notes@main
         with:
           tag_name: ${{ inputs.tag_name }}
           version: ${{ inputs.version }}

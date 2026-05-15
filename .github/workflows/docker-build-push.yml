@@ -104,16 +104,6 @@ name: Docker Build and Push (reusable)
         required: false
         type: number
         default: 15
-      actions_repo:
-        description: 'Repo hosting the resolve-docker-image-tags composite action.'
-        required: false
-        type: string
-        default: blackoutsecure/platform-automation
-      resolver_ref:
-        description: 'Git ref of `actions_repo` to checkout.'
-        required: false
-        type: string
-        default: main
       runner_type:
         description: '`cloud` (GitHub-hosted) or `self-hosted`.'
         required: false
@@ -160,9 +150,6 @@ name: Docker Build and Push (reusable)
         required: true
       DOCKERHUB_NAMESPACE:
         description: 'Deprecated. Pass `dockerhub_namespace` (or set `vars.DOCKERHUB_NAMESPACE`) instead.'
-        required: false
-      ACTIONS_REPO_TOKEN:
-        description: 'Optional. Only needed if `actions_repo` is private; falls back to GITHUB_TOKEN.'
         required: false
     outputs:
       image:
@@ -238,7 +225,6 @@ jobs:
           EXTRA_TAGS: ${{ inputs.extra_tags }}
           DISTRO: ${{ inputs.distro }}
           RUNNER_TYPE: ${{ inputs.runner_type }}
-          ACTIONS_REPO: ${{ inputs.actions_repo }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
@@ -268,11 +254,6 @@ jobs:
           check_singleline "input 'registry'"             "${REGISTRY}"
           check_singleline "secret 'DOCKERHUB_USERNAME'"  "${DOCKERHUB_USERNAME}"
           check_singleline "secret 'DOCKERHUB_TOKEN'"     "${DOCKERHUB_TOKEN}"
-
-          if ! printf '%s' "${ACTIONS_REPO}" \
-            | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$'; then
-            fail "input 'actions_repo' must be 'owner/name' (got '${ACTIONS_REPO}')"
-          fi
 
           case "${VERSION_SOURCE}" in
             auto|dockerfile|file|git_tag|sha) ;;
@@ -318,19 +299,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout composite actions
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          repository: ${{ inputs.actions_repo }}
-          ref: ${{ inputs.resolver_ref }}
-          path: .platform-automation
-          token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
-          persist-credentials: false
-          sparse-checkout: |
-            .github/actions/shared/resolve-docker-image-tags
-            .github/actions/shared/resolve-release-context
-          sparse-checkout-cone-mode: false
-
       - name: Validate caller paths
         if: inputs.auto_resolve_version
         env:
@@ -344,7 +312,7 @@ jobs:
       - name: Resolve image tags
         id: tags
         if: inputs.auto_resolve_version
-        uses: ./.platform-automation/.github/actions/shared/resolve-docker-image-tags
+        uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-docker-image-tags@main
         with:
           version_override: ${{ inputs.image_version }}
           version_source: ${{ inputs.version_source }}
@@ -356,7 +324,7 @@ jobs:
 
       - name: Resolve release context
         id: ctx
-        uses: ./.platform-automation/.github/actions/shared/resolve-release-context
+        uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-release-context@main
         with:
           publish_override: ${{ inputs.push }}
           auto_resolve_version: ${{ inputs.auto_resolve_version }}
@@ -544,54 +512,22 @@ jobs:
           merge-multiple: true
 
       - name: Create and push manifest
-        run: |
-          set -euo pipefail
-
-          mapfile -t DIGESTS < <(find "${DIGESTS_DIR}" -type f -printf '%f\n' | sort)
-          [ "${#DIGESTS[@]}" -gt 0 ] || { echo "ERROR: no digests found" >&2; exit 1; }
-
-          SOURCES=()
-          for d in "${DIGESTS[@]}"; do SOURCES+=("${IMAGE_REF}@sha256:${d}"); done
-
-          declare -A SEEN=()
-          TAGS=()
-          add_tag() {
-            local t="$1"
-            [ -n "${t}" ] || return 0
-            [ -n "${SEEN[$t]:-}" ] && return 0
-            SEEN[$t]=1
-            TAGS+=(--tag "${IMAGE_REF}:${t}")
-          }
-
-          add_tag "${IMAGE_VERSION}"
-          [ "${TAG_LATEST}" = "true" ] && add_tag "latest"
-
-          if [ -n "${EXTRA_TAGS}" ]; then
-            while IFS= read -r tag; do
-              tag="$(echo "${tag}" | xargs)"
-              add_tag "${tag}"
-            done <<< "${EXTRA_TAGS}"
-          fi
-
-          echo "Applying tags:"
-          for t in "${!SEEN[@]}"; do echo "  - ${IMAGE_REF}:${t}"; done
-
-          for attempt in $(seq 1 "${MANIFEST_RETRIES}"); do
-            if docker buildx imagetools create "${TAGS[@]}" "${SOURCES[@]}"; then
-              break
-            fi
-            if [ "${attempt}" -eq "${MANIFEST_RETRIES}" ]; then
-              echo "ERROR: failed after ${MANIFEST_RETRIES} attempts" >&2
-              exit 1
-            fi
-            echo "attempt ${attempt}/${MANIFEST_RETRIES} failed, retrying in ${MANIFEST_RETRY_DELAY}s..."
-            sleep "${MANIFEST_RETRY_DELAY}"
-          done
-
-          docker buildx imagetools inspect "${IMAGE_REF}:${IMAGE_VERSION}"
+        id: manifest
+        uses: blackoutsecure/platform-automation/.github/actions/shared/docker-multiarch-manifest@main
+        with:
+          image_ref: ${{ env.IMAGE_REF }}
+          digests_dir: ${{ env.DIGESTS_DIR }}
+          version_tag: ${{ env.IMAGE_VERSION }}
+          latest: ${{ env.TAG_LATEST }}
+          extra_tags: ${{ env.EXTRA_TAGS }}
+          max_attempts: ${{ env.MANIFEST_RETRIES }}
+          retry_delay_seconds: ${{ env.MANIFEST_RETRY_DELAY }}
 
       - name: Job summary
         if: always()
+        env:
+          APPLIED_TAGS: ${{ steps.manifest.outputs.applied_tags }}
+          DIGEST_COUNT: ${{ steps.manifest.outputs.digest_count }}
         run: |
           {
             echo "## Docker Build Summary"
@@ -602,6 +538,15 @@ jobs:
             echo "| Version     | \`${IMAGE_VERSION}\` |"
             echo "| Latest tag  | \`${TAG_LATEST}\` |"
             echo "| Build date  | \`${BUILD_DATE}\` |"
+            echo "| Digests     | \`${DIGEST_COUNT:-?}\` |"
+            if [ -n "${APPLIED_TAGS:-}" ]; then
+              echo ""
+              echo "### Applied tags"
+              echo ""
+              while IFS= read -r t; do
+                [ -n "${t}" ] && echo "- \`${IMAGE_REF}:${t}\`"
+              done <<< "${APPLIED_TAGS}"
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
   update-description:
@@ -616,20 +561,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout composite actions
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          repository: ${{ inputs.actions_repo }}
-          ref: ${{ inputs.resolver_ref }}
-          path: .platform-automation
-          token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
-          persist-credentials: false
-          sparse-checkout: |
-            .github/actions/sync-dockerhub-description
-          sparse-checkout-cone-mode: false
-
       - name: Sync description
-        uses: ./.platform-automation/.github/actions/sync-dockerhub-description
+        uses: blackoutsecure/platform-automation/.github/actions/sync-dockerhub-description@main
         with:
           repository: ${{ needs.setup.outputs.namespace }}/${{ inputs.image_name }}
           username: ${{ secrets.DOCKERHUB_USERNAME }}

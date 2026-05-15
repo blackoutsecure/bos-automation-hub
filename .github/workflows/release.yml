@@ -1,0 +1,314 @@
+# Tag-driven release **meta-workflow**.
+#
+# Composes the three single-purpose reusable workflows in this repo into one
+# end-to-end release pipeline:
+#
+#   1. docker-build-push.yml   — multi-arch image to Docker Hub
+#   2. balena-block-publish.yml — publish source tree as a balenaBlock
+#   3. github-release.yml       — create/update the GitHub Release
+#
+# Each stage is independently togglable so the same meta-workflow can power a
+# Docker-only release, a Balena-only release, or any combination.
+#
+# This workflow is intended to be called from a thin caller workflow in a
+# product repo (see `.github/workflow-templates/release.yml`). It is **not**
+# intended to be triggered directly on this repo.
+name: Release (reusable meta)
+
+"on":
+  workflow_call:
+    inputs:
+      # ----- Tag / version --------------------------------------------------
+      tag_name:
+        description: >-
+          Explicit release tag (e.g. `v1.2.3`). When empty, auto-resolved
+          from the calling event: `github.ref_name` for tag pushes and
+          `github.event.release.tag_name` for `release` events. Required
+          for `workflow_dispatch` callers — they must pass the tag through.
+        required: false
+        type: string
+        default: ''
+
+      # ----- Stage toggles --------------------------------------------------
+      docker:
+        description: 'Run the docker-build-push stage.'
+        required: false
+        type: boolean
+        default: true
+      balena:
+        description: 'Run the balena-block-publish stage.'
+        required: false
+        type: boolean
+        default: true
+      github_release:
+        description: 'Run the github-release publish stage.'
+        required: false
+        type: boolean
+        default: true
+
+      # ----- Docker stage inputs -------------------------------------------
+      image_name:
+        description: 'Docker image name (no namespace). Required when `docker: true`.'
+        required: false
+        type: string
+        default: ''
+      dockerhub_namespace:
+        description: 'Docker Hub namespace. Required when `docker: true`.'
+        required: false
+        type: string
+        default: ''
+      docker_extra_tags:
+        description: 'Newline-separated extra tags applied to the manifest.'
+        required: false
+        type: string
+        default: ''
+      docker_short_description:
+        description: 'Docker Hub short description (<=100 chars). Empty leaves it untouched.'
+        required: false
+        type: string
+        default: ''
+      docker_latest:
+        description: 'Also tag :latest when pushing.'
+        required: false
+        type: boolean
+        default: true
+      docker_multi_arch:
+        description: 'Build linux/amd64 + linux/arm64.'
+        required: false
+        type: boolean
+        default: true
+      docker_update_description:
+        description: 'Sync the README + short description to Docker Hub after a successful push.'
+        required: false
+        type: boolean
+        default: true
+
+      # ----- Balena stage inputs -------------------------------------------
+      block_name:
+        description: 'Balena block slug (without namespace). Required when `balena: true`.'
+        required: false
+        type: string
+        default: ''
+      balena_namespace:
+        description: 'Balena namespace (user/org). Required when `balena: true`.'
+        required: false
+        type: string
+        default: ''
+      balena_sync_yml:
+        description: 'Rewrite balena.yml `version:` and commit it back when publishing.'
+        required: false
+        type: boolean
+        default: true
+      balena_draft:
+        description: 'Publish as a draft (sets `finalize: false`).'
+        required: false
+        type: boolean
+        default: false
+
+      # ----- GitHub Release stage inputs -----------------------------------
+      release_template_path:
+        description: 'Path to a Markdown template inside the caller repo. Empty uses the bundled default.'
+        required: false
+        type: string
+        default: ''
+      release_extra_context:
+        description: 'Newline-separated `KEY=VALUE` pairs interpolated into the release notes template.'
+        required: false
+        type: string
+        default: ''
+      generate_release_notes:
+        description: "Append GitHub's auto-generated PR/contributor notes after the rendered body."
+        required: false
+        type: boolean
+        default: true
+      release_files:
+        description: 'Newline-separated globs of artifacts to attach to the release.'
+        required: false
+        type: string
+        default: ''
+      release_draft:
+        description: 'Create the release as a draft.'
+        required: false
+        type: boolean
+        default: false
+      release_prerelease:
+        description: "`true`/`false` to force the pre-release flag. Empty lets the renderer auto-detect from `vX.Y.Z-<suffix>`."
+        required: false
+        type: string
+        default: ''
+
+      # ----- Shared / advanced ---------------------------------------------
+      platforms:
+        description: 'Platform list reported in release notes (e.g. `linux/amd64,linux/arm64`).'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
+
+    secrets:
+      DOCKERHUB_USERNAME:
+        description: 'Docker Hub username. Required when `docker: true`.'
+        required: false
+      DOCKERHUB_TOKEN:
+        description: 'Docker Hub access token. Required when `docker: true`.'
+        required: false
+      BALENA_API_TOKEN:
+        description: 'balenaCloud API token. Required when `balena: true`.'
+        required: false
+
+    outputs:
+      tag_name:
+        description: 'Resolved release tag (with `v` prefix when present).'
+        value: ${{ jobs.resolve.outputs.tag_name }}
+      version:
+        description: 'Resolved version (tag with leading `v` stripped).'
+        value: ${{ jobs.resolve.outputs.version }}
+      image:
+        description: 'Fully qualified Docker image reference (when the docker stage ran).'
+        value: ${{ jobs.docker.outputs.image }}
+      release_url:
+        description: 'GitHub Release HTML URL (when the github-release stage ran).'
+        value: ${{ jobs.github-release.outputs.release_url }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Tag-scoped: a re-tag of the same version is the rare case where you
+  # actively *want* the previous run to be superseded — but we treat each
+  # release as durable and serialize instead.
+  group: release-meta-${{ github.workflow }}-${{ inputs.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 0 — resolve the release tag from caller-supplied input or event ctx
+  # ---------------------------------------------------------------------------
+  resolve:
+    name: Resolve tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      tag_name: ${{ steps.tag.outputs.value }}
+      version:  ${{ steps.tag.outputs.version }}
+    steps:
+      - id: tag
+        env:
+          OVERRIDE:    ${{ inputs.tag_name }}
+          EVENT_NAME:  ${{ github.event_name }}
+          REF_TYPE:    ${{ github.ref_type }}
+          REF_NAME:    ${{ github.ref_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "${OVERRIDE}" ]; then
+            TAG="${OVERRIDE}"
+            SOURCE="input"
+          else
+            case "${EVENT_NAME}" in
+              push)
+                if [ "${REF_TYPE}" != "tag" ]; then
+                  echo "ERROR: 'tag_name' input is empty and event is not a tag push (ref_type='${REF_TYPE}')." >&2
+                  exit 1
+                fi
+                TAG="${REF_NAME}"
+                SOURCE="push.tag"
+                ;;
+              release)
+                TAG="${RELEASE_TAG}"
+                SOURCE="release.event"
+                ;;
+              *)
+                echo "ERROR: 'tag_name' input is required for event '${EVENT_NAME}'." >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          case "${TAG}" in
+            *[$'\n\r\t ']*)
+              echo "ERROR: resolved tag '${TAG}' contains whitespace." >&2
+              exit 1
+              ;;
+          esac
+
+          if ! printf '%s' "${TAG}" \
+            | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.+-]+)?$'; then
+            echo "ERROR: tag '${TAG}' is not a SemVer release tag (vX.Y.Z[-suffix])." >&2
+            exit 1
+          fi
+
+          {
+            echo "value=${TAG}"
+            echo "version=${TAG#v}"
+            echo "source=${SOURCE}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Resolved tag '${TAG}' (source: ${SOURCE})."
+
+  # ---------------------------------------------------------------------------
+  # Stage 1 — Docker Hub
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Docker Hub
+    if: ${{ inputs.docker }}
+    needs: resolve
+    uses: blackoutsecure/platform-automation/.github/workflows/docker-build-push.yml@main
+    with:
+      image_name:          ${{ inputs.image_name }}
+      dockerhub_namespace: ${{ inputs.dockerhub_namespace }}
+      image_version:       ${{ needs.resolve.outputs.version }}
+      push:                'true'
+      latest:              ${{ inputs.docker_latest }}
+      multi_arch:          ${{ inputs.docker_multi_arch }}
+      extra_tags:          ${{ inputs.docker_extra_tags }}
+      short_description:   ${{ inputs.docker_short_description }}
+      update_description:  ${{ inputs.docker_update_description }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 — Balena block
+  # ---------------------------------------------------------------------------
+  balena:
+    name: Balena block
+    if: ${{ inputs.balena }}
+    needs: [resolve, docker]
+    permissions:
+      contents: write   # allow `sync_balena_yml` commit-back
+    uses: blackoutsecure/platform-automation/.github/workflows/balena-block-publish.yml@main
+    with:
+      block_name:       ${{ inputs.block_name }}
+      balena_namespace: ${{ inputs.balena_namespace }}
+      version:          ${{ needs.resolve.outputs.version }}
+      publish:          'true'
+      sync_balena_yml:  ${{ inputs.balena_sync_yml }}
+      draft:            ${{ inputs.balena_draft }}
+    secrets:
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 3 — GitHub Release
+  # ---------------------------------------------------------------------------
+  github-release:
+    name: GitHub Release
+    # Run when the caller wants it AND nothing upstream failed/was cancelled.
+    # Skipped upstream jobs (docker:false / balena:false) do NOT block this.
+    if: ${{ inputs.github_release && !failure() && !cancelled() }}
+    needs: [resolve, docker, balena]
+    permissions:
+      contents: write
+    uses: blackoutsecure/platform-automation/.github/workflows/github-release.yml@main
+    with:
+      tag_name:               ${{ needs.resolve.outputs.tag_name }}
+      version:                ${{ needs.resolve.outputs.version }}
+      image_ref:              ${{ needs.docker.outputs.image }}
+      platforms:              ${{ inputs.platforms }}
+      template_path:          ${{ inputs.release_template_path }}
+      extra_context:          ${{ inputs.release_extra_context }}
+      draft:                  ${{ inputs.release_draft }}
+      prerelease:             ${{ inputs.release_prerelease }}
+      generate_release_notes: ${{ inputs.generate_release_notes }}
+      files:                  ${{ inputs.release_files }}
+

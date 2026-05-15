@@ -1,0 +1,178 @@
+name: Resolve upstream version
+description: >-
+  Shallow-clone an upstream git repo at a branch, tag, or commit and
+  emit a `version`, full commit SHA (`vcs_ref`), and ISO-8601 commit
+  date (`build_date`). Useful when building a Docker image downstream
+  of a third-party project (e.g. a wrapper around `wiedehopf/readsb`).
+  Resolution cascade: explicit `version_file` -> `git describe --tags` ->
+  short SHA. Each fallback is opt-out via its own input.
+
+inputs:
+  repo_url:
+    description: 'HTTPS URL to the upstream git repo (with or without `.git`).'
+    required: true
+  ref:
+    description: 'Branch, tag, or commit SHA to fetch.'
+    required: true
+  version_file:
+    description: >-
+      Repo-relative path to a plain-text version file inside the upstream
+      repo. First non-comment, non-blank line is taken as the version.
+      Empty disables the file probe.
+    required: false
+    default: 'version'
+  fallback_to_describe:
+    description: 'When `version_file` is missing, fall back to `git describe --tags FETCH_HEAD`.'
+    required: false
+    default: 'true'
+  fallback_to_sha:
+    description: 'When all other sources fail, fall back to the short SHA.'
+    required: false
+    default: 'true'
+  sha_length:
+    description: 'Short-SHA length used by the SHA fallback (4-40).'
+    required: false
+    default: '12'
+  strip_v_prefix:
+    description: 'Strip a leading `v` from the resolved version.'
+    required: false
+    default: 'true'
+
+outputs:
+  version:
+    description: 'Resolved upstream version.'
+    value: ${{ steps.resolve.outputs.version }}
+  vcs_ref:
+    description: 'Full upstream commit SHA at the resolved ref.'
+    value: ${{ steps.resolve.outputs.vcs_ref }}
+  build_date:
+    description: 'ISO-8601 UTC commit date at the resolved ref.'
+    value: ${{ steps.resolve.outputs.build_date }}
+  source:
+    description: 'Which resolver path produced the version: `file`, `describe`, or `sha`.'
+    value: ${{ steps.resolve.outputs.source }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        REPO_URL: ${{ inputs.repo_url }}
+        REF: ${{ inputs.ref }}
+        VERSION_FILE: ${{ inputs.version_file }}
+        FALLBACK_DESCRIBE: ${{ inputs.fallback_to_describe }}
+        FALLBACK_SHA: ${{ inputs.fallback_to_sha }}
+        SHA_LENGTH: ${{ inputs.sha_length }}
+        STRIP_V_PREFIX: ${{ inputs.strip_v_prefix }}
+      run: |
+        set -euo pipefail
+
+        die() { echo "ERROR: $*" >&2; exit 1; }
+
+        # Validate repo_url — must be https://. SSH/git/file:// are rejected
+        # because they'd require additional credentials and aren't the model
+        # this action is built for.
+        case "${REPO_URL}" in
+          https://*) ;;
+          *) die "input 'repo_url' must be an https:// URL (got '${REPO_URL}')" ;;
+        esac
+        case "${REPO_URL}" in
+          *[$'\n\r\t ']*) die "input 'repo_url' contains whitespace/newlines" ;;
+        esac
+
+        # Validate ref — single line, conservative charset, no leading dash
+        # (would be parsed as a flag), no path traversal.
+        [ -n "${REF}" ] || die "input 'ref' is required"
+        case "${REF}" in
+          *[$'\n\r\t ']*) die "input 'ref' contains whitespace/newlines: '${REF}'" ;;
+          -*)             die "input 'ref' must not start with '-' (got '${REF}')" ;;
+          *..*)           die "input 'ref' must not contain '..' (got '${REF}')" ;;
+        esac
+        if ! printf '%s' "${REF}" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+          die "input 'ref' contains characters outside [A-Za-z0-9._/-]: '${REF}'"
+        fi
+
+        # version_file (when supplied) must stay inside the upstream worktree.
+        if [ -n "${VERSION_FILE}" ]; then
+          case "${VERSION_FILE}" in
+            /*|*..*) die "input 'version_file' must be a repo-relative path (got '${VERSION_FILE}')" ;;
+            *[$'\n\r\t ']*) die "input 'version_file' contains whitespace" ;;
+          esac
+        fi
+
+        for name in FALLBACK_DESCRIBE FALLBACK_SHA STRIP_V_PREFIX; do
+          val="${!name}"
+          case "${val}" in
+            true|false) ;;
+            *) die "input '$(echo "${name}" | tr '[:upper:]' '[:lower:]')' must be 'true' or 'false' (got '${val}')" ;;
+          esac
+        done
+
+        case "${SHA_LENGTH}" in
+          ''|*[!0-9]*) die "input 'sha_length' must be a positive integer (got '${SHA_LENGTH}')" ;;
+        esac
+        if [ "${SHA_LENGTH}" -lt 4 ] || [ "${SHA_LENGTH}" -gt 40 ]; then
+          die "input 'sha_length' must be between 4 and 40 (got '${SHA_LENGTH}')"
+        fi
+
+        # Normalise: append `.git` so smart-HTTP discovery is unambiguous.
+        case "${REPO_URL}" in
+          *.git) URL="${REPO_URL}" ;;
+          *)     URL="${REPO_URL}.git" ;;
+        esac
+
+        TMPDIR="$(mktemp -d)"
+        trap 'rm -rf "${TMPDIR}"' EXIT
+
+        git -C "${TMPDIR}" init -q
+        git -C "${TMPDIR}" remote add origin "${URL}"
+        # `--tags` so `git describe` can see annotated tags reachable from REF.
+        if ! git -C "${TMPDIR}" fetch --depth 1 --tags origin "${REF}" >/dev/null 2>&1; then
+          die "failed to fetch ref '${REF}' from ${URL}"
+        fi
+
+        VCS_REF="$(git -C "${TMPDIR}" rev-parse FETCH_HEAD)"
+        BUILD_DATE="$(git -C "${TMPDIR}" log -1 --format=%cI FETCH_HEAD)"
+
+        VERSION=""
+        SOURCE=""
+
+        if [ -n "${VERSION_FILE}" ]; then
+          if RAW="$(git -C "${TMPDIR}" show "FETCH_HEAD:${VERSION_FILE}" 2>/dev/null)"; then
+            VERSION="$(printf '%s\n' "${RAW}" | grep -E -m1 -v '^[[:space:]]*(#|$)' | tr -d '[:space:]' || true)"
+            [ -n "${VERSION}" ] && SOURCE="file"
+          fi
+        fi
+
+        if [ -z "${VERSION}" ] && [ "${FALLBACK_DESCRIBE}" = "true" ]; then
+          if VERSION="$(git -C "${TMPDIR}" describe --tags --always FETCH_HEAD 2>/dev/null)" && [ -n "${VERSION}" ]; then
+            SOURCE="describe"
+          else
+            VERSION=""
+          fi
+        fi
+
+        if [ -z "${VERSION}" ] && [ "${FALLBACK_SHA}" = "true" ]; then
+          VERSION="${VCS_REF:0:${SHA_LENGTH}}"
+          SOURCE="sha"
+        fi
+
+        [ -n "${VERSION}" ] || die "could not resolve upstream version (file/describe/sha all unavailable or disabled)"
+
+        [ "${STRIP_V_PREFIX}" = "true" ] && VERSION="${VERSION#v}"
+
+        # Reject whitespace — a stray newline silently truncates GITHUB_OUTPUT
+        # for any downstream job consuming `version`.
+        case "${VERSION}" in
+          *[$'\n\r\t ']*) die "resolved version contains whitespace: '${VERSION}'" ;;
+        esac
+
+        {
+          echo "version=${VERSION}"
+          echo "vcs_ref=${VCS_REF}"
+          echo "build_date=${BUILD_DATE}"
+          echo "source=${SOURCE}"
+        } >> "${GITHUB_OUTPUT}"
+
+        echo "Resolved upstream: version=${VERSION} (source=${SOURCE}) ref=${VCS_REF} date=${BUILD_DATE}"

@@ -89,22 +89,9 @@ name: Balena Block Publish (reusable)
         required: false
         type: string
         default: ubuntu-latest
-      actions_repo:
-        description: 'Repo hosting the `resolve-docker-image-tags` composite action.'
-        required: false
-        type: string
-        default: blackoutsecure/platform-automation
-      resolver_ref:
-        description: 'Git ref of `actions_repo` to checkout.'
-        required: false
-        type: string
-        default: main
     secrets:
       BALENA_API_TOKEN:
         required: true
-      ACTIONS_REPO_TOKEN:
-        description: 'Optional. Only needed if `actions_repo` is private; falls back to GITHUB_TOKEN.'
-        required: false
     outputs:
       published:
         description: '`true` when a release was actually pushed to balenaCloud.'
@@ -144,7 +131,6 @@ jobs:
           BALENA_NAMESPACE: ${{ inputs.balena_namespace }}
           VERSION_SOURCE: ${{ inputs.version_source }}
           VERSION: ${{ inputs.version }}
-          ACTIONS_REPO: ${{ inputs.actions_repo }}
           BALENA_API_TOKEN: ${{ secrets.BALENA_API_TOKEN }}
         run: |
           set -euo pipefail
@@ -175,11 +161,6 @@ jobs:
           check_slug       "input 'block_name'"        "${BLOCK_NAME}"
           check_slug       "input 'balena_namespace'"  "${BALENA_NAMESPACE}"
 
-          if ! printf '%s' "${ACTIONS_REPO}" \
-            | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$'; then
-            fail "input 'actions_repo' must be 'owner/name' (got '${ACTIONS_REPO}')"
-          fi
-
           case "${VERSION_SOURCE}" in
             auto|dockerfile|file|git_tag|sha) ;;
             *) fail "input 'version_source' must be one of: auto|dockerfile|file|git_tag|sha (got '${VERSION_SOURCE}')" ;;
@@ -198,23 +179,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout composite actions
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          repository: ${{ inputs.actions_repo }}
-          ref: ${{ inputs.resolver_ref }}
-          path: .platform-automation
-          token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
-          persist-credentials: false
-          sparse-checkout: |
-            .github/actions/shared/resolve-docker-image-tags
-            .github/actions/shared/resolve-release-context
-          sparse-checkout-cone-mode: false
-
       - name: Resolve version
         id: tags
         if: inputs.auto_resolve_version
-        uses: ./.platform-automation/.github/actions/shared/resolve-docker-image-tags
+        uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-docker-image-tags@main
         with:
           version_override: ${{ inputs.version }}
           version_source: ${{ inputs.version_source }}
@@ -224,7 +192,7 @@ jobs:
 
       - name: Resolve release context
         id: ctx
-        uses: ./.platform-automation/.github/actions/shared/resolve-release-context
+        uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-release-context@main
         with:
           publish_override: ${{ inputs.publish }}
           auto_resolve_version: ${{ inputs.auto_resolve_version }}
@@ -269,7 +237,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ github.event.repository.default_branch }}
-          token: ${{ secrets.ACTIONS_REPO_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
 
       - name: Sync version into balena.yml

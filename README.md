@@ -9,7 +9,7 @@ workflows directly without needing a token.
 ### Configuration model
 
 - **`secrets:`** — things that grant access (Docker Hub token, Balena
-  API token, optional `ACTIONS_REPO_TOKEN`).
+  API token).
 - **`vars:`** — things that identify *what* you're publishing (image
   name, namespace, block name). Set them once on the repository or
   organisation and the caller workflow stays free of literals.
@@ -27,15 +27,20 @@ The Docker Hub namespace is **public information** (it appears in every
 |------|------|---------|
 | [.github/workflows/docker-build-push.yml](.github/workflows/docker-build-push.yml) | Reusable workflow | Multi-arch Docker build, push-by-digest, and single-manifest publish to Docker Hub. |
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
+| [.github/workflows/balena-fleet-deploy.yml](.github/workflows/balena-fleet-deploy.yml) | Reusable workflow | Render a per-fleet `balena.yml` from inputs and deploy the same block to one or more balenaCloud fleets in a matrix. |
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
 | [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Poll an upstream repo's `latest` release, dispatch downstream workflows on change, and commit a tracking file. |
+| [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
 | [.github/actions/shared/resolve-docker-image-tags/action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
 | [.github/actions/shared/resolve-release-context/action.yml](.github/actions/shared/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
+| [.github/actions/shared/resolve-upstream-version/action.yml](.github/actions/shared/resolve-upstream-version/action.yml) | Composite action | Shallow-clones an upstream git repo at a ref and resolves a version (file → `git describe` → short SHA), commit SHA, and commit date. |
+| [.github/actions/shared/docker-multiarch-manifest/action.yml](.github/actions/shared/docker-multiarch-manifest/action.yml) | Composite action | Assembles a multi-arch Docker manifest from per-arch digest artifacts and pushes it under one or more tags, with retry on transient registry failures. |
 | [.github/actions/sync-dockerhub-description/action.yml](.github/actions/sync-dockerhub-description/action.yml) | Composite action | Validates inputs and pushes a repo's README + short description to Docker Hub via `peter-evans/dockerhub-description`. |
 | [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
 | [.github/workflows/openwrt-readsb-wiedehopf-bump.yml](.github/workflows/openwrt-readsb-wiedehopf-bump.yml) | Scheduled automation | Tracks new `wiedehopf/readsb` releases and proposes them upstream as a cross-repo PR to `openwrt/packages` (bumps `PKG_VERSION`/`PKG_HASH`, resets `PKG_RELEASE`) via a bot-owned fork. |
+| [.github/workflow-templates/](.github/workflow-templates/) | Starter workflows | GitHub-format starter workflows (`*.yml` + sibling `*.properties.json`, `$default-branch` placeholders) that thinly wrap the reusable workflows above. See [.github/workflow-templates/README.md](.github/workflow-templates/README.md). |
 
 ---
 
@@ -107,8 +112,6 @@ jobs:
 | `build_date` | string | `''` | Override ISO-8601 build date. |
 | `manifest_retries` | number | `3` | Retry attempts for manifest creation. |
 | `manifest_retry_delay` | number | `15` | Seconds between manifest retries. |
-| `actions_repo` | string | `blackoutsecure/platform-automation` | Repo hosting the composite action. |
-| `resolver_ref` | string | `main` | Git ref of `actions_repo` to check out. |
 | `runner_type` | string | `cloud` | `cloud` (GitHub-hosted) or `self-hosted`. |
 | `update_description` | boolean | `true` | Sync the repo README + short description to Docker Hub after a successful manifest push. No-op when not pushing. |
 | `readme_filepath` | string | `./README.md` | Path to the README uploaded as the Docker Hub full description. |
@@ -122,7 +125,6 @@ jobs:
 | `DOCKERHUB_USERNAME` | ✔ | Docker Hub username. |
 | `DOCKERHUB_TOKEN` | ✔ | Docker Hub access token (not your password). |
 | `DOCKERHUB_NAMESPACE` | ✖ | **Deprecated.** Pass `dockerhub_namespace:` (or set `vars.DOCKERHUB_NAMESPACE`) instead. Still accepted for back-compat. |
-| `ACTIONS_REPO_TOKEN` | ✖ | Only needed if `actions_repo` is private. Falls back to `GITHUB_TOKEN`. |
 
 ### Outputs
 
@@ -201,6 +203,114 @@ for the full input list.
 
 ---
 
+## `docker-multiarch-manifest` — composite action
+
+Assemble a multi-arch Docker manifest from per-architecture digest
+artifacts and push it under one or more tags. Used internally by the
+manifest job in [`docker-build-push.yml`](.github/workflows/docker-build-push.yml),
+and reusable on its own when you need finer control (e.g. building
+amd64 and arm64 in different jobs/runners and merging at the end).
+
+```yaml
+- uses: docker/setup-buildx-action@v3
+- uses: docker/login-action@v3
+  with:
+    username: ${{ secrets.DOCKERHUB_USERNAME }}
+    password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+- uses: actions/download-artifact@v4
+  with:
+    path: /tmp/digests
+    pattern: digest-*
+    merge-multiple: true
+
+- uses: blackoutsecure/platform-automation/.github/actions/shared/docker-multiarch-manifest@main
+  id: manifest
+  with:
+    image_ref: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/my-service
+    digests_dir: /tmp/digests
+    version_tag: 1.2.3
+    latest: true
+    extra_tags: |
+      stable
+      sha-${{ github.sha }}
+- run: echo "Pushed ${{ steps.manifest.outputs.digest_count }} arch(es)"
+```
+
+### Inputs
+
+- `image_ref` — fully qualified image name **without a tag**.
+- `digests_dir` — directory of per-arch digest files. Each filename
+  must be the 64-char lowercase hex sha256 (no `sha256:` prefix), as
+  written by `docker/build-push-action`'s `push-by-digest=true` mode.
+- `version_tag` — primary tag, always applied.
+- `latest` — also tag `:latest` (default `true`).
+- `extra_tags` — newline-separated extra tags. Empty lines and
+  `#`-comments are ignored. Tags are deduplicated.
+- `max_attempts` — manifest create retries (1–10, default `3`).
+- `retry_delay_seconds` — delay between retries (1–300, default `15`).
+- `inspect_after_push` — run `imagetools inspect` after success
+  (default `true`).
+
+### Outputs
+
+- `applied_tags` — newline-separated list of tags actually applied.
+- `digest_count` — number of per-arch digests merged.
+
+See [action.yml](.github/actions/shared/docker-multiarch-manifest/action.yml)
+for full details.
+
+---
+
+## `resolve-upstream-version` — composite action
+
+Shallow-clone an upstream git repo at a branch, tag, or commit and emit
+its version string, full commit SHA, and ISO-8601 commit date. Designed
+for downstream wrappers (Docker images, Balena blocks, OpenWrt packages)
+where the build version should track the upstream project. Resolution
+cascade: explicit `version_file` → `git describe --tags` → short SHA;
+each fallback opt-out via its own input.
+
+```yaml
+- uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-upstream-version@main
+  id: upstream
+  with:
+    repo_url: https://github.com/wiedehopf/readsb
+    ref: main
+    version_file: version
+- run: echo "tracking ${{ steps.upstream.outputs.version }}"
+```
+
+### Inputs
+
+- `repo_url` — HTTPS URL to the upstream repo (with or without `.git`).
+  SSH/`git://`/`file://` are rejected.
+- `ref` — branch, tag, or commit SHA to fetch. Charset restricted to
+  `[A-Za-z0-9._/-]+`; `..` and leading `-` are rejected.
+- `version_file` — repo-relative path to a plain-text version file
+  (default `version`). Path traversal is rejected. Empty disables the
+  file probe.
+- `fallback_to_describe` — fall back to `git describe --tags FETCH_HEAD`
+  when the file probe fails (default `true`).
+- `fallback_to_sha` — fall back to the short SHA when the other
+  resolvers fail (default `true`).
+- `sha_length` — short-SHA length (4–40, default `12`).
+- `strip_v_prefix` — strip a leading `v` from the resolved version
+  (default `true`).
+
+### Outputs
+
+- `version` — resolved upstream version (no whitespace).
+- `vcs_ref` — full upstream commit SHA at the resolved ref.
+- `build_date` — ISO-8601 UTC commit date.
+- `source` — which resolver path produced the version: `file`,
+  `describe`, or `sha`.
+
+See [action.yml](.github/actions/shared/resolve-upstream-version/action.yml)
+for full details.
+
+---
+
 ## `balena-block-publish.yml` — reusable workflow
 
 Resolve a block version (same logic as the Docker workflow), optionally
@@ -230,6 +340,149 @@ sync the version back into `balena.yml`, and publish to balenaCloud via
   block; in-progress runs are never cancelled.
 
 See [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml)
+for the full input/output list.
+
+---
+
+## `balena-fleet-deploy.yml` — reusable workflow
+
+Render a balena block manifest (`balena.yml`) per architecture from a
+JSON list of fleet targets, then deploy to each target in a fan-out
+matrix via
+[`balena-io/deploy-to-balena-action`](https://github.com/balena-io/deploy-to-balena-action).
+
+Use this when the *same* block is deployed to *multiple* fleets that
+differ only in their `defaultDeviceType` / `supportedDeviceTypes`
+(e.g. an x64 fleet and an arm64 fleet of the same self-hosted runner).
+For a single-fleet block whose `balena.yml` lives in the repo, use
+[`balena-block-publish.yml`](#balena-block-publishyml--reusable-workflow)
+instead.
+
+### Minimal caller
+
+```yaml
+name: Balena fleets
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: blackoutsecure/platform-automation/.github/workflows/balena-fleet-deploy.yml@main
+    with:
+      block_name: my-block
+      block_version: 1.0.0
+      targets: |
+        [
+          {
+            "name": "x64",
+            "fleet": "acme/my-block-x64",
+            "default_device_type": "genericx86-64-ext",
+            "supported_device_types": "genericx86-64-ext,intel-nuc"
+          },
+          {
+            "name": "arm64",
+            "fleet": "acme/my-block-arm64",
+            "default_device_type": "raspberrypi4-64",
+            "supported_device_types": "raspberrypi4-64,raspberrypi5,generic-aarch64"
+          }
+        ]
+    secrets:
+      BALENA_API_TOKEN: ${{ secrets.BALENA_API_TOKEN }}
+```
+
+### Default behaviour
+
+- **`balena.yml` is rendered, never committed.** Each matrix job writes
+  it transiently before the deploy step. The caller repo doesn't need
+  a checked-in `balena.yml`.
+- **One job per target.** `strategy.fail-fast: false` so a failure in
+  one fleet doesn't cancel the others.
+- **Per-fleet concurrency.** balenaCloud rejects concurrent pushes to
+  the same fleet; the workflow serialises them per fleet and never
+  cancels an in-progress run.
+- **Event-agnostic.** Trigger logic stays in the caller; pass the
+  active subset via `target_filter`. The starter workflow demonstrates
+  the `push` / `workflow_dispatch` / `repository_dispatch` fan-out
+  pattern.
+
+### Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `targets` | string | **required** | JSON array of fleet targets (see below). |
+| `target_filter` | string | `''` | Comma-separated subset of target `name`s. Empty/`all` = every target. |
+| `block_name` | string | **required** | Top-level `name:` written to `balena.yml`. |
+| `block_version` | string | **required** | Top-level `version:`. |
+| `block_type` | string | `sw.application` | Top-level `type:`. |
+| `description_template` | string | `''` | Template for `description:` with `{{ name }}` / `{{ fleet }}` / `{{ labels }}` / `{{ default_device_type }}` / `{{ supported_device_types }}` substitution. |
+| `post_provisioning_template` | string | `''` | Template for `post-provisioning:`. Same placeholders. |
+| `assets_repository_url` | string | `''` | Sets `assets.repository.data.url`. Must be `https://`. Empty omits the assets block. |
+| `balena_yml_path` | string | `./balena.yml` | Repo-relative path the rendered file is written to. |
+| `source` | string | `.` | Forwarded to `deploy-to-balena-action`. |
+| `cache` | boolean | `true` | Forwarded to `deploy-to-balena-action`. |
+| `layer_cache` | boolean | `true` | Forwarded to `deploy-to-balena-action`. |
+| `debug` | boolean | `false` | Forwarded to `deploy-to-balena-action`. |
+| `draft` | boolean | `false` | Publish as a draft (sets `finalize: false`). |
+| `runs_on` | string | `ubuntu-latest` | Runner label. |
+| `timeout_minutes` | number | `60` | Per-deploy job timeout. |
+
+### Target object schema
+
+Each entry in `targets` is a JSON object with these fields:
+
+| Field | Required | Description |
+|-------|:--------:|-------------|
+| `name` | ✔ | Slug used by `target_filter` and shown in job names. Must be unique. |
+| `fleet` | ✔ | balenaCloud fleet slug (`<namespace>/<fleet>`). |
+| `default_device_type` | ✔ | Device-type slug written as `data.defaultDeviceType`. Must appear in `supported_device_types`. |
+| `supported_device_types` | ✔ | Comma-separated device-type slugs written as `data.supportedDeviceTypes`. |
+| `labels` | ✖ | Free-form string available as `{{ labels }}` in templates. |
+| `description` | ✖ | Per-target literal that overrides `description_template`. |
+| `post_provisioning` | ✖ | Per-target literal that overrides `post_provisioning_template`. |
+
+### Secrets
+
+| Secret | Required | Description |
+|--------|:--------:|-------------|
+| `BALENA_API_TOKEN` | ✔ | balenaCloud API token with deploy access to every fleet listed in `targets`. |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `selected` | JSON list of target names actually selected for deploy. |
+| `count` | Number of fleets selected for deploy. |
+
+### Security notes specific to this workflow
+
+- `targets` JSON is parsed and validated in a dedicated `plan` job
+  before any deploy runs. `name`, `fleet`, `default_device_type`, and
+  every entry in `supported_device_types` are regex-checked; unknown
+  keys are rejected.
+- `balena_yml_path` and `assets_repository_url` are rejected if they
+  resolve outside the workspace or use a non-`https://` scheme.
+- The rendered manifest is written via PyYAML's `safe_dump`, which
+  quotes/escapes any special characters — caller-supplied
+  `description` / `post-provisioning` text cannot break out of the YAML
+  doc.
+- Template substitution accepts only keys matching `^[a-z][a-z0-9_]*$`
+  drawn from a fixed allow-list, so caller values cannot inject
+  arbitrary template tokens.
+- `BALENA_API_TOKEN` is rejected if it contains whitespace (a stray
+  newline would silently truncate `GITHUB_OUTPUT`).
+- All `${{ … }}` template expansions go through `env:` blocks — caller
+  values never appear inline in any `run:` body, eliminating the
+  script-injection class of bug.
+- The deploy step runs with `persist-credentials: false` and the
+  workflow defaults to `permissions: contents: read`.
+
+See [.github/workflows/balena-fleet-deploy.yml](.github/workflows/balena-fleet-deploy.yml)
 for the full input/output list.
 
 ---
@@ -330,6 +583,114 @@ token via the `DISPATCH_TOKEN` secret.
 
 See [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml)
 for the full input/output list.
+
+---
+
+## `release.yml` — reusable **meta-workflow**
+
+End-to-end tag-driven release pipeline. Composes three single-purpose
+reusable workflows in this repo into one call:
+
+1. [`docker-build-push.yml`](.github/workflows/docker-build-push.yml) —
+   multi-arch image to Docker Hub.
+2. [`balena-block-publish.yml`](.github/workflows/balena-block-publish.yml) —
+   publish source tree as a balenaBlock.
+3. [`github-release.yml`](.github/workflows/github-release.yml) —
+   render notes and create/update the GitHub Release.
+
+Each stage is independently togglable (`docker: true|false`,
+`balena: true|false`, `github_release: true|false`), so the same
+meta-workflow powers Docker-only, Balena-only, or any combination.
+
+### Tag resolution
+
+`tag_name` is optional. When empty, the meta-workflow auto-resolves
+from the calling event:
+
+- `push` of a tag → `github.ref_name`
+- `release` event → `github.event.release.tag_name`
+- `workflow_dispatch` → caller **must** pass `tag_name` explicitly
+
+The resolved tag is validated against `vX.Y.Z[-suffix]` (SemVer with an
+optional pre-release suffix) before any stage runs.
+
+### Minimal caller
+
+```yaml
+name: Release (tag-driven)
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+', 'v[0-9]+.[0-9]+.[0-9]+-*']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g. v1.2.3).'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    permissions:
+      contents: write   # balena commit-back + GitHub Release publish
+    uses: blackoutsecure/platform-automation/.github/workflows/release.yml@main
+    with:
+      tag_name:            ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || '' }}
+      image_name:          ${{ vars.IMAGE_NAME }}
+      dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
+      block_name:          ${{ vars.BALENA_BLOCK_NAME }}
+      balena_namespace:    ${{ vars.BALENA_NAMESPACE }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
+```
+
+A drop-in starter is provided at
+[.github/workflow-templates/release.yml](.github/workflow-templates/release.yml).
+
+### Stage skipping semantics
+
+`github-release` runs when `inputs.github_release` is true and **no**
+upstream stage failed or was cancelled. Skipped upstream stages
+(because their toggle was `false`) do **not** prevent it from running.
+
+### Inputs
+
+See [.github/workflows/release.yml](.github/workflows/release.yml) for
+the authoritative list. High-level groups:
+
+- **Tag/version:** `tag_name`
+- **Stage toggles:** `docker`, `balena`, `github_release`
+- **Docker:** `image_name`, `dockerhub_namespace`, `docker_extra_tags`,
+  `docker_short_description`, `docker_latest`, `docker_multi_arch`,
+  `docker_update_description`
+- **Balena:** `block_name`, `balena_namespace`, `balena_sync_yml`,
+  `balena_draft`
+- **GitHub Release:** `release_template_path`, `release_extra_context`,
+  `generate_release_notes`, `release_files`, `release_draft`,
+  `release_prerelease`, `platforms`
+
+### Secrets
+
+| Secret | Required when |
+|--------|---------------|
+| `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` | `docker: true` (default) |
+| `BALENA_API_TOKEN` | `balena: true` (default) |
+
+### Outputs
+
+| Output | Description |
+|--------|-------------|
+| `tag_name` | Resolved release tag (with `v` prefix when present). |
+| `version` | Resolved version (tag with leading `v` stripped). |
+| `image` | Fully qualified Docker image reference (when the docker stage ran). |
+| `release_url` | GitHub Release HTML URL (when the github-release stage ran). |
 
 ---
 
@@ -567,32 +928,15 @@ for the full input/output list.
 ## Security notes
 
 This repository is public and these workflows run in downstream repos
-with access to their secrets, so they follow GitHub's
-[security hardening guidance](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions):
+with access to their secrets. The hardening practices applied across
+every workflow and composite action — pinned action SHAs, least-privilege
+tokens, no credential persistence, injection-safe shell scripts, strict
+input validation, concurrency safety, and no `pull_request_target` — are
+documented in [SECURITY.md](SECURITY.md).
 
-- **Pinned actions.** Every `uses:` reference is pinned to a 40-char
-  commit SHA, with the human-readable version in a trailing comment.
-  [Dependabot](.github/dependabot.yml) opens grouped PRs weekly to bump
-  the SHAs as new releases ship.
-- **Injection-safe scripts.** All user-controlled inputs reach shell via
-  `env:` — no `${{ ... }}` expansion happens inside `run:` bodies,
-  eliminating the
-  [script-injection class of vulnerability](https://securitylab.github.com/research/github-actions-untrusted-input/).
-- **Least-privilege tokens.** `permissions: contents: read` at the
-  workflow level; jobs that need `contents: write` (only the
-  `sync-balena-yml` job) opt in explicitly.
-- **No credential persistence.** Every checkout uses
-  `persist-credentials: false`, except the one job that has to push a
-  commit back to the default branch.
-- **Strict input validation.** Tags, identifiers, image names, slugs,
-  Balena block names, and `actions_repo` overrides are all regex-checked
-  before use; secrets are rejected if they contain stray whitespace.
-- **Concurrency safety.** Publish jobs use `cancel-in-progress: false`
-  to avoid leaving partial releases behind.
-- **No `pull_request_target`.** Untrusted PR code is never checked out
-  with elevated privileges.
-
-See [SECURITY.md](SECURITY.md) for the vulnerability-disclosure process.
+To report a vulnerability, use GitHub's
+[private vulnerability reporting](https://github.com/blackoutsecure/platform-automation/security/advisories/new)
+form.
 
 ---
 

@@ -1,0 +1,7 @@
+{
+  "name": "Docker Build and Push",
+  "description": "Multi-arch (amd64 + arm64) Docker Buildx build and push to Docker Hub via the org's platform-automation reusable workflow.",
+  "iconName": "docker",
+  "categories": ["Deployment", "Containers"],
+  "filePatterns": ["Dockerfile$"]
+}

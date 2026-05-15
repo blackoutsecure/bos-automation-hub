@@ -1,0 +1,478 @@
+name: Balena Fleet Deploy (reusable)
+
+"on":
+  workflow_call:
+    inputs:
+      targets:
+        description: >-
+          JSON array of fleet target objects. Each entry requires:
+          `name` (slug used by `target_filter`), `fleet`
+          (`<namespace>/<fleet>`), `default_device_type` (balena
+          device-type slug), and `supported_device_types` (comma-
+          separated balena device-type slugs). Optional per-entry
+          keys: `labels`, `description`, `post_provisioning` — when
+          set, override the workflow-level templates for that target.
+        required: true
+        type: string
+      target_filter:
+        description: >-
+          Comma-separated subset of target names to deploy. Empty or
+          `all` means every target. Useful when callers fan out per
+          architecture via `workflow_dispatch`/`repository_dispatch`.
+        required: false
+        type: string
+        default: ''
+      block_name:
+        description: 'Top-level `name:` written to the rendered `balena.yml`.'
+        required: true
+        type: string
+      block_version:
+        description: 'Top-level `version:` written to the rendered `balena.yml`.'
+        required: true
+        type: string
+      block_type:
+        description: 'Top-level `type:` written to the rendered `balena.yml`.'
+        required: false
+        type: string
+        default: sw.application
+      description_template:
+        description: >-
+          Optional template for the `description:` field. Supports
+          `{{ name }}`, `{{ fleet }}`, `{{ labels }}`,
+          `{{ default_device_type }}`, and `{{ supported_device_types }}`
+          placeholders. Per-target `description` overrides this.
+        required: false
+        type: string
+        default: ''
+      post_provisioning_template:
+        description: >-
+          Optional template for the `post-provisioning:` field. Same
+          placeholders as `description_template`. Per-target
+          `post_provisioning` overrides this.
+        required: false
+        type: string
+        default: ''
+      assets_repository_url:
+        description: >-
+          Optional `assets.repository.data.url`. Must be an
+          `https://` URL when set; empty omits the assets block.
+        required: false
+        type: string
+        default: ''
+      balena_yml_path:
+        description: 'Repo-relative path the rendered `balena.yml` is written to.'
+        required: false
+        type: string
+        default: ./balena.yml
+      source:
+        description: 'Forwarded to `deploy-to-balena-action` as `source`.'
+        required: false
+        type: string
+        default: .
+      cache:
+        description: 'Forwarded to `deploy-to-balena-action` as `cache`.'
+        required: false
+        type: boolean
+        default: true
+      layer_cache:
+        description: 'Forwarded to `deploy-to-balena-action` as `layer_cache`.'
+        required: false
+        type: boolean
+        default: true
+      debug:
+        description: 'Forwarded to `deploy-to-balena-action` as `debug`.'
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: 'Publish as a draft (sets `finalize: false`).'
+        required: false
+        type: boolean
+        default: false
+      runs_on:
+        description: 'Runner label for the deploy job.'
+        required: false
+        type: string
+        default: ubuntu-latest
+      timeout_minutes:
+        description: 'Per-deploy job timeout in minutes.'
+        required: false
+        type: number
+        default: 60
+    secrets:
+      BALENA_API_TOKEN:
+        description: 'balenaCloud API token with deploy access to every fleet in `targets`.'
+        required: true
+    outputs:
+      selected:
+        description: 'JSON list of target names selected for deploy.'
+        value: ${{ jobs.plan.outputs.selected }}
+      count:
+        description: 'Number of fleets selected for deploy.'
+        value: ${{ jobs.plan.outputs.count }}
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+      count: ${{ steps.build.outputs.count }}
+      selected: ${{ steps.build.outputs.selected }}
+    steps:
+      - name: Validate inputs and build matrix
+        id: build
+        env:
+          TARGETS: ${{ inputs.targets }}
+          TARGET_FILTER: ${{ inputs.target_filter }}
+          BLOCK_NAME: ${{ inputs.block_name }}
+          BLOCK_VERSION: ${{ inputs.block_version }}
+          BLOCK_TYPE: ${{ inputs.block_type }}
+          ASSETS_REPO_URL: ${{ inputs.assets_repository_url }}
+          BALENA_YML_PATH: ${{ inputs.balena_yml_path }}
+          BALENA_API_TOKEN: ${{ secrets.BALENA_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - >> "${GITHUB_OUTPUT}" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+
+          def fail(msg):
+              print(f"ERROR: {msg}", file=sys.stderr)
+              sys.exit(1)
+
+
+          # A stray newline silently truncates GITHUB_OUTPUT for any
+          # downstream job, so reject whitespace in single-line scalars.
+          def reject_ws(name, val, allow_inner_space=False):
+              bad = "\n\r\t" if allow_inner_space else "\n\r\t "
+              if any(c in val for c in bad):
+                  fail(f"input {name} contains whitespace/newlines")
+
+
+          slug_re = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+          fleet_re = re.compile(
+              r"^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
+          )
+
+          # ---- workflow-level inputs --------------------------------
+          for k in ("BLOCK_NAME", "BLOCK_VERSION", "BLOCK_TYPE"):
+              v = os.environ.get(k, "").strip()
+              if not v:
+                  fail(f"input {k.lower()} is required")
+              reject_ws(k.lower(), v, allow_inner_space=True)
+
+          token = os.environ.get("BALENA_API_TOKEN", "")
+          if not token:
+              fail("secret BALENA_API_TOKEN is required")
+          reject_ws("BALENA_API_TOKEN", token)
+
+          assets_url = os.environ.get("ASSETS_REPO_URL", "").strip()
+          if assets_url and not assets_url.startswith("https://"):
+              fail("input assets_repository_url must start with 'https://'")
+
+          out_path = os.environ.get("BALENA_YML_PATH", "").strip()
+          if not out_path:
+              fail("input balena_yml_path is empty")
+          if out_path.startswith("/") or ".." in out_path.split("/"):
+              fail(f"input balena_yml_path must be repo-relative: {out_path!r}")
+
+          # ---- targets array ----------------------------------------
+          raw = os.environ.get("TARGETS", "").strip()
+          if not raw:
+              fail("input targets is empty")
+          try:
+              targets = json.loads(raw)
+          except json.JSONDecodeError as e:
+              fail(f"input targets is not valid JSON: {e}")
+
+          if not isinstance(targets, list) or not targets:
+              fail("input targets must be a non-empty JSON array")
+
+          required_keys = (
+              "name",
+              "fleet",
+              "default_device_type",
+              "supported_device_types",
+          )
+          allowed_keys = set(required_keys) | {
+              "labels",
+              "description",
+              "post_provisioning",
+          }
+
+          seen = set()
+          for i, t in enumerate(targets):
+              if not isinstance(t, dict):
+                  fail(f"targets[{i}] must be a JSON object")
+              extras = sorted(set(t.keys()) - allowed_keys)
+              if extras:
+                  fail(f"targets[{i}] has unsupported keys: {extras}")
+              for k in required_keys:
+                  v = t.get(k)
+                  if not isinstance(v, str) or not v.strip():
+                      fail(f"targets[{i}].{k} is required (non-empty string)")
+
+              n = t["name"].strip()
+              if not slug_re.match(n):
+                  fail(f"targets[{i}].name {n!r} is not a valid slug")
+              if n in seen:
+                  fail(f"duplicate targets[].name {n!r}")
+              seen.add(n)
+              t["name"] = n
+
+              fleet = t["fleet"].strip()
+              if not fleet_re.match(fleet):
+                  fail(
+                      f"targets[{i}].fleet {fleet!r} must be "
+                      "'<namespace>/<fleet>'"
+                  )
+              t["fleet"] = fleet
+
+              ddt = t["default_device_type"].strip()
+              if not slug_re.match(ddt):
+                  fail(f"targets[{i}].default_device_type {ddt!r} invalid")
+              t["default_device_type"] = ddt
+
+              dts = [
+                  s.strip()
+                  for s in t["supported_device_types"].split(",")
+                  if s.strip()
+              ]
+              if not dts:
+                  fail(f"targets[{i}].supported_device_types is empty")
+              for s in dts:
+                  if not slug_re.match(s):
+                      fail(
+                          f"targets[{i}].supported_device_types entry {s!r} invalid"
+                      )
+              if ddt not in dts:
+                  fail(
+                      f"targets[{i}].default_device_type {ddt!r} not present in "
+                      "supported_device_types"
+                  )
+              # Re-emit the normalized comma list for downstream env vars.
+              t["supported_device_types"] = ",".join(dts)
+
+              for k in ("labels", "description", "post_provisioning"):
+                  v = t.get(k, "")
+                  if not isinstance(v, str):
+                      fail(f"targets[{i}].{k} must be a string")
+                  t[k] = v
+
+          # ---- apply target_filter ----------------------------------
+          flt_raw = os.environ.get("TARGET_FILTER", "").strip()
+          if flt_raw and flt_raw.lower() != "all":
+              wanted = {x.strip() for x in flt_raw.split(",") if x.strip()}
+              known = {t["name"] for t in targets}
+              unknown = sorted(wanted - known)
+              if unknown:
+                  fail(f"target_filter references unknown name(s): {unknown}")
+              targets = [t for t in targets if t["name"] in wanted]
+
+          if not targets:
+              fail("no targets selected after filter")
+
+          print(f"matrix={json.dumps({'include': targets})}")
+          print(f"count={len(targets)}")
+          print(f"selected={json.dumps([t['name'] for t in targets])}")
+          PY
+
+      - name: Show selected targets
+        env:
+          MATRIX: ${{ steps.build.outputs.matrix }}
+          COUNT: ${{ steps.build.outputs.count }}
+        run: |
+          set -euo pipefail
+          echo "::group::Selected matrix (${COUNT} target(s))"
+          printf '%s\n' "${MATRIX}" \
+            | python3 -c 'import json,sys; print(json.dumps(json.loads(sys.stdin.read()), indent=2))'
+          echo "::endgroup::"
+
+  deploy:
+    name: Deploy ${{ matrix.name }} (${{ matrix.fleet }})
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    concurrency:
+      # balenaCloud rejects concurrent pushes to the same fleet.
+      group: balena-fleet-deploy-${{ github.workflow }}-${{ matrix.fleet }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Render balena.yml
+        env:
+          TARGET_NAME: ${{ matrix.name }}
+          TARGET_FLEET: ${{ matrix.fleet }}
+          DEFAULT_DEVICE_TYPE: ${{ matrix.default_device_type }}
+          SUPPORTED_DEVICE_TYPES: ${{ matrix.supported_device_types }}
+          TARGET_LABELS: ${{ matrix.labels }}
+          TARGET_DESCRIPTION: ${{ matrix.description }}
+          TARGET_POST_PROVISIONING: ${{ matrix.post_provisioning }}
+          BLOCK_NAME: ${{ inputs.block_name }}
+          BLOCK_VERSION: ${{ inputs.block_version }}
+          BLOCK_TYPE: ${{ inputs.block_type }}
+          DESCRIPTION_TEMPLATE: ${{ inputs.description_template }}
+          POST_PROVISIONING_TEMPLATE: ${{ inputs.post_provisioning_template }}
+          ASSETS_REPO_URL: ${{ inputs.assets_repository_url }}
+          OUT_PATH: ${{ inputs.balena_yml_path }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          # PyYAML ships with the default Python on ubuntu-latest runners.
+          import yaml
+
+
+          def fail(msg):
+              print(f"ERROR: {msg}", file=sys.stderr)
+              sys.exit(1)
+
+
+          out_path = os.environ["OUT_PATH"].strip()
+          if out_path.startswith("/") or ".." in out_path.split("/"):
+              fail(f"balena_yml_path must be repo-relative: {out_path!r}")
+
+          name = os.environ["TARGET_NAME"]
+          fleet = os.environ["TARGET_FLEET"]
+          default_dt = os.environ["DEFAULT_DEVICE_TYPE"]
+          supported = [
+              s.strip()
+              for s in os.environ["SUPPORTED_DEVICE_TYPES"].split(",")
+              if s.strip()
+          ]
+          labels = os.environ.get("TARGET_LABELS", "")
+
+          ctx = {
+              "name": name,
+              "fleet": fleet,
+              "labels": labels,
+              "default_device_type": default_dt,
+              "supported_device_types": os.environ["SUPPORTED_DEVICE_TYPES"],
+          }
+
+          # Restricted key shape blocks injection of arbitrary template tokens.
+          key_re = re.compile(r"^[a-z][a-z0-9_]*$")
+          token_re = re.compile(r"\{\{\s*([^}\s]+)\s*\}\}")
+
+          def render(tpl):
+              if not tpl:
+                  return ""
+
+              def repl(m):
+                  k = m.group(1).strip()
+                  if not key_re.fullmatch(k):
+                      fail(f"template key {k!r} must match ^[a-z][a-z0-9_]*$")
+                  if k not in ctx:
+                      fail(f"unknown template key '{{{{ {k} }}}}'")
+                  return ctx[k]
+
+              return token_re.sub(repl, tpl)
+
+          desc = os.environ.get("TARGET_DESCRIPTION") or render(
+              os.environ.get("DESCRIPTION_TEMPLATE", "")
+          )
+          pp = os.environ.get("TARGET_POST_PROVISIONING") or render(
+              os.environ.get("POST_PROVISIONING_TEMPLATE", "")
+          )
+
+          doc = {
+              "name": os.environ["BLOCK_NAME"],
+              "type": os.environ["BLOCK_TYPE"],
+              "version": os.environ["BLOCK_VERSION"],
+          }
+          if desc:
+              doc["description"] = desc
+          if pp:
+              doc["post-provisioning"] = pp
+
+          assets_url = os.environ.get("ASSETS_REPO_URL", "").strip()
+          if assets_url:
+              if not assets_url.startswith("https://"):
+                  fail("assets_repository_url must start with 'https://'")
+              doc["assets"] = {
+                  "repository": {
+                      "type": "blob.asset",
+                      "data": {"url": assets_url},
+                  }
+              }
+
+          doc["data"] = {
+              "defaultDeviceType": default_dt,
+              "supportedDeviceTypes": supported,
+          }
+
+          # safe_dump quotes / escapes any special characters; caller
+          # values cannot break out of the YAML doc.
+          with open(out_path, "w", encoding="utf-8") as f:
+              yaml.safe_dump(
+                  doc,
+                  f,
+                  sort_keys=False,
+                  default_flow_style=False,
+                  allow_unicode=True,
+              )
+          PY
+
+          echo "::group::Rendered ${OUT_PATH}"
+          cat -- "${OUT_PATH}"
+          echo "::endgroup::"
+
+          # Defensive re-parse — confirm valid YAML before handing it to the deploy action.
+          python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' -- "${OUT_PATH}"
+
+      - name: Deploy to balenaCloud
+        id: deploy
+        uses: balena-io/deploy-to-balena-action@60c9255a5329ffa07e0313b155491dc393a97fb9 # v2.1.0
+        with:
+          balena_token: ${{ secrets.BALENA_API_TOKEN }}
+          fleet: ${{ matrix.fleet }}
+          source: ${{ inputs.source }}
+          cache: ${{ inputs.cache }}
+          layer_cache: ${{ inputs.layer_cache }}
+          debug: ${{ inputs.debug }}
+          finalize: ${{ inputs.draft && 'false' || 'true' }}
+
+      - name: Job summary
+        if: always()
+        env:
+          NAME: ${{ matrix.name }}
+          FLEET: ${{ matrix.fleet }}
+          BLOCK_NAME: ${{ inputs.block_name }}
+          BLOCK_VERSION: ${{ inputs.block_version }}
+          DEFAULT_DEVICE_TYPE: ${{ matrix.default_device_type }}
+          SUPPORTED_DEVICE_TYPES: ${{ matrix.supported_device_types }}
+          RELEASE_ID: ${{ steps.deploy.outputs.release_id }}
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Balena Fleet Deploy — \`${NAME}\`"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Block                   | \`${BLOCK_NAME}\` |"
+            echo "| Block version           | \`${BLOCK_VERSION}\` |"
+            echo "| Fleet                   | \`${FLEET}\` |"
+            echo "| Default device type     | \`${DEFAULT_DEVICE_TYPE}\` |"
+            echo "| Supported device types  | \`${SUPPORTED_DEVICE_TYPES}\` |"
+            echo "| Release ID              | \`${RELEASE_ID:-n/a}\` |"
+            echo "| Status                  | \`${STATUS}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"

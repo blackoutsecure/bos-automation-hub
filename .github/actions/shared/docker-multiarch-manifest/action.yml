@@ -1,0 +1,181 @@
+name: Create and push multi-arch Docker manifest
+description: >-
+  Assemble a multi-arch image manifest from per-architecture digest
+  artifacts and publish it under one or more tags, with retry on
+  transient registry failures. Tags are deduplicated and validated.
+  Caller is responsible for `docker/setup-buildx-action` and registry
+  login (e.g. `docker/login-action`).
+
+inputs:
+  image_ref:
+    description: 'Fully qualified image reference without a tag (e.g. `docker.io/acme/widget`).'
+    required: true
+  digests_dir:
+    description: >-
+      Directory containing per-arch digest files. Each filename must be
+      the 64-char lowercase hex sha256 (no `sha256:` prefix), as written
+      by the `push-by-digest` mode of `docker/build-push-action`.
+    required: true
+  version_tag:
+    description: 'Primary version tag (always applied; e.g. `1.2.3`).'
+    required: true
+  latest:
+    description: 'Also tag the manifest as `:latest`.'
+    required: false
+    default: 'true'
+  extra_tags:
+    description: >-
+      Newline-separated extra tags (just the tag portion, not
+      `image:tag`). Empty lines and `#`-prefixed comments are ignored.
+    required: false
+    default: ''
+  max_attempts:
+    description: 'Manifest create retry attempts (1-10).'
+    required: false
+    default: '3'
+  retry_delay_seconds:
+    description: 'Delay between retries (1-300).'
+    required: false
+    default: '15'
+  inspect_after_push:
+    description: 'Run `docker buildx imagetools inspect` on the version tag after a successful push.'
+    required: false
+    default: 'true'
+
+outputs:
+  applied_tags:
+    description: 'Newline-separated list of tags actually applied (post-dedup).'
+    value: ${{ steps.publish.outputs.applied_tags }}
+  digest_count:
+    description: 'Number of per-arch digests merged into the manifest.'
+    value: ${{ steps.publish.outputs.digest_count }}
+
+runs:
+  using: composite
+  steps:
+    - id: publish
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image_ref }}
+        DIGESTS_DIR: ${{ inputs.digests_dir }}
+        VERSION_TAG: ${{ inputs.version_tag }}
+        TAG_LATEST: ${{ inputs.latest }}
+        EXTRA_TAGS: ${{ inputs.extra_tags }}
+        MAX_ATTEMPTS: ${{ inputs.max_attempts }}
+        RETRY_DELAY: ${{ inputs.retry_delay_seconds }}
+        INSPECT_AFTER_PUSH: ${{ inputs.inspect_after_push }}
+      run: |
+        set -euo pipefail
+
+        die() { echo "ERROR: $*" >&2; exit 1; }
+
+        TAG_RE='^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$'
+        validate_tag() {
+          local name="$1" val="$2"
+          printf '%s' "${val}" | grep -Eq "${TAG_RE}" \
+            || die "${name} is not a valid Docker tag: '${val}'"
+        }
+
+        # A stray newline in `image_ref` silently breaks every subsequent
+        # `imagetools` argv; reject it explicitly along with empty inputs.
+        [ -n "${IMAGE_REF}" ]   || die "input 'image_ref' is required"
+        [ -n "${VERSION_TAG}" ] || die "input 'version_tag' is required"
+        case "${IMAGE_REF}" in
+          *[$'\n\r\t ']*) die "input 'image_ref' contains whitespace/newlines" ;;
+        esac
+
+        validate_tag "input 'version_tag'" "${VERSION_TAG}"
+
+        case "${TAG_LATEST}" in
+          true|false) ;;
+          *) die "input 'latest' must be 'true' or 'false' (got '${TAG_LATEST}')" ;;
+        esac
+
+        case "${INSPECT_AFTER_PUSH}" in
+          true|false) ;;
+          *) die "input 'inspect_after_push' must be 'true' or 'false' (got '${INSPECT_AFTER_PUSH}')" ;;
+        esac
+
+        case "${MAX_ATTEMPTS}" in
+          ''|*[!0-9]*) die "input 'max_attempts' must be a positive integer (got '${MAX_ATTEMPTS}')" ;;
+        esac
+        if [ "${MAX_ATTEMPTS}" -lt 1 ] || [ "${MAX_ATTEMPTS}" -gt 10 ]; then
+          die "input 'max_attempts' must be between 1 and 10 (got '${MAX_ATTEMPTS}')"
+        fi
+
+        case "${RETRY_DELAY}" in
+          ''|*[!0-9]*) die "input 'retry_delay_seconds' must be a positive integer (got '${RETRY_DELAY}')" ;;
+        esac
+        if [ "${RETRY_DELAY}" -lt 1 ] || [ "${RETRY_DELAY}" -gt 300 ]; then
+          die "input 'retry_delay_seconds' must be between 1 and 300 (got '${RETRY_DELAY}')"
+        fi
+
+        [ -d "${DIGESTS_DIR}" ] || die "digests_dir '${DIGESTS_DIR}' does not exist"
+
+        mapfile -t DIGESTS < <(find "${DIGESTS_DIR}" -type f -printf '%f\n' | sort)
+        [ "${#DIGESTS[@]}" -gt 0 ] || die "no digests found under '${DIGESTS_DIR}'"
+
+        # Reject anything that isn't a 64-char lowercase hex sha256 — guarantees
+        # the digest will round-trip safely as `${IMAGE_REF}@sha256:${d}`.
+        for d in "${DIGESTS[@]}"; do
+          printf '%s' "${d}" | grep -Eq '^[0-9a-f]{64}$' \
+            || die "digest filename '${d}' is not a 64-char lowercase hex sha256"
+        done
+
+        SOURCES=()
+        for d in "${DIGESTS[@]}"; do
+          SOURCES+=("${IMAGE_REF}@sha256:${d}")
+        done
+
+        declare -A SEEN=()
+        TAG_ARGS=()
+        APPLIED=()
+        add_tag() {
+          local t="$1"
+          [ -n "${t}" ] || return 0
+          [ -n "${SEEN[$t]:-}" ] && return 0
+          validate_tag "computed tag" "${t}"
+          SEEN[$t]=1
+          TAG_ARGS+=(--tag "${IMAGE_REF}:${t}")
+          APPLIED+=("${t}")
+        }
+
+        add_tag "${VERSION_TAG}"
+        [ "${TAG_LATEST}" = "true" ] && add_tag "latest"
+
+        if [ -n "${EXTRA_TAGS}" ]; then
+          while IFS= read -r raw || [ -n "${raw}" ]; do
+            tag="$(printf '%s' "${raw}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            [ -z "${tag}" ] && continue
+            case "${tag}" in \#*) continue ;; esac
+            add_tag "${tag}"
+          done <<< "${EXTRA_TAGS}"
+        fi
+
+        echo "Merging ${#DIGESTS[@]} digest(s) under ${#APPLIED[@]} tag(s):"
+        for t in "${APPLIED[@]}"; do echo "  - ${IMAGE_REF}:${t}"; done
+
+        attempt=1
+        while :; do
+          if docker buildx imagetools create "${TAG_ARGS[@]}" "${SOURCES[@]}"; then
+            echo "Manifest created on attempt ${attempt}."
+            break
+          fi
+          if [ "${attempt}" -ge "${MAX_ATTEMPTS}" ]; then
+            die "failed to create manifest after ${MAX_ATTEMPTS} attempts"
+          fi
+          echo "Attempt ${attempt}/${MAX_ATTEMPTS} failed; retrying in ${RETRY_DELAY}s..."
+          sleep "${RETRY_DELAY}"
+          attempt=$((attempt + 1))
+        done
+
+        if [ "${INSPECT_AFTER_PUSH}" = "true" ]; then
+          docker buildx imagetools inspect "${IMAGE_REF}:${VERSION_TAG}"
+        fi
+
+        {
+          echo "applied_tags<<__EOF__"
+          printf '%s\n' "${APPLIED[@]}"
+          echo "__EOF__"
+          echo "digest_count=${#DIGESTS[@]}"
+        } >> "${GITHUB_OUTPUT}"
