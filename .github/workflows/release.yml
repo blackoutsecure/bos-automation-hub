@@ -317,7 +317,7 @@ jobs:
       # called from a PR-driven flow.
       pull-requests: write
       security-events: write
-    uses: blackoutsecure/platform-automation/.github/workflows/docker-build-push.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/docker-build-push.yml@main
     with:
       image_name:                ${{ inputs.image_name }}
       dockerhub_namespace:       ${{ inputs.dockerhub_namespace }}
@@ -350,7 +350,7 @@ jobs:
     needs: [resolve, docker]
     permissions:
       contents: write   # allow `sync_balena_yml` commit-back
-    uses: blackoutsecure/platform-automation/.github/workflows/balena-block-publish.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/balena-block-publish.yml@main
     with:
       block_name:       ${{ inputs.block_name }}
       balena_namespace: ${{ inputs.balena_namespace }}
@@ -372,7 +372,7 @@ jobs:
     needs: [resolve, docker, balena]
     permissions:
       contents: write
-    uses: blackoutsecure/platform-automation/.github/workflows/github-release.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/github-release.yml@main
     with:
       tag_name:               ${{ needs.resolve.outputs.tag_name }}
       version:                ${{ needs.resolve.outputs.version }}

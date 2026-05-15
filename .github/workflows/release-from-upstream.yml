@@ -272,7 +272,7 @@ jobs:
     name: Monitor ${{ inputs.upstream_repo }}
     permissions:
       contents: write   # commit the tracking file
-    uses: blackoutsecure/platform-automation/.github/workflows/monitor-upstream-release.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/monitor-upstream-release.yml@main
     with:
       upstream_repo:    ${{ inputs.upstream_repo }}
       track_file:       ${{ inputs.track_file }}
@@ -290,7 +290,7 @@ jobs:
       needs.monitor.outputs.changed == 'true' || inputs.force_release
     permissions:
       contents: write   # balena sync_balena_yml + GitHub Release publish
-    uses: blackoutsecure/platform-automation/.github/workflows/release.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release.yml@main
     with:
       tag_name:                        v${{ needs.monitor.outputs.upstream_version }}
       docker:                          ${{ inputs.docker }}

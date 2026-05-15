@@ -48,7 +48,7 @@ so you can choose install / status / uninstall from a menu. Pass an
 explicit subcommand with `sh -s` for non-interactive use (cron, CI).
 
 ```sh
-URL=https://raw.githubusercontent.com/blackoutsecure/platform-automation/main/linux/openwrt/network-security/wireguard-ipv4-only/configure-wireguard-ipv4-only.sh
+URL=https://raw.githubusercontent.com/blackoutsecure/bos-automation-hub/main/linux/openwrt/network-security/wireguard-ipv4-only/configure-wireguard-ipv4-only.sh
 
 # Default — launches the wizard (works even when piped, because the wizard
 # reads from /dev/tty, not stdin)

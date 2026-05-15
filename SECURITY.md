@@ -8,7 +8,7 @@ callers should pin to a specific commit SHA or release tag.
 ## Reporting a vulnerability
 
 Please report security issues **privately** via GitHub's
-[private vulnerability reporting](https://github.com/blackoutsecure/platform-automation/security/advisories/new)
+[private vulnerability reporting](https://github.com/blackoutsecure/bos-automation-hub/security/advisories/new)
 form. Do **not** open a public issue for security reports.
 
 We aim to acknowledge new reports within 5 business days.

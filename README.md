@@ -1,4 +1,4 @@
-# platform-automation
+# bos-automation-hub
 
 > Maintained by [Blackout Secure](https://blackoutsecure.app)
 
@@ -148,7 +148,7 @@ jobs:
   release:
     permissions:
       contents: write   # balena commit-back + GitHub Release publish
-    uses: blackoutsecure/platform-automation/.github/workflows/release.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release.yml@main
     with:
       tag_name:                 ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || '' }}
       image_name:               ${{ vars.IMAGE_NAME }}
@@ -201,7 +201,7 @@ jobs:
   release:
     permissions:
       contents: write   # monitor commit + balena commit-back + GitHub Release
-    uses: blackoutsecure/platform-automation/.github/workflows/release-from-upstream.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release-from-upstream.yml@main
     with:
       upstream_repo:            ${{ vars.UPSTREAM_REPO }}
       force_release:            ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
@@ -254,7 +254,7 @@ jobs:
       contents: read
       security-events: write
       pull-requests: write
-    uses: blackoutsecure/platform-automation/.github/workflows/docker-scout-scan.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/docker-scout-scan.yml@main
     with:
       image: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.IMAGE_NAME }}:${{ inputs.image_tag || 'latest' }}
       command: cves
@@ -302,7 +302,7 @@ jobs:
     permissions:
       contents: write   # commit the tracking file
       actions:  write   # dispatch the target workflows
-    uses: blackoutsecure/platform-automation/.github/workflows/monitor-upstream-release.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/monitor-upstream-release.yml@main
     with:
       upstream_repo:    actions/runner
       track_file:       .github/upstream/actions-runner.json
@@ -441,7 +441,7 @@ permissions:
 
 jobs:
   docker:
-    uses: blackoutsecure/platform-automation/.github/workflows/docker-build-push.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/docker-build-push.yml@main
     with:
       image_name: my-service
       dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
@@ -586,7 +586,7 @@ the called workflow itself — callers do not need to grant it.
 Standalone version/tag resolver. Usable outside the reusable workflow.
 
 ```yaml
-- uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-docker-image-tags@main
+- uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-docker-image-tags@main
   id: tags
   with:
     version_source: auto            # auto | dockerfile | file | git_tag | sha
@@ -627,7 +627,7 @@ It is invoked automatically by the `update-description` job in
 a successful manifest push, and can also be used standalone:
 
 ```yaml
-- uses: blackoutsecure/platform-automation/.github/actions/sync-dockerhub-description@main
+- uses: blackoutsecure/bos-automation-hub/.github/actions/sync-dockerhub-description@main
   with:
     repository: ${{ vars.DOCKERHUB_NAMESPACE }}/my-service
     username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -662,7 +662,7 @@ amd64 and arm64 in different jobs/runners and merging at the end).
     pattern: digest-*
     merge-multiple: true
 
-- uses: blackoutsecure/platform-automation/.github/actions/shared/docker-multiarch-manifest@main
+- uses: blackoutsecure/bos-automation-hub/.github/actions/shared/docker-multiarch-manifest@main
   id: manifest
   with:
     image_ref: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/my-service
@@ -729,7 +729,7 @@ jobs:
       contents: read
       security-events: write   # SARIF upload
       pull-requests: write     # PR comment (if invoked from a PR)
-    uses: blackoutsecure/platform-automation/.github/workflows/docker-scout-scan.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/docker-scout-scan.yml@main
     with:
       image: docker.io/acme/widget:latest
     secrets:
@@ -788,7 +788,7 @@ already built and loaded earlier in the same job, or running multiple
 Scout commands sharing a single login.
 
 ```yaml
-- uses: blackoutsecure/platform-automation/.github/actions/shared/docker-scout-scan@main
+- uses: blackoutsecure/bos-automation-hub/.github/actions/shared/docker-scout-scan@main
   with:
     image: local://acme/widget:scan-${{ github.sha }}
     command: cves
@@ -819,7 +819,7 @@ cascade: explicit `version_file` → `git describe --tags` → short SHA;
 each fallback opt-out via its own input.
 
 ```yaml
-- uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-upstream-version@main
+- uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-upstream-version@main
   id: upstream
   with:
     repo_url: https://github.com/wiedehopf/readsb
@@ -932,7 +932,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: blackoutsecure/platform-automation/.github/workflows/balena-fleet-deploy.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/balena-fleet-deploy.yml@main
     with:
       block_name: my-block
       block_version: 1.0.0
@@ -1197,7 +1197,7 @@ jobs:
   release:
     permissions:
       contents: write   # balena commit-back + GitHub Release publish
-    uses: blackoutsecure/platform-automation/.github/workflows/release.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release.yml@main
     with:
       tag_name:            ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || '' }}
       image_name:          ${{ vars.IMAGE_NAME }}
@@ -1301,7 +1301,7 @@ jobs:
   release:
     permissions:
       contents: write
-    uses: blackoutsecure/platform-automation/.github/workflows/release-from-upstream.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release-from-upstream.yml@main
     with:
       upstream_repo:       wiedehopf/readsb
       image_name:          ${{ vars.IMAGE_NAME }}
@@ -1383,7 +1383,7 @@ permissions:
 
 jobs:
   pages:
-    uses: blackoutsecure/platform-automation/.github/workflows/deploy-cloudflare-pages.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
     with:
       cloudflare_project_name: ${{ vars.CLOUDFLARE_PROJECT_NAME }}
       cloudflare_account_id:   ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -1504,7 +1504,7 @@ is targeted:
 ```yaml
 jobs:
   pages:
-    uses: blackoutsecure/platform-automation/.github/workflows/deploy-cloudflare-pages.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
     with:
       cloudflare_project_name: ${{ vars.CLOUDFLARE_PROJECT_NAME }}
       cloudflare_account_id:   ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -1537,7 +1537,7 @@ command, not just `pages deploy`:
 - uses: actions/checkout@v4
   with: { persist-credentials: false }
 - id: account
-  uses: blackoutsecure/platform-automation/.github/actions/cloudflare-pages-resolve-account-id@main
+  uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-pages-resolve-account-id@main
   with:
     account_id:          ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
     fallback_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -1758,7 +1758,7 @@ input validation, concurrency safety, and no `pull_request_target` — are
 documented in [SECURITY.md](SECURITY.md).
 
 To report a vulnerability, use GitHub's
-[private vulnerability reporting](https://github.com/blackoutsecure/platform-automation/security/advisories/new)
+[private vulnerability reporting](https://github.com/blackoutsecure/bos-automation-hub/security/advisories/new)
 form.
 
 ---

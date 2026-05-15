@@ -188,7 +188,7 @@ jobs:
       - name: Resolve version
         id: tags
         if: inputs.auto_resolve_version
-        uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-docker-image-tags@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-docker-image-tags@main
         with:
           version_override: ${{ inputs.version }}
           version_source: ${{ inputs.version_source }}
@@ -198,7 +198,7 @@ jobs:
 
       - name: Resolve release context
         id: ctx
-        uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-release-context@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-release-context@main
         with:
           publish_override: ${{ inputs.publish }}
           auto_resolve_version: ${{ inputs.auto_resolve_version }}

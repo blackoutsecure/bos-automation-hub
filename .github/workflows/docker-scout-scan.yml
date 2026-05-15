@@ -198,7 +198,7 @@ jobs:
 
       - name: Run Docker Scout
         id: scout
-        uses: blackoutsecure/platform-automation/.github/actions/shared/docker-scout-scan@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/docker-scout-scan@main
         with:
           image: ${{ inputs.image }}
           command: ${{ inputs.command }}

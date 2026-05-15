@@ -302,7 +302,7 @@ jobs:
 
       - name: Resolve Cloudflare account ID
         id: account
-        uses: blackoutsecure/platform-automation/.github/actions/cloudflare-pages-resolve-account-id@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-pages-resolve-account-id@main
         with:
           account_id: ${{ inputs.cloudflare_account_id }}
           fallback_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -495,7 +495,7 @@ jobs:
           bash -eo pipefail -c "${PREBUILD_COMMAND}"
 
       - name: Stage deploy directory
-        uses: blackoutsecure/platform-automation/.github/actions/shared/stage-deploy-dir@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/stage-deploy-dir@main
         with:
           public_dir: ${{ inputs.public_dir }}
           deploy_dir: ${{ inputs.deploy_dir }}
@@ -549,7 +549,7 @@ jobs:
       - name: Compose wrangler command
         id: cmd
         if: steps.gate.outputs.deploy == 'true'
-        uses: blackoutsecure/platform-automation/.github/actions/cloudflare-pages-compose-command@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-pages-compose-command@main
         with:
           deploy_dir: ${{ inputs.deploy_dir }}
           project_name: ${{ inputs.cloudflare_project_name }}

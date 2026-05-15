@@ -423,7 +423,7 @@ jobs:
       - name: Resolve image tags
         id: tags
         if: inputs.auto_resolve_version
-        uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-docker-image-tags@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-docker-image-tags@main
         with:
           version_override: ${{ inputs.image_version }}
           version_source: ${{ inputs.version_source }}
@@ -435,7 +435,7 @@ jobs:
 
       - name: Resolve release context
         id: ctx
-        uses: blackoutsecure/platform-automation/.github/actions/shared/resolve-release-context@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-release-context@main
         with:
           publish_override: ${{ inputs.push }}
           auto_resolve_version: ${{ inputs.auto_resolve_version }}
@@ -649,7 +649,7 @@ jobs:
 
       - name: Create and push manifest
         id: manifest
-        uses: blackoutsecure/platform-automation/.github/actions/shared/docker-multiarch-manifest@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/docker-multiarch-manifest@main
         with:
           image_ref: ${{ env.IMAGE_REF }}
           digests_dir: ${{ env.DIGESTS_DIR }}
@@ -698,7 +698,7 @@ jobs:
           persist-credentials: false
 
       - name: Sync description
-        uses: blackoutsecure/platform-automation/.github/actions/sync-dockerhub-description@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/sync-dockerhub-description@main
         with:
           repository: ${{ needs.setup.outputs.namespace }}/${{ inputs.image_name }}
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -784,7 +784,7 @@ jobs:
           tags: ${{ env.IMAGE_REF }}:${{ env.SCAN_TAG }}
 
       - name: Run Docker Scout
-        uses: blackoutsecure/platform-automation/.github/actions/shared/docker-scout-scan@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/docker-scout-scan@main
         with:
           # `local://` forces Scout to use the loaded image and skip
           # any registry round-trip — important because the tag does
@@ -857,7 +857,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Docker Scout (CVEs)
-        uses: blackoutsecure/platform-automation/.github/actions/shared/docker-scout-scan@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/docker-scout-scan@main
         with:
           # `registry://` forces a registry pull — the runner's local
           # store is empty here (the matrix build pushed by digest from
@@ -885,7 +885,7 @@ jobs:
 
       - name: Record image to Scout environment
         if: inputs.scout_record_environment != ''
-        uses: blackoutsecure/platform-automation/.github/actions/shared/docker-scout-scan@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/docker-scout-scan@main
         with:
           image: registry://${{ env.IMAGE_REF }}:${{ env.IMAGE_VERSION }}
           command: environment

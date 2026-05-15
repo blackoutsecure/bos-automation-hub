@@ -531,7 +531,7 @@ elif [[ "$dev_rotational" -ne 1 ]]; then
     echo "      no-op on solid-state media."
 else
     cat > /etc/hdparm.conf <<EOF
-# Managed by platform-automation / configure-usb-boot-optimization.sh
+# Managed by bos-automation-hub / configure-usb-boot-optimization.sh
 $device {
     apm = 255
     spindown_time = 0
@@ -554,7 +554,7 @@ if [[ "$dev_is_ata" -ne 1 ]]; then
     echo "      manages write caching for these devices already."
 elif hdparm -W 1 "$device" >/dev/null 2>&1; then
     cat > /etc/udev/rules.d/99-bos-writecache.rules <<EOF
-# Managed by platform-automation / configure-usb-boot-optimization.sh
+# Managed by bos-automation-hub / configure-usb-boot-optimization.sh
 ACTION=="add", SUBSYSTEM=="block", KERNEL=="$devbase", RUN+="/usr/sbin/hdparm -W1 $device"
 EOF
     echo "Write caching enabled and persisted via udev (keyed on $devbase)."
@@ -577,7 +577,7 @@ fi
 # re-applied at boot via a small systemd service (see below) since dm devices
 # don't get a stable 'add' event we can hook reliably here.
 cat > /etc/udev/rules.d/60-bos-readahead.rules <<EOF
-# Managed by platform-automation / configure-usb-boot-optimization.sh
+# Managed by bos-automation-hub / configure-usb-boot-optimization.sh
 ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="$devbase", RUN+="/sbin/blockdev --setra $readahead $device"
 EOF
 
@@ -598,7 +598,7 @@ if [[ "${#ra_targets[@]}" -gt 1 ]]; then
     helper="/usr/local/sbin/bos-readahead-apply"
     cat > "$helper" <<EOF
 #!/bin/bash
-# Managed by platform-automation / configure-usb-boot-optimization.sh
+# Managed by bos-automation-hub / configure-usb-boot-optimization.sh
 # Re-applies read-ahead at boot to whatever block devices currently back '/'.
 set -u
 readahead=$readahead
@@ -624,9 +624,9 @@ EOF
     chmod 0755 "$helper"
 
     cat > /etc/systemd/system/bos-readahead.service <<EOF
-# Managed by platform-automation / configure-usb-boot-optimization.sh
+# Managed by bos-automation-hub / configure-usb-boot-optimization.sh
 [Unit]
-Description=Apply platform-automation read-ahead to root block devices
+Description=Apply bos-automation-hub read-ahead to root block devices
 After=local-fs.target
 
 [Service]
@@ -705,7 +705,7 @@ fi
 
 if [[ -n "$iosched" ]]; then
     cat > "$ioschedrule" <<EOF
-# Managed by platform-automation / configure-usb-boot-optimization.sh
+# Managed by bos-automation-hub / configure-usb-boot-optimization.sh
 ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="$devbase", ATTR{queue/scheduler}="$iosched"
 EOF
     # Apply now too (udev rule covers reboots).
@@ -784,7 +784,7 @@ if grep -Eq '^[^#].*[[:space:]]/tmp[[:space:]]+tmpfs' /etc/fstab; then
 else
     cat >> /etc/fstab <<EOF
 
-# Managed by platform-automation: /tmp on tmpfs to reduce USB writes
+# Managed by bos-automation-hub: /tmp on tmpfs to reduce USB writes
 tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
 EOF
     echo "Added tmpfs /tmp entry."
@@ -830,7 +830,7 @@ else
     if grep -Eq '^[[:space:]]*#[[:space:]]*PERCENT=' "$zramswapfile"; then
         sed -i "s|^[[:space:]]*#[[:space:]]*PERCENT=.*|PERCENT=${zram_target_percent}|" "$zramswapfile"
     else
-        printf '\n# Added by platform-automation / configure-usb-boot-optimization.sh\nPERCENT=%s\n' \
+        printf '\n# Added by bos-automation-hub / configure-usb-boot-optimization.sh\nPERCENT=%s\n' \
             "$zram_target_percent" >> "$zramswapfile"
     fi
     if systemctl restart zramswap.service >/dev/null 2>&1; then
@@ -865,7 +865,7 @@ done
 # -------------------------------
 echo "[9/9] Applying VM writeback sysctl tuning..."
 cat > "$sysctlfile" <<EOF
-# Managed by platform-automation / configure-usb-boot-optimization.sh
+# Managed by bos-automation-hub / configure-usb-boot-optimization.sh
 # USB-attached boot disk writeback tuning
 vm.dirty_background_ratio = 5
 vm.dirty_ratio = 20
