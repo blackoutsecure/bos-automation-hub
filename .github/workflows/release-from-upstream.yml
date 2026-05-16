@@ -296,6 +296,10 @@ jobs:
     name: Monitor ${{ inputs.upstream_repo }}
     permissions:
       contents: write   # commit the tracking file
+      actions:  write   # nested `monitor-upstream-release.yml` declares this for
+                        # `gh workflow run`; GitHub validates the permission at
+                        # workflow-call time even when `target_workflows: ''`
+                        # means it is never actually invoked at runtime.
     uses: blackoutsecure/bos-automation-hub/.github/workflows/monitor-upstream-release.yml@main
     with:
       upstream_repo:     ${{ inputs.upstream_repo }}
