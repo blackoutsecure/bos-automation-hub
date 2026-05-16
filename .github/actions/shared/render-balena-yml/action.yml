@@ -38,8 +38,8 @@ inputs:
   assets_repository_url:
     description: >-
       `assets.repository.data.url`. When empty and `emit_assets` is
-      true, derived from
-      `${{ github.server_url }}/${{ github.repository }}`. Must be
+      true, derived from the caller repository URL
+      (`https://github.com/<owner>/<repo>` on github.com). Must be
       `https://` when set.
     required: false
     default: ''
