@@ -172,7 +172,15 @@ concurrency:
 jobs:
   monitor:
     name: Monitor ${{ inputs.upstream_repo || inputs.package_name || inputs.image_ref || inputs.version_url }}
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # Resolve runner from org-shared `vars.DEFAULT_RUNNER`, falling back to
+    # GitHub-hosted `ubuntu-latest`. The `fromJSON` + `startsWith` dance is
+    # **load-bearing** — a JSON-array-shaped string substituted directly
+    # into `runs-on:` is treated as a single label by GHA's scheduler,
+    # so the job never gets picked up. Parsing it via `fromJSON` makes
+    # GHA see a real label list (e.g. `[self-hosted, Linux, ARM64]`).
+    # Bare single-label strings (e.g. `ubuntu-latest`) go through
+    # `format('"{0}"', ...)` so they survive `fromJSON` as a string.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 10
     permissions:
       contents: write

@@ -297,7 +297,9 @@ env:
 jobs:
   setup:
     name: Setup
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     outputs:
       matrix: ${{ steps.resolve.outputs.matrix }}
       push: ${{ steps.resolve.outputs.push }}
@@ -635,7 +637,9 @@ jobs:
     name: Publish manifest
     needs: [setup, build]
     if: needs.setup.outputs.push == 'true' && needs.build.result == 'success'
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 30
     env:
       IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
@@ -702,7 +706,9 @@ jobs:
     name: Sync Docker Hub description
     needs: [setup, manifest]
     if: needs.setup.outputs.push == 'true' && inputs.update_description
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 5
     steps:
       - name: Checkout caller repo
@@ -738,7 +744,9 @@ jobs:
     if: needs.setup.outputs.push != 'true' && inputs.enable_scout
     # The amd64 leg always runs on x64 hardware — Scout doesn't need
     # the arm64 leg, so we hard-pin x64 here regardless of the matrix.
-    runs-on: ${{ vars.RUNNER_X64 || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64, '[') && vars.RUNNER_X64 || format('"{0}"', vars.RUNNER_X64 || 'ubuntu-latest')) }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -855,7 +863,9 @@ jobs:
     name: Docker Scout (published)
     needs: [setup, manifest]
     if: needs.setup.outputs.push == 'true' && inputs.enable_scout && needs.manifest.result == 'success'
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -949,7 +959,9 @@ jobs:
     name: Enroll repo in Docker Scout
     needs: [setup, manifest]
     if: needs.setup.outputs.push == 'true' && inputs.scout_enable_repo && needs.manifest.result == 'success'
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 5
     steps:
       - name: Enroll repository in Docker Scout

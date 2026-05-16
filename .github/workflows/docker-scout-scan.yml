@@ -142,8 +142,11 @@ name: Docker Scout Scan (reusable)
       runs_on:
         description: >-
           Optional runner override. Empty resolves from the org-shared
-          `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Pass a
-          literal label or JSON-array string to force a runner.
+          `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Accepts either
+          a bare label (e.g. `ubuntu-latest`) or a JSON-array string of
+          labels (e.g. `["self-hosted","Linux","ARM64"]`); both shapes are
+          parsed at runtime via `fromJSON` so GHA sees a real label list
+          rather than a single 35-character "label".
         required: false
         type: string
         default: ''
@@ -180,7 +183,9 @@ concurrency:
 jobs:
   scout:
     name: Docker Scout
-    runs-on: ${{ inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars/inputs in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     permissions:
       contents: read

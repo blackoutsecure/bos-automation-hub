@@ -316,7 +316,9 @@ jobs:
   # ---------------------------------------------------------------------------
   resolve:
     name: Resolve tag
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 2
     outputs:
       tag_name: ${{ steps.tag.outputs.value }}

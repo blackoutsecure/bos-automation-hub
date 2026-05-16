@@ -200,8 +200,10 @@ name: Balena Block Publish (reusable)
           default), resolves from the org-shared `vars.DEFAULT_RUNNER`
           (a JSON array of labels, e.g. `["self-hosted","Linux","ARM64"]`);
           falls back to the GitHub-hosted `ubuntu-latest` runner when the
-          var is unset. Pass a literal label or JSON-array string to force
-          a specific runner.
+          var is unset. Accepts either a bare label (e.g. `ubuntu-latest`)
+          or a JSON-array string of labels (e.g. `["self-hosted","Linux","ARM64"]`);
+          both shapes are parsed at runtime via `fromJSON` so GHA sees a
+          real label list rather than a single 35-character "label".
         required: false
         type: string
         default: ''
@@ -233,7 +235,9 @@ concurrency:
 jobs:
   setup:
     name: Setup
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 10
     outputs:
       publish: ${{ steps.resolve.outputs.publish }}
@@ -348,7 +352,9 @@ jobs:
       && !inputs.generate_balena_yml
       && github.event_name == 'push'
       && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 5
     permissions:
       contents: write
@@ -410,8 +416,10 @@ jobs:
       && (needs.sync-balena-yml.result == 'success' || needs.sync-balena-yml.result == 'skipped')
     # Resolve runner: explicit `inputs.runs_on` override beats org-shared
     # `vars.DEFAULT_RUNNER`; both fall through to the GitHub-hosted
-    # `ubuntu-latest` runner.
-    runs-on: ${{ inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # `ubuntu-latest` runner. See monitor-upstream-release.yml for the
+    # `fromJSON` + `startsWith` rationale (a JSON-array-shaped string
+    # substituted directly into `runs-on:` is treated as a single label).
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 60
     outputs:
       release_id: ${{ steps.deploy.outputs.release_id }}
