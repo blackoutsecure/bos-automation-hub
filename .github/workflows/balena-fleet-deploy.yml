@@ -310,12 +310,10 @@ jobs:
     name: Deploy ${{ matrix.name }} (${{ matrix.fleet }})
     needs: plan
     if: needs.plan.outputs.count != '0'
-    # Resolve runner: explicit `inputs.runs_on` override beats org-shared
-    # `vars.DEFAULT_RUNNER`; both fall through to the GitHub-hosted
-    # `ubuntu-latest` runner. See monitor-upstream-release.yml for the
-    # `fromJSON` + `startsWith` rationale (a JSON-array-shaped string
-    # substituted directly into `runs-on:` is treated as a single label).
-    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    # deploy-to-balena-action is amd64-only; never route this job to an
+    # arm64 runner via DEFAULT_RUNNER.  Callers that have a self-hosted
+    # amd64 runner can pass `inputs.runs_on` to override.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on, '[') && inputs.runs_on || format('"{0}"', inputs.runs_on || 'ubuntu-latest')) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     strategy:
       fail-fast: false
