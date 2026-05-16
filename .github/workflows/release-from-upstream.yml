@@ -320,7 +320,12 @@ jobs:
     if: >-
       needs.monitor.outputs.changed == 'true' || inputs.force_release
     permissions:
-      contents: write   # balena sync_balena_yml + GitHub Release publish
+      contents:        write   # balena sync_balena_yml + GitHub Release publish
+      pull-requests:   write   # nested docker-build-push declares this for Docker
+                               # Scout PR-annotation paths; statically validated
+                               # at workflow-call time regardless of runtime path.
+      security-events: write   # nested docker-build-push declares this for SARIF
+                               # upload to the GHAS code-scanning dashboard.
     uses: blackoutsecure/bos-automation-hub/.github/workflows/release.yml@main
     with:
       tag_name:                        v${{ needs.monitor.outputs.upstream_version }}
