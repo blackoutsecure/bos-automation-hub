@@ -141,6 +141,32 @@ name: Cloudflare Pages Deploy (reusable)
         type: number
         default: 0
 
+      # ── Edge cache purge ───────────────────────────────────────────
+      purge_cache:
+        description: >-
+          When `true` (default), purge the entire Cloudflare edge cache
+          for the zone configured via `cloudflare_zone_id` after a
+          successful deploy, so subsequent requests pull the freshly
+          published assets. Has no effect when the deploy step is
+          skipped. When `true` but no zone ID is configured, the purge
+          is skipped with a notice annotation (existing callers without
+          a zone ID keep working). Set to `false` to disable purging
+          regardless of zone ID configuration.
+        required: false
+        type: boolean
+        default: true
+      cloudflare_zone_id:
+        description: >-
+          Cloudflare zone ID (32-char hex) for the production domain
+          attached to this Pages project. Prefer setting this via a
+          repository or organisation `vars.CLOUDFLARE_ZONE_ID` — zone
+          IDs appear in the dashboard URL and are not secret. When
+          empty, falls back to `secrets.CLOUDFLARE_ZONE_ID`. Required
+          for the cache-purge step to do anything.
+        required: false
+        type: string
+        default: ''
+
       # ── Sitemap generator ──────────────────────────────────────────
       generate_sitemap:
         description: 'Run the Blackout Secure sitemap generator before deploy.'
@@ -228,7 +254,11 @@ name: Cloudflare Pages Deploy (reusable)
         default: ''
     secrets:
       CLOUDFLARE_API_TOKEN:
-        description: 'Cloudflare API token with `Account → Cloudflare Pages → Edit` permission on the target project.'
+        description: >-
+          Cloudflare API token. Requires `Account → Cloudflare Pages →
+          Edit` for the deploy step, plus `Zone → Cache Purge → Purge`
+          on the target zone when `purge_cache` is enabled. The same
+          token can carry both scopes.
         required: true
       CLOUDFLARE_ACCOUNT_ID:
         description: >-
@@ -236,6 +266,13 @@ name: Cloudflare Pages Deploy (reusable)
           `inputs.cloudflare_account_id` is empty. Account IDs appear
           in dashboard URLs — prefer `vars.CLOUDFLARE_ACCOUNT_ID` and
           pass it via `inputs.cloudflare_account_id` instead.
+        required: false
+      CLOUDFLARE_ZONE_ID:
+        description: >-
+          Cloudflare zone ID (32-char hex). Optional fallback when
+          `inputs.cloudflare_zone_id` is empty. Zone IDs appear in
+          dashboard URLs — prefer `vars.CLOUDFLARE_ZONE_ID` and pass
+          it via `inputs.cloudflare_zone_id` instead.
         required: false
     outputs:
       deployed:
@@ -256,6 +293,9 @@ name: Cloudflare Pages Deploy (reusable)
       account_id:
         description: 'Resolved Cloudflare account ID (`inputs.cloudflare_account_id` or fallback secret).'
         value: ${{ jobs.deploy.outputs.account_id }}
+      purged:
+        description: '`true` when the post-deploy zone cache purge ran successfully; `false` when skipped or failed.'
+        value: ${{ jobs.deploy.outputs.purged }}
 
 permissions:
   contents: read
@@ -293,9 +333,10 @@ jobs:
       deployment_alias_url: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
       environment: ${{ steps.deploy.outputs.pages-environment }}
       account_id: ${{ steps.account.outputs.value }}
+      purged: ${{ steps.purge.outputs.purged || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: ${{ inputs.checkout_fetch_depth }}
           persist-credentials: false
@@ -560,7 +601,7 @@ jobs:
       - name: Deploy to Cloudflare Pages
         id: deploy
         if: steps.gate.outputs.deploy == 'true'
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ steps.account.outputs.value }}
@@ -568,6 +609,54 @@ jobs:
           workingDirectory: ${{ inputs.working_directory }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           command: ${{ steps.cmd.outputs.command }}
+
+      - name: Resolve cache-purge gate
+        id: purge_gate
+        if: always()
+        env:
+          DEPLOY_GATE: ${{ steps.gate.outputs.deploy }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          PURGE_REQUESTED: ${{ inputs.purge_cache }}
+          ZONE_ID_INPUT: ${{ inputs.cloudflare_zone_id }}
+          ZONE_ID_FALLBACK: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          set -euo pipefail
+          decide() {
+            echo "purge=$1"  >> "${GITHUB_OUTPUT}"
+            echo "reason=$2" >> "${GITHUB_OUTPUT}"
+            echo "purge=$1 reason=$2"
+          }
+          if [ "${DEPLOY_GATE}" != "true" ]; then
+            decide false "deploy-skipped"
+            exit 0
+          fi
+          if [ "${DEPLOY_OUTCOME}" != "success" ]; then
+            decide false "deploy-${DEPLOY_OUTCOME:-unknown}"
+            exit 0
+          fi
+          if [ "${PURGE_REQUESTED}" != "true" ]; then
+            decide false "opt-out"
+            exit 0
+          fi
+          ZONE_ID="$(printf '%s' "${ZONE_ID_INPUT:-${ZONE_ID_FALLBACK}}" | tr -d '[:space:]')"
+          if [ -z "${ZONE_ID}" ]; then
+            echo "::notice::purge_cache=true but no Cloudflare zone ID is configured (inputs.cloudflare_zone_id or secrets.CLOUDFLARE_ZONE_ID). Skipping cache purge."
+            decide false "no-zone-id"
+            exit 0
+          fi
+          # Shape (`^[0-9a-f]{32}$`) is validated inside the purge action
+          # via shared/cloudflare-resolve-id — a malformed value fails
+          # loudly there. This gate just answers go / no-go.
+          decide true "enabled"
+
+      - name: Purge Cloudflare zone cache
+        id: purge
+        if: steps.purge_gate.outputs.purge == 'true'
+        uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-purge@main
+        with:
+          zone_id: ${{ inputs.cloudflare_zone_id }}
+          fallback_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Job summary
         if: always()
@@ -579,6 +668,10 @@ jobs:
           DEPLOYMENT_ID: ${{ steps.deploy.outputs.pages-deployment-id }}
           DEPLOYMENT_ALIAS: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
           PAGES_ENVIRONMENT: ${{ steps.deploy.outputs.pages-environment }}
+          PURGE_DECISION: ${{ steps.purge_gate.outputs.purge }}
+          PURGE_REASON: ${{ steps.purge_gate.outputs.reason }}
+          PURGED: ${{ steps.purge.outputs.purged }}
+          PURGE_HTTP: ${{ steps.purge.outputs.http_code }}
         run: |
           {
             echo "## Cloudflare Pages Deploy"
@@ -595,4 +688,5 @@ jobs:
             echo "| Deployment URL   | ${DEPLOYMENT_URL:-n/a} |"
             echo "| Alias URL        | ${DEPLOYMENT_ALIAS:-n/a} |"
             echo "| Deployment ID    | \`${DEPLOYMENT_ID:-n/a}\` |"
+            echo "| Cache purge      | \`${PURGED:-${PURGE_DECISION:-n/a}}\` (reason: \`${PURGE_REASON:-n/a}\`${PURGE_HTTP:+, HTTP \`${PURGE_HTTP}\`}) |"
           } >> "${GITHUB_STEP_SUMMARY}"

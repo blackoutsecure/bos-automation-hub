@@ -138,6 +138,14 @@ name: Release pipeline (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      docker_scout_enable_repo:
+        description: >-
+          After a successful publish, ensure the Docker Hub repository
+          is enrolled in Docker Scout's continuous-monitoring service.
+          Idempotent — no-op when the repo is already enabled.
+        required: false
+        type: boolean
+        default: true
 
       # ----- Balena stage inputs -------------------------------------------
       block_name:
@@ -160,6 +168,73 @@ name: Release pipeline (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      balena_generate_yml:
+        description: >-
+          Render `balena.yml` dynamically inside the balena stage instead
+          of reading it from the caller repo. Lets consumer repos drop the
+          checked-in `balena.yml` entirely. When `true`, the balena commit-
+          back job is skipped (the manifest is regenerated each run).
+        required: false
+        type: boolean
+        default: false
+      balena_type:
+        description: >-
+          Top-level `type:` written to the rendered manifest. Used only
+          when `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: sw.block
+      balena_description:
+        description: >-
+          Rendered `description:` field. Optional. Used only when
+          `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_post_provisioning:
+        description: >-
+          Rendered `post-provisioning:` Markdown. Multi-line; pass as a
+          YAML literal block (`|`). Used only when `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_repository_url:
+        description: >-
+          `assets.repository.data.url` for the rendered manifest. When
+          empty, defaults to the caller repo URL. Used only when
+          `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_logo_url:
+        description: >-
+          Optional `assets.logo.data.url`. Must be `https://` when set.
+          Used only when `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_default_device_type:
+        description: >-
+          `data.defaultDeviceType` slug. Optional — when empty, the
+          renderer uses the first entry of the resolved
+          `supportedDeviceTypes`. Validated to appear in the resolved
+          list either way. Used only when `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_supported_device_types:
+        description: >-
+          Explicit `data.supportedDeviceTypes` (newline- and/or
+          comma-separated balena device-type slugs). Optional — when
+          empty, the balena stage automatically derives the list from
+          the published docker image (`needs.docker.outputs.image` +
+          version) and falls back to the workflow-level `platforms`
+          input (which already defaults to `linux/amd64,linux/arm64`).
+          Set this only to force a specific list. Used only when
+          `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
 
       # ----- GitHub Release stage inputs -----------------------------------
       release_template_path:
@@ -337,6 +412,7 @@ jobs:
       scout_record_environment:  ${{ inputs.docker_scout_record_environment }}
       scout_sarif_upload:        ${{ inputs.docker_scout_sarif_upload }}
       scout_exit_code:           ${{ inputs.docker_scout_exit_code }}
+      scout_enable_repo:         ${{ inputs.docker_scout_enable_repo }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
@@ -358,6 +434,30 @@ jobs:
       publish:          'true'
       sync_balena_yml:  ${{ inputs.balena_sync_yml }}
       draft:            ${{ inputs.balena_draft }}
+      generate_balena_yml:          ${{ inputs.balena_generate_yml }}
+      block_type:                   ${{ inputs.balena_type }}
+      block_assets_repository_url:  ${{ inputs.balena_repository_url }}
+      block_assets_logo_url:        ${{ inputs.balena_logo_url }}
+      block_default_device_type:    ${{ inputs.balena_default_device_type }}
+      # When the balena stage runs `generate_balena_yml: true` and the
+      # caller did not pass an explicit `balena_supported_device_types`,
+      # the renderer derives the device list automatically from (in
+      # waterfall order) the live docker manifest -> `block_platforms`.
+      # `block_image_ref` is the most authoritative source (it reflects
+      # what was actually pushed); we only set it when the docker stage
+      # ran successfully, so a skipped or failed docker stage falls
+      # through cleanly to the `platforms` fallback.
+      block_image_ref: ${{ needs.docker.result == 'success' && format('{0}:{1}', needs.docker.outputs.image, needs.resolve.outputs.version) || '' }}
+      block_platforms:              ${{ inputs.platforms }}
+      # Long / multi-line passthroughs use `|-` (strip-final-newline) literal
+      # blocks so multi-line caller values survive the YAML interpolation
+      # without accumulating trailing blank lines at every hop.
+      block_description: |-
+        ${{ inputs.balena_description }}
+      block_post_provisioning: |-
+        ${{ inputs.balena_post_provisioning }}
+      block_supported_device_types: |-
+        ${{ inputs.balena_supported_device_types }}
     secrets:
       BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
 

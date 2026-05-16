@@ -158,6 +158,19 @@ done
 # deployments / post-mortem review.
 exec > >(tee -a "$log") 2>&1
 
+# Optional LOG_LEVEL gate: trace|debug|info|warn|error. Default 'info'
+# keeps existing output unchanged. 'debug' adds log_debug lines; 'trace'
+# additionally enables shell tracing (set -x). See ../README.md.
+LOG_LEVEL="${LOG_LEVEL:-info}"
+case "$LOG_LEVEL" in
+    trace) _ll_cur=0 ;; debug) _ll_cur=1 ;; info) _ll_cur=2 ;;
+    warn)  _ll_cur=3 ;; error) _ll_cur=4 ;;
+    *) echo "ERROR: invalid LOG_LEVEL='$LOG_LEVEL' (trace|debug|info|warn|error)"; exit 1 ;;
+esac
+log_debug() { [[ $_ll_cur -le 1 ]] && echo "DEBUG: $*" || true; }
+log_warn()  { [[ $_ll_cur -le 3 ]] && echo "WARN: $*"  || true; }
+[[ "$LOG_LEVEL" == "trace" ]] && set -x
+
 echo ""
 echo "##############################################################"
 echo "# $(date) | Starting $appname"

@@ -1,0 +1,157 @@
+name: Enable Docker Scout for a Hub repository
+description: >-
+  Idempotently enroll a Docker Hub repository in Docker Scout's
+  continuous-monitoring service. Wraps `docker scout repo enable` with
+  preflight credential validation, Docker Hub login, and Scout-CLI
+  install so the call surfaces a clear error (under-scoped PAT, wrong
+  repository slug) instead of a generic CLI failure.
+
+  New Hub repositories are NOT automatically indexed by Scout until
+  enrolled — this action closes that gap so the first release of a
+  brand-new repo surfaces in the Scout dashboard without a manual
+  onboarding step. Calling `docker scout repo enable` against an
+  already-enrolled repository is a no-op, so the action is safe to run
+  on every release.
+
+inputs:
+  repository:
+    description: 'Docker Hub repository as `<namespace>/<name>` (e.g. `acme/widget`).'
+    required: true
+  username:
+    description: >-
+      Docker Hub username. The associated PAT must have admin scope on
+      the namespace — `repo:read` is not sufficient to call
+      `docker scout repo enable`.
+    required: true
+  password:
+    description: 'Docker Hub access token (PAT, not the account password).'
+    required: true
+  skip_login:
+    description: >-
+      Skip the Docker Hub `docker/login-action` step. Set to `true`
+      when the caller has already logged in earlier in the same job.
+    required: false
+    default: 'false'
+  summary:
+    description: 'Render the enrollment result as a job summary.'
+    required: false
+    default: 'true'
+
+outputs:
+  state:
+    description: >-
+      Resolved enrollment state — `enabled` when this action enrolled
+      the repository, `already enabled` when it was already enrolled.
+    value: ${{ steps.enroll.outputs.state }}
+
+runs:
+  using: composite
+  steps:
+    - name: Preflight validation
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        USERNAME: ${{ inputs.username }}
+        PASSWORD: ${{ inputs.password }}
+        SKIP_LOGIN: ${{ inputs.skip_login }}
+        SUMMARY: ${{ inputs.summary }}
+      run: |
+        set -euo pipefail
+        ERR=0
+        fail() { echo "ERROR: $*" >&2; ERR=1; }
+
+        # Reject whitespace/newlines — common cause of silent 401s when a
+        # secret was pasted with a trailing newline.
+        check_singleline() {
+          local name="$1" val="$2"
+          [ -n "${val}" ] || { fail "${name} is missing"; return; }
+          case "${val}" in
+            *[$'\n\r\t ']*) fail "${name} contains whitespace/newlines" ;;
+          esac
+        }
+
+        check_bool() {
+          local name="$1" val="$2"
+          case "${val}" in
+            true|false) ;;
+            *) fail "${name} must be 'true' or 'false' (got '${val}')" ;;
+          esac
+        }
+
+        check_singleline "input 'repository'" "${REPOSITORY}"
+        check_singleline "input 'username'"   "${USERNAME}"
+        check_singleline "input 'password'"   "${PASSWORD}"
+
+        # repository must be `namespace/name`.
+        if ! printf '%s' "${REPOSITORY}" \
+          | grep -Eq '^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$'; then
+          fail "input 'repository' is not a valid '<namespace>/<name>': '${REPOSITORY}'"
+        fi
+
+        check_bool "input 'skip_login'" "${SKIP_LOGIN}"
+        check_bool "input 'summary'"    "${SUMMARY}"
+
+        [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
+        echo "Preflight OK — enrolling ${REPOSITORY} in Docker Scout"
+
+    - name: Docker Hub login
+      if: inputs.skip_login != 'true'
+      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      with:
+        username: ${{ inputs.username }}
+        password: ${{ inputs.password }}
+
+    - name: Install Docker Scout CLI
+      # The Scout CLI plugin is not pre-installed on github-hosted runners.
+      # The official installer is a no-op when the plugin is already present
+      # (self-hosted runners may pin it), so this stays idempotent.
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! docker scout version >/dev/null 2>&1; then
+          curl -sSfL https://raw.githubusercontent.com/docker/scout-cli/main/install.sh | sh -s --
+        fi
+        docker scout version
+
+    - name: Enroll repository in Docker Scout
+      id: enroll
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+      run: |
+        set -euo pipefail
+        # `docker scout repo enable` is idempotent — calling it on an
+        # already-enrolled repository returns success without side effect.
+        # The `repo list` probe is purely cosmetic so the log clearly
+        # states the prior state. Auth / permission / quota failures
+        # are surfaced immediately (no `continue-on-error`) so an
+        # under-scoped PAT becomes a fixable failure rather than a
+        # silent no-op.
+        if docker scout repo list 2>/dev/null | awk 'NR>1 {print $1}' | grep -Fxq "${REPOSITORY}"; then
+          echo "Docker Scout is already enabled for ${REPOSITORY}."
+          STATE="already enabled"
+        else
+          echo "Enabling Docker Scout for ${REPOSITORY}…"
+          docker scout repo enable "${REPOSITORY}"
+          STATE="enabled"
+        fi
+        echo "state=${STATE}" >> "${GITHUB_OUTPUT}"
+
+    - name: Job summary
+      if: ${{ inputs.summary == 'true' && always() }}
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        STATE: ${{ steps.enroll.outputs.state }}
+        STATUS: ${{ job.status }}
+      run: |
+        set -euo pipefail
+        {
+          echo "## Docker Scout repository enrollment"
+          echo ""
+          echo "| Field | Value |"
+          echo "|-------|-------|"
+          echo "| Repository | \`${REPOSITORY}\` |"
+          echo "| State      | \`${STATE:-unknown}\` |"
+          echo "| Status     | \`${STATUS}\` |"
+        } >> "${GITHUB_STEP_SUMMARY}"

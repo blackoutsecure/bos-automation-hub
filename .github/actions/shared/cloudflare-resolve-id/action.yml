@@ -1,0 +1,98 @@
+name: Resolve Cloudflare 32-char hex ID
+description: >-
+  Generic resolver/validator for any Cloudflare 32-character lowercase
+  hex identifier (account ID, zone ID, etc.). Picks the value from a
+  preferred input or a back-compat fallback, strips whitespace, asserts
+  the `^[0-9a-f]{32}$` shape, and optionally registers the resolved
+  value with `::add-mask::` so it never appears verbatim in subsequent
+  step logs.
+
+  This is the canonical implementation behind
+  `cloudflare-pages-resolve-account-id` (account IDs) and the inner
+  step of `cloudflare-zone-purge` (zone IDs). Use it directly from any
+  new Cloudflare-flavored action via:
+
+  ```yaml
+  - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-resolve-id@main
+    with:
+      value:    ${{ inputs.something_id }}
+      fallback: ${{ inputs.fallback_id }}
+      kind:     zone
+  ```
+
+inputs:
+  value:
+    description: >-
+      Preferred source of the ID. In a workflow, pass
+      `vars.CLOUDFLARE_<KIND>_ID` so the caller stays free of secret
+      literals.
+    required: false
+    default: ''
+  fallback:
+    description: >-
+      Optional fallback (e.g. `secrets.CLOUDFLARE_<KIND>_ID`). Used
+      only when `value` is empty.
+    required: false
+    default: ''
+  kind:
+    description: >-
+      Short label used in error messages — e.g. `account` or `zone`.
+      Lowercase letters and hyphens only; up to 32 chars. Used solely
+      for diagnostics; does not change resolver behaviour.
+    required: false
+    default: 'id'
+  mask:
+    description: >-
+      When `true` (default) the resolved ID is registered with
+      `::add-mask::` so it never appears verbatim in subsequent logs.
+    required: false
+    default: 'true'
+
+outputs:
+  value:
+    description: 'Resolved, validated 32-char lowercase hex ID.'
+    value: ${{ steps.resolve.outputs.value }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve & validate
+      id: resolve
+      shell: bash
+      env:
+        INPUT_VALUE: ${{ inputs.value }}
+        FALLBACK_VALUE: ${{ inputs.fallback }}
+        KIND: ${{ inputs.kind }}
+        MASK: ${{ inputs.mask }}
+      run: |
+        set -euo pipefail
+
+        # Sanity-check the diagnostic label so we can safely interpolate
+        # it into error messages without it becoming an injection vector
+        # in workflow command strings.
+        if ! printf '%s' "${KIND}" | grep -Eq '^[a-z][a-z-]{0,31}$'; then
+          echo "ERROR: input 'kind' must be lowercase letters/hyphens, 1-32 chars (got '${KIND}')" >&2
+          exit 1
+        fi
+
+        case "${MASK}" in
+          true|false) ;;
+          *) echo "ERROR: input 'mask' must be 'true' or 'false' (got '${MASK}')" >&2; exit 1 ;;
+        esac
+
+        # Strip whitespace (newlines from a pasted secret are a common
+        # cause of silent 401s and of GITHUB_OUTPUT corruption).
+        ID="$(printf '%s' "${INPUT_VALUE:-${FALLBACK_VALUE}}" | tr -d '[:space:]')"
+        if [ -z "${ID}" ]; then
+          echo "ERROR: no Cloudflare ${KIND} ID supplied. Set the 'value' input (preferably from vars.CLOUDFLARE_${KIND^^}_ID) or 'fallback'." >&2
+          exit 1
+        fi
+        if ! printf '%s' "${ID}" | grep -Eq '^[0-9a-f]{32}$'; then
+          echo "ERROR: Cloudflare ${KIND} ID must be a 32-char lowercase hex string" >&2
+          exit 1
+        fi
+
+        if [ "${MASK}" = "true" ]; then
+          echo "::add-mask::${ID}"
+        fi
+        echo "value=${ID}" >> "${GITHUB_OUTPUT}"

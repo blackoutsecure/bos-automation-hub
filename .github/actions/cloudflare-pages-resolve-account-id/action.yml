@@ -1,8 +1,10 @@
 name: Resolve Cloudflare account ID
 description: >-
-  Resolve a Cloudflare account ID from an input (preferred) or a back-compat
-  secret, validate the 32-char hex shape, and mask the value in later step
-  logs via `::add-mask::`.
+  Thin back-compat wrapper around
+  [`shared/cloudflare-resolve-id`](../shared/cloudflare-resolve-id/action.yml)
+  that preserves the historical `account_id` / `fallback_account_id`
+  inputs documented in the repo README. New actions should call the
+  shared resolver directly with `kind: account`.
 
 inputs:
   account_id:
@@ -33,31 +35,11 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Resolve & validate
+    - name: Resolve via shared cloudflare-resolve-id
       id: resolve
-      shell: bash
-      env:
-        INPUT_ID: ${{ inputs.account_id }}
-        FALLBACK_ID: ${{ inputs.fallback_account_id }}
-        MASK: ${{ inputs.mask }}
-      run: |
-        set -euo pipefail
-        # Strip any whitespace (newlines from a pasted secret are a common cause
-        # of silent 401s and of GITHUB_OUTPUT corruption).
-        ID="$(printf '%s' "${INPUT_ID:-${FALLBACK_ID}}" | tr -d '[:space:]')"
-        if [ -z "${ID}" ]; then
-          echo "ERROR: no Cloudflare account ID supplied. Set the 'account_id' input (preferably from 'vars.CLOUDFLARE_ACCOUNT_ID') or 'fallback_account_id'." >&2
-          exit 1
-        fi
-        if ! printf '%s' "${ID}" | grep -Eq '^[0-9a-f]{32}$'; then
-          echo "ERROR: Cloudflare account ID must be a 32-char lowercase hex string" >&2
-          exit 1
-        fi
-        case "${MASK}" in
-          true|false) ;;
-          *) echo "ERROR: input 'mask' must be 'true' or 'false' (got '${MASK}')" >&2; exit 1 ;;
-        esac
-        if [ "${MASK}" = "true" ]; then
-          echo "::add-mask::${ID}"
-        fi
-        echo "value=${ID}" >> "${GITHUB_OUTPUT}"
+      uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-resolve-id@main
+      with:
+        value: ${{ inputs.account_id }}
+        fallback: ${{ inputs.fallback_account_id }}
+        kind: account
+        mask: ${{ inputs.mask }}

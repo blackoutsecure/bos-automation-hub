@@ -70,17 +70,23 @@ one job; leave it empty to inherit.
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/workflows/balena-fleet-deploy.yml](.github/workflows/balena-fleet-deploy.yml) | Reusable workflow | Render a per-fleet `balena.yml` from inputs and deploy the same block to one or more balenaCloud fleets in a matrix. |
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
-| [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Poll an upstream repo's `latest` release, dispatch downstream workflows on change, and commit a tracking file. |
+| [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Discover the latest upstream version from a pluggable source (GitHub Releases / branch HEAD / tag list / container registry / npm / PyPI / generic URL), dispatch downstream workflows on change, and commit a tracking file. Provider plugins live in `.github/actions/discover-upstream-release/`. |
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
-| [.github/workflows/release-from-upstream.yml](.github/workflows/release-from-upstream.yml) | Reusable **meta-workflow** | Schedule-driven "follow upstream" loop. Composes `monitor-upstream-release.yml` → `release.yml`: detects a new upstream release and runs the full Docker → Balena → GitHub Release pipeline against the new version, in one caller workflow. |
+| [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml) | Reusable **meta-workflow** | Schedule-driven "follow upstream" loop (Blackout Secure Launchpad). Composes `monitor-upstream-release.yml` → `release.yml`: detects a new upstream release and runs the full Docker → Balena → GitHub Release pipeline against the new version, in one caller workflow. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
+| [.github/workflows/sync-managed-files.yml](.github/workflows/sync-managed-files.yml) | Reusable workflow | Keep standardized "managed" sections of `.gitignore`, `.dockerignore`, `.editorconfig`, and `.gitattributes` in sync with canonical blocks. Pluggable per-service: `common`, `docker`, `balena`, `node`, `python`, `lf_line_endings`. Two modes: `commit` (write + push) and `check` (PR drift-check). Disabled services are skipped entirely — their existing blocks are never removed. |
 | [.github/actions/shared/resolve-docker-image-tags/action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
 | [.github/actions/shared/resolve-release-context/action.yml](.github/actions/shared/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
 | [.github/actions/shared/resolve-upstream-version/action.yml](.github/actions/shared/resolve-upstream-version/action.yml) | Composite action | Shallow-clones an upstream git repo at a ref and resolves a version (file → `git describe` → short SHA), commit SHA, and commit date. |
 | [.github/actions/shared/docker-multiarch-manifest/action.yml](.github/actions/shared/docker-multiarch-manifest/action.yml) | Composite action | Assembles a multi-arch Docker manifest from per-arch digest artifacts and pushes it under one or more tags, with retry on transient registry failures. |
 | [.github/actions/sync-dockerhub-description/action.yml](.github/actions/sync-dockerhub-description/action.yml) | Composite action | Validates inputs and pushes a repo's README + short description to Docker Hub via `peter-evans/dockerhub-description`. |
+| [.github/actions/docker-scout-enable-repo/action.yml](.github/actions/docker-scout-enable-repo/action.yml) | Composite action | Idempotently enrolls a Docker Hub repository in Docker Scout's continuous-monitoring service. Validates credentials, logs in to Docker Hub, installs the Scout CLI, and calls `docker scout repo enable`. |
 | [.github/actions/shared/docker-scout-scan/action.yml](.github/actions/shared/docker-scout-scan/action.yml) | Composite action | Wraps `docker/scout-action` with input validation, Docker Hub login, and optional SARIF upload to GitHub code scanning. Used by both the embedded scan in `docker-build-push.yml` and the standalone `docker-scout-scan.yml`. |
+| [.github/actions/shared/render-balena-yml/action.yml](.github/actions/shared/render-balena-yml/action.yml) | Composite action | Renders `balena.yml` from scalar inputs (PyYAML `safe_dump`, path-traversal + HTTPS-URL + default-vs-supported-device-type validation, defensive re-parse). Shared by `balena-block-publish.yml` (default `type: sw.block`) and `balena-fleet-deploy.yml` (default `type: sw.application`, `emit_assets: false` for the legacy per-target omit-assets behavior). |
 | [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
+| [.github/actions/discover-upstream-release/action.yml](.github/actions/discover-upstream-release/action.yml) | Composite action | Pluggable upstream-version discovery (stdlib-only Python). Sources: `github_release`, `github_branch_file`, `github_tags`, `container_image`, `npm`, `pypi`, `generic_url`. Writes a byte-stable tracker JSON file and reports whether the version changed. Used by `monitor-upstream-release.yml`. |
+| [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks for each enabled service in `.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
+| [.github/actions/shared/commit-and-push/action.yml](.github/actions/shared/commit-and-push/action.yml) | Composite action | Stage files, commit, and push to the current branch with rebase-retry on concurrent commits. Single-line message + author validation. Exits cleanly with `committed=false` when nothing is staged. Used by `monitor-upstream-release.yml` and `sync-managed-files.yml`. |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
 | [.github/workflows/openwrt-readsb-wiedehopf-bump.yml](.github/workflows/openwrt-readsb-wiedehopf-bump.yml) | Scheduled automation | Tracks new `wiedehopf/readsb` releases and proposes them upstream as a cross-repo PR to `openwrt/packages` (bumps `PKG_VERSION`/`PKG_HASH`, resets `PKG_RELEASE`) via a bot-owned fork. |
 | [linux/](linux/) | OS administration scripts | Distribution-grouped install/configure scripts for managed Linux endpoints (Ubuntu, OpenWrt / GL.iNet). See [linux/README.md](linux/README.md). |
@@ -92,21 +98,8 @@ one job; leave it empty to inherit.
 
 Consumer repos wire themselves up by committing a small caller
 workflow under `.github/workflows/` that calls one of the reusable
-workflows in this repo. The patterns below are the canonical ones —
-copy the relevant block, drop it into your repo, set the listed
-`vars` / `secrets`, and commit.
-
-> **Why no starter-workflow templates?** GitHub's "Suggested
-> workflows" picker only auto-populates from
-> `<org>/.github/workflow-templates/`, which is a *separate* repo
-> from this one. Maintaining a parallel set of thin wrapper files
-> here that drift from the reusable workflows they call (different
-> input names, missing toggles, stale comments) is a strictly
-> negative-value engineering tax. The reusable workflows themselves
-> are the contract; this section is the reference for wiring them
-> up. If you want the picker UX, mirror these snippets into
-> `blackoutsecure/.github/workflow-templates/` once — they don't
-> need to track per-input changes there.
+workflows in this repo. Copy the relevant block, drop it into your
+repo, set the listed `vars` / `secrets`, and commit.
 
 ### 1. Tag-driven release (Docker → Balena → GitHub Release)
 
@@ -165,11 +158,17 @@ jobs:
 
 ### 2. Upstream-tracked release (poll upstream, then run the same pipeline)
 
-Calls the [`release-from-upstream.yml`](#release-from-upstreamyml--reusable-meta-workflow)
+Calls the [`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow)
 meta-workflow on a 6-hourly cron. When the tracked upstream repo cuts
 a new release, the full Docker → Balena → GitHub Release pipeline runs
 against `v<upstream_version>` automatically — no tag push required in
 the consumer repo.
+
+> **Full annotated template:** [examples/bos-launchpad-example.yml](examples/bos-launchpad-example.yml).
+> Copy that file to your repo as `.github/workflows/bos-launchpad.yml`,
+> fill in the four `# TODO` placeholders, and you're done. The minimal
+> shape below is for reading; the template has every comment and
+> structural guard rail the production callers use.
 
 Required `vars`: `UPSTREAM_REPO`, `IMAGE_NAME`, `DOCKERHUB_NAMESPACE`,
 `BALENA_BLOCK_NAME`, `BALENA_NAMESPACE`.
@@ -177,8 +176,8 @@ Required `secrets`: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`,
 `BALENA_API_TOKEN`.
 
 ```yaml
-# .github/workflows/release-from-upstream.yml
-name: Release from upstream
+# .github/workflows/bos-launchpad.yml
+name: Blackout Secure Launchpad
 
 on:
   schedule:
@@ -190,27 +189,26 @@ on:
         type: boolean
         default: false
 
+# No top-level `concurrency:` here — the hub workflow owns serialization.
+# Declaring it on both sides triggers a GHA self-deadlock.
 permissions:
   contents: read
-
-concurrency:
-  group: release-from-upstream-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   release:
     permissions:
-      contents: write   # monitor commit + balena commit-back + GitHub Release
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/release-from-upstream.yml@main
+      contents:        write   # monitor tracking-file commit + GitHub Release publish
+      actions:         write   # nested monitor declares this; cascade requires it
+      pull-requests:   write   # nested Docker Scout PR annotations
+      security-events: write   # nested Docker Scout SARIF upload
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
     with:
-      upstream_repo:            ${{ vars.UPSTREAM_REPO }}
-      force_release:            ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
-      image_name:               ${{ vars.IMAGE_NAME }}
-      dockerhub_namespace:      ${{ vars.DOCKERHUB_NAMESPACE }}
-      docker_extra_tags:        sha-${{ github.sha }}
-      docker_short_description: ${{ github.event.repository.description }}
-      block_name:               ${{ vars.BALENA_BLOCK_NAME }}
-      balena_namespace:         ${{ vars.BALENA_NAMESPACE }}
+      upstream_repo:       ${{ vars.UPSTREAM_REPO }}
+      force_release:       ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
+      image_name:          ${{ vars.IMAGE_NAME }}
+      dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
+      block_name:          ${{ vars.BALENA_BLOCK_NAME }}
+      balena_namespace:    ${{ vars.BALENA_NAMESPACE }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
@@ -221,15 +219,16 @@ jobs:
 
 Some upstreams ship rolling builds off a development branch and never
 cut GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). The same
-`release-from-upstream.yml` meta-workflow handles that case via
-`source: branch_head` — the monitor reads a version file from the
-branch HEAD and resolves the commit SHA via `git ls-remote`.
+`bos-launchpad.yml` meta-workflow handles that case via
+`source: github_branch_file` (legacy alias: `branch_head`) — the
+monitor reads a version file from the branch HEAD and resolves the
+commit SHA via the GitHub API.
 
 Required `vars` and `secrets` are identical to example 2.
 
 ```yaml
-# .github/workflows/release-from-upstream.yml
-name: Release from upstream
+# .github/workflows/bos-launchpad.yml
+name: Blackout Secure Launchpad
 
 on:
   schedule:
@@ -240,31 +239,29 @@ on:
         type: boolean
         default: false
 
+# No top-level `concurrency:` — the hub workflow owns serialization.
 permissions:
   contents: read
-
-concurrency:
-  group: release-from-upstream-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
 
 jobs:
   release:
     permissions:
-      contents: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/release-from-upstream.yml@main
+      contents:        write
+      actions:         write
+      pull-requests:   write
+      security-events: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
     with:
       upstream_repo:     wiedehopf/readsb
-      source:            branch_head         # ← the only structural difference vs. example 2
-      upstream_branch:   dev                 # ← required when source: branch_head
+      source:            github_branch_file  # ← the only structural difference vs. example 2
+      upstream_branch:   dev                 # ← required when source: github_branch_file
       track_file:        .github/upstream/readsb-dev.json
       force_release:     ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
 
-      image_name:               ${{ vars.IMAGE_NAME }}
-      dockerhub_namespace:      ${{ vars.DOCKERHUB_NAMESPACE }}
-      docker_extra_tags:        sha-${{ github.sha }}
-      docker_short_description: ${{ github.event.repository.description }}
-      block_name:               ${{ vars.BALENA_BLOCK_NAME }}
-      balena_namespace:         ${{ vars.BALENA_NAMESPACE }}
+      image_name:          ${{ vars.IMAGE_NAME }}
+      dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
+      block_name:          ${{ vars.BALENA_BLOCK_NAME }}
+      balena_namespace:    ${{ vars.BALENA_NAMESPACE }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
@@ -276,6 +273,26 @@ The monitor SemVer-validates the fetched version string and synthesizes
 sees a uniform output shape regardless of source mode. By default the
 file path is `version` (the wiedehopf convention); override with
 `version_file_path: path/to/your/version-file`.
+
+#### 2b. Other upstream sources (tags, container image, npm, PyPI, arbitrary URL)
+
+The monitor delegates version discovery to the
+[`discover-upstream-release`](.github/actions/discover-upstream-release/action.yml)
+composite action, which ships with seven pluggable providers. Switch
+providers by changing `source:` and the matching input:
+
+| `source:`               | Required inputs                                  | Notes |
+|-------------------------|--------------------------------------------------|-------|
+| `github_release`        | `upstream_repo`                                  | Default. Polls `releases/latest`. Alias: `latest_release`. |
+| `github_branch_file`    | `upstream_repo`, `upstream_branch`               | Reads `version_file_path` from branch HEAD. Alias: `branch_head`. |
+| `github_tags`           | `upstream_repo`                                  | Lists tags, picks highest SemVer. Filter via `tag_pattern`. |
+| `container_image`       | `image_ref` (e.g. `docker.io/library/nginx`)     | Docker Hub tags only in this revision. Picks highest SemVer. |
+| `npm`                   | `package_name` (scoped names allowed)            | `registry.npmjs.org/<pkg>/latest`. |
+| `pypi`                  | `package_name`                                   | `pypi.org/pypi/<pkg>/json`. |
+| `generic_url`           | `version_url`, `version_regex` (1 capture group) | Stdlib-only HTTP, no auth. |
+
+Legacy aliases `latest_release` and `branch_head` continue to work
+byte-for-byte against existing `tracked-release.json` files.
 
 ### 3. Scheduled Docker Scout re-scan
 
@@ -405,7 +422,7 @@ flowchart LR
     tag([git tag push / release]):::trigger --> release
     dispatch([workflow_dispatch]):::trigger --> release
 
-    rfu["release-from-upstream.yml<br/><i>composes monitor + release</i>"]:::orchestrator
+    rfu["bos-launchpad.yml<br/><i>composes monitor + release</i>"]:::orchestrator
     release["release.yml<br/><i>release pipeline</i>"]:::orchestrator
 
     rfu --> release
@@ -565,6 +582,7 @@ jobs:
 | `scout_keep_previous_comments` | boolean | `false` | PR-mode only: keep previous Scout comments hidden instead of updating one in place. |
 | `scout_exit_code` | boolean | `false` | Fail the Scout job on findings. |
 | `scout_exit_on` | string | `''` | `compare`-mode worsening conditions to fail on (`vulnerability,policy`). |
+| `scout_enable_repo` | boolean | `true` | Publish-mode only: after a successful manifest push, enroll the Docker Hub repository in Docker Scout's continuous-monitoring service (idempotent — no-op on an already-enrolled repo). Requires a Docker Hub PAT with admin scope on the namespace. |
 
 ### Secrets
 
@@ -697,6 +715,39 @@ a successful manifest push, and can also be used standalone:
 ```
 
 See [action.yml](.github/actions/sync-dockerhub-description/action.yml)
+for the full input list.
+
+---
+
+## `docker-scout-enable-repo` — composite action
+
+Idempotently enrolls a Docker Hub repository in Docker Scout's
+continuous-monitoring service. New Hub repositories are NOT
+automatically indexed by Scout until enrolled — this closes that gap
+so the first release of a brand-new repo surfaces in the Scout
+dashboard without a manual onboarding step. Calling
+`docker scout repo enable` against an already-enrolled repository is a
+no-op, so the action is safe to run on every release.
+
+It is invoked automatically by the `scout-enable-repo` job in
+[`docker-build-push.yml`](.github/workflows/docker-build-push.yml)
+after a successful manifest push (gated on the `scout_enable_repo`
+input, default `true`), and can also be used standalone:
+
+```yaml
+- uses: blackoutsecure/bos-automation-hub/.github/actions/docker-scout-enable-repo@main
+  with:
+    repository: ${{ vars.DOCKERHUB_NAMESPACE }}/my-service
+    username:   ${{ secrets.DOCKERHUB_USERNAME }}
+    password:   ${{ secrets.DOCKERHUB_TOKEN }}
+```
+
+Requires a Docker Hub PAT with admin scope on the namespace — a
+`repo:read` PAT cannot call `docker scout repo enable`. Outputs
+`state` (`enabled` or `already enabled`) so callers can branch on the
+result.
+
+See [action.yml](.github/actions/docker-scout-enable-repo/action.yml)
 for the full input list.
 
 ---
@@ -1293,7 +1344,7 @@ jobs:
 A drop-in caller is shown in [Quick start](#quick-start--caller-wiring)
 below. To wire the same pipeline to an upstream-tracked schedule
 instead of a tag push, use the
-[`release-from-upstream.yml`](#release-from-upstreamyml--reusable-meta-workflow)
+[`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow)
 meta-workflow.
 
 ### Stage skipping semantics
@@ -1317,7 +1368,9 @@ the authoritative list. High-level groups:
   `docker_scout_severities`, `docker_scout_only_fixed`,
   `docker_scout_ignore_base`, `docker_scout_organization`,
   `docker_scout_record_environment`, `docker_scout_sarif_upload`,
-  `docker_scout_exit_code`
+  `docker_scout_exit_code`,
+  `docker_scout_enable_repo` (default `true` — auto-enrolls the
+  Hub repo in Scout's continuous-monitoring service)
 - **Balena:** `block_name`, `balena_namespace`, `balena_sync_yml`,
   `balena_draft`
 - **GitHub Release:** `release_template_path`, `release_extra_context`,
@@ -1342,12 +1395,12 @@ the authoritative list. High-level groups:
 
 ---
 
-## `release-from-upstream.yml` — reusable **meta-workflow**
+## `bos-launchpad.yml` — reusable **meta-workflow**
 
-Schedule-driven "follow upstream" loop. Composes two reusable
-workflows in this repo into one end-to-end pipeline so consumer repos
-that wrap an upstream project can drive everything from a single
-~25-line caller workflow:
+Schedule-driven "follow upstream" loop — the **Blackout Secure
+Launchpad**. Composes two reusable workflows in this repo into one
+end-to-end pipeline so consumer repos that wrap an upstream project
+can drive everything from a single ~25-line caller workflow:
 
 1. [`monitor-upstream-release.yml`](#monitor-upstream-releaseyml--reusable-workflow) —
    poll the upstream `latest` release, commit a tracking JSON file,
@@ -1373,15 +1426,22 @@ or otherwise non-SemVer tags.
 
 ### Caller example
 
-See [Quick start §2](#2-upstream-tracked-release-poll-upstream-then-run-the-same-pipeline)
-for the canonical caller. The minimum viable shape is:
+The full annotated template lives at
+[examples/bos-launchpad-example.yml](examples/bos-launchpad-example.yml) — copy it
+verbatim into a consumer repo as `.github/workflows/bos-launchpad.yml`
+and fill in the four `# TODO` placeholders. See
+[Quick start §2](#2-upstream-tracked-release-poll-upstream-then-run-the-same-pipeline)
+for the inline minimal-shape walkthrough. The minimum viable shape is:
 
 ```yaml
 jobs:
   release:
     permissions:
-      contents: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/release-from-upstream.yml@main
+      contents:        write
+      actions:         write
+      pull-requests:   write
+      security-events: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
     with:
       upstream_repo:       wiedehopf/readsb
       image_name:          ${{ vars.IMAGE_NAME }}
@@ -1396,7 +1456,7 @@ jobs:
 
 ### Inputs
 
-See [.github/workflows/release-from-upstream.yml](.github/workflows/release-from-upstream.yml)
+See [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml)
 for the authoritative list. High-level groups:
 
 - **Monitor stage:** `upstream_repo`, `track_file`, `force_release`
@@ -1434,6 +1494,111 @@ These are available to the release-notes template as
 `{{ UPSTREAM_REPO }}`, `{{ UPSTREAM_TAG }}`, and
 `{{ UPSTREAM_COMMIT }}`. Caller-supplied `release_extra_context:` is
 appended after them and can override them or add additional keys.
+
+---
+
+## `sync-managed-files.yml` — reusable workflow
+
+Keep the dotfiles every consumer repo cares about — `.gitignore`,
+`.dockerignore`, `.editorconfig`, optionally `.gitattributes` — in
+sync with canonical content defined once in the hub. Each file is
+managed by **section**, not whole-file: only the text between
+
+```
+# >>> bos-automation-hub:<service> >>>
+…
+# <<< bos-automation-hub:<service> <<<
+```
+
+is touched. Everything outside those markers is preserved verbatim,
+including any user-authored rules in the same file.
+
+### Services
+
+Pass the services your repo uses; pass nothing for the rest. Skipped
+services are **not** removed from the file — they're simply ignored on
+this run.
+
+| Service           | Files it contributes to                  | Block contents (summary) |
+|-------------------|------------------------------------------|--------------------------|
+| `common`          | `.gitignore`, `.editorconfig`            | OS / editor noise, `.env*` + private-key ignores, LF + 2-space defaults. |
+| `docker`          | `.dockerignore`                          | CI / git metadata, editor / OS noise, README / LICENSE / SECURITY.md, `.env*` and private keys. |
+| `balena`          | `.dockerignore`                          | `!balena.yml` re-include (the hub renders this file into the build context before `balena push`). |
+| `node`            | `.gitignore`, `.dockerignore`            | `node_modules/`, `npm-debug.log*`, etc. |
+| `python`          | `.gitignore`, `.dockerignore`            | `__pycache__/`, `.venv/`, `.pytest_cache/`, etc. |
+| `lf_line_endings` | `.gitattributes`                         | `* text=auto eol=lf` + binary-type marks. Opt-in (some repos legitimately need CRLF for Windows scripts). |
+
+### Modes
+
+| `mode:`  | Behaviour |
+|----------|-----------|
+| `commit` | (default) Write changes and push to the current branch using `shared/commit-and-push`, with rebase-retry on concurrent commits. |
+| `check`  | Compute drift only; print a unified diff in the job log; exit non-zero if any block drifted. Use in a PR caller to enforce that consumers commit canonical blocks. |
+
+### Minimal caller
+
+```yaml
+# .github/workflows/sync-managed-files.yml
+name: Sync managed dotfiles
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'   # weekly Monday 13:00 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-managed-files.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-managed-files-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    permissions:
+      contents: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
+    with:
+      services: |
+        common
+        docker
+        balena
+```
+
+### PR drift-check pattern
+
+Run the same workflow on every PR with `mode: check` and a read-only
+`contents:` permission. The job fails (with a diff in the log) if a
+managed block drifted, prompting the contributor to re-run the
+`commit` mode locally or in a separate job.
+
+```yaml
+jobs:
+  drift-check:
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
+    with:
+      services: |
+        common
+        docker
+        balena
+      mode: check
+```
+
+### Adding a new service block
+
+Open
+[`sync.py`](.github/actions/sync-managed-files/sync.py), add the block
+constant, register it in `SERVICE_BLOCKS`, and add a row to the
+table above. The block must end with a newline so the close marker
+sits on its own line. Run the self-test in
+[`.github/actions/sync-managed-files/`](.github/actions/sync-managed-files/)
+to confirm idempotency (a second run must produce zero drift).
 
 ---
 
@@ -1518,8 +1683,10 @@ applies here:
 |--------------|----------------------------|----------|
 | **Variable** | `CLOUDFLARE_PROJECT_NAME`  | Pages project name. Pass through `inputs.cloudflare_project_name`. |
 | **Variable** | `CLOUDFLARE_ACCOUNT_ID`    | 32-char hex account ID (appears in dashboard URLs — not secret). Pass through `inputs.cloudflare_account_id`. |
-| **Secret**   | `CLOUDFLARE_API_TOKEN`     | Cloudflare API token with `Account → Cloudflare Pages → Edit` on the project. |
+| **Variable** | `CLOUDFLARE_ZONE_ID`       | 32-char hex zone ID for the production domain (appears in dashboard URLs — not secret). Pass through `inputs.cloudflare_zone_id`. Required by the post-deploy cache-purge step. |
+| **Secret**   | `CLOUDFLARE_API_TOKEN`     | Cloudflare API token. Requires `Account → Cloudflare Pages → Edit` for the deploy step, plus `Zone → Cache Purge → Purge` on the target zone when `purge_cache` is enabled. The same token can carry both scopes. |
 | Secret       | `CLOUDFLARE_ACCOUNT_ID`    | **Optional / back-compat.** Used only if `inputs.cloudflare_account_id` is empty. Prefer the `vars.` form. |
+| Secret       | `CLOUDFLARE_ZONE_ID`       | **Optional / back-compat.** Used only if `inputs.cloudflare_zone_id` is empty. Prefer the `vars.` form. |
 
 Set `vars.CLOUDFLARE_PROJECT_NAME` and `vars.CLOUDFLARE_ACCOUNT_ID`
 once at the **organisation** level for shared defaults, override at
@@ -1547,6 +1714,8 @@ the repo level when a project differs.
 | `deploy` | string | `''` | `'true'`/`'false'` to force; empty deploys only on default-branch pushes. |
 | `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","ARM64"]`) to override. See [Runner resolution](#runner-resolution). |
 | `checkout_fetch_depth` | number | `0` | `fetch-depth` for `actions/checkout`. |
+| `purge_cache` | boolean | `true` | Purge the entire Cloudflare edge cache for `cloudflare_zone_id` after a successful deploy. Skips with a `::notice::` if no zone ID is configured. Set to `false` to disable. |
+| `cloudflare_zone_id` | string | `''` | 32-char hex zone ID for the production domain. Falls back to `secrets.CLOUDFLARE_ZONE_ID`. Required for the cache-purge step to do anything. |
 | `generate_sitemap` | boolean | `false` | Run `bos-sitemap-generator`. |
 | `generate_robots` | boolean | `false` | Run `bos-robotstxt-generator`. |
 | `generate_security_txt` | boolean | `false` | Run `bos-securitytxt-generator`. |
@@ -1573,6 +1742,7 @@ the repo level when a project differs.
 | `deployment_alias_url` | Deployment alias URL (preview/branch deploys). |
 | `environment` | `production` or `preview`. |
 | `account_id` | Resolved Cloudflare account ID (input or fallback secret). |
+| `purged` | `true` when the post-deploy zone cache purge ran successfully; `false` when it was skipped (opt-out, no zone ID, deploy skipped) or failed. |
 
 ### Production gating with GitHub Environments
 
@@ -1600,18 +1770,20 @@ the gate is satisfied.
 
 ### Composite actions consumed by this workflow
 
-Three steps are split out into local composite actions so they can be
-audited independently and reused on their own:
+Each pre/post-deploy step is split out into a local composite action so
+it can be audited independently and reused on its own:
 
 | Action | Path | Purpose |
 |--------|------|---------|
-| `cloudflare-pages-resolve-account-id` | [.github/actions/cloudflare-pages-resolve-account-id/action.yml](.github/actions/cloudflare-pages-resolve-account-id/action.yml) | Picks the account ID from the input or fallback secret, validates the 32-char hex shape, and registers `::add-mask::` so the value is redacted from later logs. |
+| `shared/cloudflare-resolve-id` | [.github/actions/shared/cloudflare-resolve-id/action.yml](.github/actions/shared/cloudflare-resolve-id/action.yml) | Generic resolver/validator for any Cloudflare 32-char hex ID (account, zone, …). Strips whitespace, asserts `^[0-9a-f]{32}$`, and registers `::add-mask::`. Lives under `shared/` because it's reused by both the account-ID and zone-purge actions. New Cloudflare-flavored actions should call it directly with the appropriate `kind`. |
+| `cloudflare-pages-resolve-account-id` | [.github/actions/cloudflare-pages-resolve-account-id/action.yml](.github/actions/cloudflare-pages-resolve-account-id/action.yml) | Thin back-compat wrapper around `shared/cloudflare-resolve-id` (`kind: account`) that preserves the historical `account_id` / `fallback_account_id` inputs. |
 | `stage-deploy-dir` | [.github/actions/shared/stage-deploy-dir/action.yml](.github/actions/shared/stage-deploy-dir/action.yml) | Generic deploy-directory stager (`copy_files` + `copy_dirs` with `SRC:DEST` rewrite, glob expansion, and path-traversal rejection). Lives under `shared/` because it's not Cloudflare-specific — any static-site deploy can reuse it. |
 | `cloudflare-pages-compose-command` | [.github/actions/cloudflare-pages-compose-command/action.yml](.github/actions/cloudflare-pages-compose-command/action.yml) | Builds the `wrangler pages deploy` argv as a properly shell-quoted string for `cloudflare/wrangler-action`'s `command:` input. |
+| `cloudflare-zone-purge` | [.github/actions/cloudflare-zone-purge/action.yml](.github/actions/cloudflare-zone-purge/action.yml) | Post-deploy edge-cache purge for the zone serving the deployed Pages domain. Calls `POST /zones/{zone_id}/purge_cache` with `{"purge_everything":true}`; resolves/validates the zone ID via `shared/cloudflare-resolve-id` (`kind: zone`). |
 
 Use them directly from any workflow when you don't need the full
-reusable workflow — for example, the resolver works with any wrangler
-command, not just `pages deploy`:
+reusable workflow — for example, the account-ID wrapper works with any
+wrangler command, not just `pages deploy`:
 
 ```yaml
 - uses: actions/checkout@v4
@@ -1628,15 +1800,26 @@ command, not just `pages deploy`:
     command:   r2 object list my-bucket
 ```
 
+Or purge a zone's edge cache from any workflow that already knows the
+zone ID:
+
+```yaml
+- uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-purge@main
+  with:
+    zone_id:   ${{ vars.CLOUDFLARE_ZONE_ID }}
+    api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+```
+
 ### Security notes specific to this workflow
 
 - All third-party actions (including the `blackoutsecure/bos-*`
   generators and `cloudflare/wrangler-action`) are SHA-pinned with the
   resolved tag in a trailing comment; Dependabot rolls them weekly.
-- The three composite actions consumed by this workflow live in this
-  repository (referenced as `./.github/actions/...`) so they're
-  versioned together with the workflow and require no extra trust
-  boundary.
+- The composite actions consumed by this workflow live in this
+  repository (referenced via the full
+  `blackoutsecure/bos-automation-hub/.github/actions/...@main` path)
+  so they're versioned together with the workflow and require no
+  extra trust boundary.
 - `public_dir`, `deploy_dir`, `working_directory`, and every entry in
   `copy_files`/`copy_dirs` are rejected if they're absolute, empty,
   contain `..`, or contain newlines — so a misconfigured caller cannot
@@ -1648,10 +1831,25 @@ command, not just `pages deploy`:
   the wrangler argv is built) so a runtime change cannot smuggle shell
   metacharacters through.
 - `cloudflare_account_id` (or its `CLOUDFLARE_ACCOUNT_ID` fallback) is
-  required to be a 32-char hex string. The resolver registers it with
-  `::add-mask::` so it never appears verbatim in subsequent logs.
+  required to be a 32-char hex string. The shared
+  `cloudflare-resolve-id` action registers it with `::add-mask::` so
+  it never appears verbatim in subsequent logs.
+- `cloudflare_zone_id` (or its `CLOUDFLARE_ZONE_ID` fallback), when
+  the cache-purge step runs, goes through the same
+  `cloudflare-resolve-id` validator — same `^[0-9a-f]{32}$` shape
+  check and same `::add-mask::` treatment.
 - `CLOUDFLARE_API_TOKEN` is rejected if it contains whitespace
-  (newlines in a secret silently truncate `GITHUB_OUTPUT`).
+  (newlines in a secret silently truncate `GITHUB_OUTPUT`) — the
+  check runs in both the workflow preflight and inside
+  `cloudflare-zone-purge` (defence in depth). When `purge_cache` is
+  enabled, the token must additionally carry `Zone → Cache Purge →
+  Purge` on the target zone; a missing scope surfaces as an HTTP 403
+  in the purge step.
+- The cache-purge step calls a fixed-URL endpoint
+  (`POST /zones/{zone_id}/purge_cache`) with a literal JSON body
+  (`{"purge_everything":true}`) — no caller-supplied data is
+  interpolated into the curl invocation. The token is sent via an
+  `Authorization:` header and never echoed to the log.
 - `deployment_environment` is regex-validated against GitHub's
   environment-name shape before being bound to the job.
 - The wrangler command is assembled as a properly shell-quoted argv
@@ -1680,7 +1878,7 @@ whether a new behaviour belongs in the orchestrator vs a stage.
 Each `*-build-push.yml` / `*-publish.yml` / `github-release.yml` does
 **one** thing and exposes a clean input/output contract. The
 *pipelines* — [`release.yml`](#releaseyml--reusable-meta-workflow) and
-[`release-from-upstream.yml`](#release-from-upstreamyml--reusable-meta-workflow) —
+[`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow) —
 are thin meta-workflows that compose those single-purpose stages with
 job-level `needs:` and forward inputs/secrets through. The same stage
 workflow is reusable on its own (e.g. a Docker-only repo calls
@@ -1710,25 +1908,12 @@ into is by name (`vars.IMAGE_NAME`, `secrets.DOCKERHUB_TOKEN`).
 
 ### 3. No starter-workflow templates duplicating reusable contracts
 
-This repo deliberately does **not** ship a `.github/workflow-templates/`
-directory. The reasons:
-
-- GitHub's "Suggested workflows" picker only auto-populates from
-  `<org>/.github/workflow-templates/` (a *separate* repo). Templates
-  shipped in this repo never appear in the picker anyway.
-- Maintaining starter files that are thin wrappers around the
-  reusable workflows means **two** sources of truth for every input
-  contract. They drift (renamed inputs, missing toggles, stale
-  comments) the moment the underlying workflow evolves.
-- The [Quick start](#quick-start--caller-wiring) section above is the
-  reference. It's discovered by the same readers and updated in the
-  same PR as the workflow it documents — no second source to keep in
-  sync.
-
-If the picker UX is desired, the [Quick start](#quick-start--caller-wiring)
-snippets can be mirrored into `<org>/.github/workflow-templates/`
-once. Picker templates are setup boilerplate, not the long-term
-contract.
+This repo does **not** ship `.github/workflow-templates/`. GitHub's
+"Suggested workflows" picker only auto-populates from
+`<org>/.github/workflow-templates/`, and parallel starter files would
+drift the moment the underlying workflow evolves. The
+[Quick start](#quick-start--caller-wiring) snippets are the reference;
+mirror them into the org `.github` repo once if you want the picker UX.
 
 ### 4. Trigger logic stays in the caller; orchestrators are trigger-agnostic
 
@@ -1737,7 +1922,7 @@ inferring it from the calling event — but it doesn't *bind* itself to
 any particular trigger. This lets the same pipeline be driven by a
 tag push, a `release: published` event, a manual dispatch, or another
 reusable workflow's `needs:` (which is exactly how
-`release-from-upstream.yml` calls it).
+`bos-launchpad.yml` calls it).
 
 When adding a new pipeline, follow the same split:
 
@@ -1772,7 +1957,7 @@ boolean, not a copy.
 
 ### 7. Concurrency is set at the orchestrator, not the stage
 
-Each orchestrator (`release.yml`, `release-from-upstream.yml`,
+Each orchestrator (`release.yml`, `bos-launchpad.yml`,
 `monitor-upstream-release.yml`) declares its own `concurrency:` group
 and **never** sets `cancel-in-progress: true` for publish-side runs.
 A partial release can leave the registry / fleet in a half-published
@@ -1797,24 +1982,7 @@ CI-style local jobs (`lint.yml`) are the only place
   should pin their `uses:` to a major-version tag once one is
   published (see below).
 
-### 9. Versioning consumer pins (planned)
-
-Today every consumer pins `@main`. To give product repos a stable
-release surface without losing the "edit-once, propagate-everywhere"
-property, the longer-term plan is:
-
-- Cut a `v1` major-version branch / tag on this repo when the input
-  contracts stabilise.
-- Consumers pin `@v1`. Non-breaking changes land on `main` and are
-  fast-forwarded onto `v1` weekly; breaking changes ship behind a
-  `v2` and consumers migrate explicitly.
-- Critical fixes are back-ported to `v1` immediately.
-
-Until then, treat `@main` as the contract and rely on lint + the
-hardening practices in [SECURITY.md](SECURITY.md) to catch
-regressions before they land.
-
-### 10. Renaming workflows is breaking — don't
+### 9. Renaming workflows is breaking — don't
 
 Workflow filenames (e.g. `release.yml`) are part of the public
 contract: every consumer repo `uses:` the workflow by path. Renames
@@ -1823,23 +1991,17 @@ repos won't notice until their next release. Prefer adding a new
 workflow alongside the old one (with the new behaviour) and
 deprecating the old in the README, rather than renaming in place.
 
-This is why `release.yml` keeps its name even though
-`release-pipeline.yml` would be marginally more descriptive.
-
 ---
 
-## Security notes
+## Security
 
-This repository is public and these workflows run in downstream repos
-with access to their secrets. The hardening practices applied across
-every workflow and composite action — pinned action SHAs, least-privilege
-tokens, no credential persistence, injection-safe shell scripts, strict
-input validation, concurrency safety, and no `pull_request_target` — are
-documented in [SECURITY.md](SECURITY.md).
-
-To report a vulnerability, use GitHub's
+Report vulnerabilities via GitHub's
 [private vulnerability reporting](https://github.com/blackoutsecure/bos-automation-hub/security/advisories/new)
-form.
+form. The organization-wide policy at
+[blackoutsecure/.github/SECURITY.md](https://github.com/blackoutsecure/.github/blob/main/SECURITY.md)
+applies. Hardening practices (pinned action SHAs, least-privilege
+tokens, injection-safe shell, strict input validation, no
+`pull_request_target`) are enforced by [lint.yml](.github/workflows/lint.yml).
 
 ---
 

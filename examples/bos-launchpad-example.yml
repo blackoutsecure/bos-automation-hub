@@ -1,0 +1,88 @@
+# Reference consumer template for the `bos-launchpad.yml` hub meta-workflow.
+#
+# Copy to the calling repo as `.github/workflows/bos-launchpad.yml`, then fill
+# in the five `# TODO` placeholders. Everything else is structural.
+#
+# Required Actions vars:    DOCKERHUB_NAMESPACE, BALENA_NAMESPACE
+# Required Actions secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
+#
+# See https://github.com/blackoutsecure/bos-automation-hub for the full
+# input reference and gotchas (concurrency, source modes, force_release).
+
+name: Blackout Secure Launchpad
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'   # stagger off :00 to dodge org cron pile-ups
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: Run the pipeline even if upstream is unchanged.
+        type: boolean
+        default: false
+
+# Do NOT declare a top-level `concurrency:` here — the hub workflow owns
+# serialization. Declaring it on both sides triggers a GHA self-deadlock.
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    permissions:
+      contents:        write   # monitor tracking-file commit + GitHub Release publish
+      actions:         write   # nested monitor (`gh workflow run`)
+      pull-requests:   write   # nested Docker Scout PR annotations
+      security-events: write   # nested Docker Scout SARIF upload
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
+    with:
+      # TODO: upstream repo whose releases drive yours.
+      upstream_repo: <UPSTREAM_OWNER>/<UPSTREAM_REPO>
+
+      # Default source is `github_release` (poll latest release). For upstreams
+      # that ship rolling builds off a dev branch, switch to:
+      #   source:          github_branch_file
+      #   upstream_branch: dev
+      #   track_file:      .github/upstream/<APP_NAME>-dev.json
+
+      # TODO: per-app tracking file path (lets one repo track multiple upstreams).
+      track_file: .github/upstream/<APP_NAME>.json
+
+      force_release: ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
+
+      # TODO: image name (no namespace) and balena block slug — usually identical.
+      image_name:          <APP_NAME>
+      dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
+      block_name:          <APP_NAME>
+      balena_namespace:    ${{ vars.BALENA_NAMESPACE }}
+
+      # Generate balena.yml at publish time so the repo doesn't need a checked-in copy.
+      balena_generate_yml: true
+
+      # TODO: one-line block description shown on Balena Hub.
+      balena_description: >-
+        One-line description of what this block does. Mention the upstream
+        application and any key features that differentiate the container.
+
+      # TODO: usage snippet (Markdown) rendered on the Balena Hub block page.
+      balena_post_provisioning: |
+        ## Usage instructions
+
+        Include this snippet in your docker-compose.yml file under 'services':
+
+          ```
+          <APP_NAME>:
+            image: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/<APP_NAME>:latest
+            restart: unless-stopped
+            environment:
+              - TZ=Etc/UTC
+            security_opt:
+              - 'no-new-privileges:true'
+          ```
+
+        Repository: https://github.com/${{ github.repository }}
+        Upstream application: https://github.com/<UPSTREAM_OWNER>/<UPSTREAM_REPO>
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}

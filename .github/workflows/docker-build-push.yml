@@ -240,6 +240,19 @@ name: Docker Build and Push (reusable)
         required: false
         type: string
         default: ''
+      scout_enable_repo:
+        description: >-
+          Publish-mode only: after a successful manifest push, ensure the
+          Docker Hub repository is enrolled in Docker Scout's continuous-
+          monitoring service. New repositories are NOT automatically
+          scanned by Scout until enrolled — this closes that gap so every
+          release surfaces in the Scout dashboard without manual
+          onboarding. The `docker scout repo enable` call is idempotent
+          (no-op on an already-enrolled repo). Requires a Docker Hub PAT
+          with admin scope on the namespace.
+        required: false
+        type: boolean
+        default: true
 
       dockerhub_namespace:
         description: >-
@@ -406,7 +419,7 @@ jobs:
 
       - name: Checkout caller repo
         if: inputs.auto_resolve_version
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
@@ -528,15 +541,15 @@ jobs:
       BUILD_DATE: ${{ needs.setup.outputs.build_date }}
       IMAGE_REF: ${{ needs.setup.outputs.image }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Generate image labels
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ${{ env.IMAGE_REF }}
           labels: |
@@ -547,7 +560,7 @@ jobs:
 
       - name: Docker Hub login
         if: env.PUSH == 'true'
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -584,7 +597,7 @@ jobs:
 
       - name: Build${{ env.PUSH == 'true' && ' and push by digest' || ' (validation only)' }}
         id: build
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: ${{ inputs.build_context }}
           file: ${{ inputs.dockerfile }}
@@ -611,7 +624,7 @@ jobs:
 
       - name: Upload digest artifact
         if: env.PUSH == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ env.DIGEST_ARTIFACT_PREFIX }}-${{ matrix.arch }}
           path: ${{ env.DIGESTS_DIR }}/*
@@ -633,15 +646,15 @@ jobs:
       MANIFEST_RETRY_DELAY: ${{ inputs.manifest_retry_delay }}
       IMAGE_REF: ${{ needs.setup.outputs.image }}
     steps:
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+      - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Download digest artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb917205b4b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: ${{ env.DIGESTS_DIR }}
           pattern: ${{ env.DIGEST_ARTIFACT_PREFIX }}-*
@@ -693,7 +706,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
@@ -736,11 +749,11 @@ jobs:
       # name the local image by. Never pushed.
       SCAN_TAG: scan-${{ github.sha }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Compose build args
         id: args
@@ -766,7 +779,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Build amd64 and load locally
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: ${{ inputs.build_context }}
           file: ${{ inputs.dockerfile }}
@@ -852,7 +865,7 @@ jobs:
       IMAGE_REF: ${{ needs.setup.outputs.image }}
       IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
@@ -920,4 +933,29 @@ jobs:
             echo "| Recorded to    | \`${RECORD_ENV:-n/a}\` |"
             echo "| Status         | \`${STATUS}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ---------------------------------------------------------------------------
+  # Docker Scout — repository enrollment.
+  #
+  # Idempotently ensures the Docker Hub repository is enrolled in Docker
+  # Scout's continuous-monitoring service. New repos are NOT automatically
+  # indexed by Scout until enrolled — this closes that gap so every release
+  # surfaces in the Scout dashboard without manual onboarding.
+  #
+  # Runs in parallel with `scout-published` (both depend only on `manifest`)
+  # so the enrollment side-effect doesn't gate SARIF upload.
+  # ---------------------------------------------------------------------------
+  scout-enable-repo:
+    name: Enroll repo in Docker Scout
+    needs: [setup, manifest]
+    if: needs.setup.outputs.push == 'true' && inputs.scout_enable_repo && needs.manifest.result == 'success'
+    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - name: Enroll repository in Docker Scout
+        uses: blackoutsecure/bos-automation-hub/.github/actions/docker-scout-enable-repo@main
+        with:
+          repository: ${{ needs.setup.outputs.namespace }}/${{ inputs.image_name }}
+          username:   ${{ secrets.DOCKERHUB_USERNAME }}
+          password:   ${{ secrets.DOCKERHUB_TOKEN }}
 

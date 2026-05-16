@@ -1,0 +1,121 @@
+name: Purge Cloudflare zone cache
+description: >-
+  Purge the entire edge cache for a Cloudflare zone via
+  `POST /zones/{zone_id}/purge_cache` with `{"purge_everything":true}`.
+  Validates the zone-id shape, masks it in logs, and surfaces the API
+  response body (never the token) for forensics.
+
+inputs:
+  zone_id:
+    description: >-
+      Cloudflare zone ID (32-char lowercase hex). Preferred source —
+      pass `vars.CLOUDFLARE_ZONE_ID` from the calling workflow. Zone
+      IDs appear in the Cloudflare dashboard URL for the zone and are
+      not secret.
+    required: false
+    default: ''
+  fallback_zone_id:
+    description: >-
+      Optional back-compat fallback (e.g. `secrets.CLOUDFLARE_ZONE_ID`).
+      Used only when `zone_id` is empty.
+    required: false
+    default: ''
+  api_token:
+    description: >-
+      Cloudflare API token with `Zone → Cache Purge → Purge` permission
+      on the target zone. The token from `secrets.CLOUDFLARE_API_TOKEN`
+      can be reused if the same token also carries the Pages:Edit scope.
+    required: true
+  mask_zone_id:
+    description: >-
+      When `true` (default) the resolved zone ID is registered with
+      `::add-mask::` so it never appears verbatim in subsequent logs.
+    required: false
+    default: 'true'
+
+outputs:
+  purged:
+    description: '`true` when the API returned `success`.'
+    value: ${{ steps.purge.outputs.purged }}
+  zone_id:
+    description: 'Resolved, validated 32-char lowercase hex zone ID.'
+    value: ${{ steps.resolve.outputs.value }}
+  http_code:
+    description: 'HTTP status code returned by the Cloudflare API.'
+    value: ${{ steps.purge.outputs.http_code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve & validate zone ID
+      id: resolve
+      uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-resolve-id@main
+      with:
+        value: ${{ inputs.zone_id }}
+        fallback: ${{ inputs.fallback_zone_id }}
+        kind: zone
+        mask: ${{ inputs.mask_zone_id }}
+
+    - name: Purge zone cache
+      id: purge
+      shell: bash
+      env:
+        ZONE_ID: ${{ steps.resolve.outputs.value }}
+        API_TOKEN: ${{ inputs.api_token }}
+      run: |
+        set -euo pipefail
+
+        # A stray newline in a secret silently truncates GITHUB_OUTPUT
+        # for any downstream step, so reject it explicitly.
+        if [ -z "${API_TOKEN}" ]; then
+          echo "ERROR: api_token is empty" >&2
+          exit 1
+        fi
+        case "${API_TOKEN}" in
+          *[$'\n\r\t ']*)
+            echo "ERROR: api_token contains whitespace/newlines" >&2
+            exit 1
+            ;;
+        esac
+
+        BODY_FILE="$(mktemp)"
+        trap 'rm -f "${BODY_FILE}"' EXIT
+
+        # `--data` body is a fixed literal — no user input is interpolated
+        # into it, so no shell-injection surface. The token is sent via
+        # an Authorization header and is never echoed to the log.
+        HTTP_CODE="$(curl --silent --show-error --location \
+          --request POST \
+          --url "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/purge_cache" \
+          --header "Authorization: Bearer ${API_TOKEN}" \
+          --header 'Content-Type: application/json' \
+          --data '{"purge_everything":true}' \
+          --output "${BODY_FILE}" \
+          --write-out '%{http_code}')"
+
+        echo "HTTP ${HTTP_CODE}"
+        # The API response body contains the purge ID and any error
+        # details — useful for debugging and safe to surface (no token).
+        cat "${BODY_FILE}"
+        echo
+
+        echo "http_code=${HTTP_CODE}" >> "${GITHUB_OUTPUT}"
+
+        if [ "${HTTP_CODE}" != "200" ]; then
+          echo "ERROR: Cloudflare API returned HTTP ${HTTP_CODE}" >&2
+          echo "purged=false" >> "${GITHUB_OUTPUT}"
+          exit 1
+        fi
+
+        # Body shape on success:
+        #   {"result":{"id":"..."}, "success":true, "errors":[], "messages":[]}
+        # Use grep instead of jq to keep this action runnable on
+        # minimalist self-hosted runners.
+        if ! grep -Eq '"success"[[:space:]]*:[[:space:]]*true' "${BODY_FILE}"; then
+          echo "ERROR: Cloudflare API returned success=false" >&2
+          echo "purged=false" >> "${GITHUB_OUTPUT}"
+          exit 1
+        fi
+
+        echo "purged=true" >> "${GITHUB_OUTPUT}"
+        echo "Cache purge OK."

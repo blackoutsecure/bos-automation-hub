@@ -1,4 +1,5 @@
-# Upstream-tracked release pipeline (reusable meta-workflow).
+# Blackout Secure Launchpad — upstream-tracked release pipeline
+# (reusable meta-workflow).
 #
 # Composes two reusable workflows in this repo into a single end-to-end loop
 # so consumer repos that wrap an upstream project can drive the full
@@ -24,16 +25,17 @@
 # Stage toggles (`docker`, `balena`, `github_release`) are forwarded to the
 # release pipeline so the same wrapper can power Docker-only / Balena-only /
 # any-combination releases of an upstream project.
-name: Release-from-upstream pipeline (reusable meta-workflow)
+name: Blackout Secure Launchpad (reusable meta-workflow)
 
 "on":
   workflow_call:
     inputs:
       # ----- Monitor stage --------------------------------------------------
       upstream_repo:
-        description: 'Upstream repo to track, as `owner/name` (e.g. `wiedehopf/readsb`).'
-        required: true
+        description: 'Upstream GitHub repo, as `owner/name`. Required for `source: github_release`, `github_branch_file`, and `github_tags`.'
+        required: false
         type: string
+        default: ''
       track_file:
         description: 'Repo-relative path to the tracking JSON file.'
         required: false
@@ -50,28 +52,62 @@ name: Release-from-upstream pipeline (reusable meta-workflow)
         default: false
       source:
         description: >-
-          Upstream-version discovery strategy. Forwarded to the monitor stage.
-          `latest_release` (default) polls `GET /repos/<repo>/releases/latest`;
-          `branch_head` reads a `version` file from a branch's HEAD. Use
-          `branch_head` when the upstream ships rolling builds and does not
-          cut GitHub Releases (e.g. `wiedehopf/readsb` `dev`).
+          Upstream-version discovery strategy. Forwarded to the monitor
+          stage. See `monitor-upstream-release.yml` for the full provider
+          list (`github_release`, `github_branch_file`, `github_tags`,
+          `container_image`, `npm`, `pypi`, `generic_url`). Legacy aliases
+          `latest_release` and `branch_head` continue to work.
         required: false
         type: string
-        default: latest_release
+        default: github_release
       upstream_branch:
         description: >-
-          Branch to track when `source: branch_head`. Required for that mode,
-          ignored otherwise.
+          Branch to track when `source: github_branch_file`. Required for
+          that mode, ignored otherwise.
         required: false
         type: string
         default: ''
       version_file_path:
         description: >-
           Repo-relative path to the version file inside `upstream_branch`.
-          Used only when `source: branch_head`. Default `version`.
+          Used only when `source: github_branch_file`. Default `version`.
         required: false
         type: string
         default: 'version'
+      image_ref:
+        description: >-
+          Container image reference (e.g. `docker.io/library/nginx`).
+          Required when `source: container_image`.
+        required: false
+        type: string
+        default: ''
+      package_name:
+        description: >-
+          Package name. Required when `source: npm` (scoped names allowed)
+          or `source: pypi`.
+        required: false
+        type: string
+        default: ''
+      version_url:
+        description: 'URL to fetch when `source: generic_url`.'
+        required: false
+        type: string
+        default: ''
+      version_regex:
+        description: >-
+          Regex applied to `version_url` body; first capture group is the
+          version. Required when `source: generic_url`.
+        required: false
+        type: string
+        default: ''
+      tag_pattern:
+        description: >-
+          Optional regex used to filter candidate tags for `github_tags` and
+          `container_image` before SemVer ranking. Default accepts
+          `[v]X.Y.Z[-suffix]`.
+        required: false
+        type: string
+        default: ''
 
       # ----- Release pipeline: stage toggles -------------------------------
       docker:
@@ -173,6 +209,14 @@ name: Release-from-upstream pipeline (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      docker_scout_enable_repo:
+        description: >-
+          After a successful publish, ensure the Docker Hub repository
+          is enrolled in Docker Scout's continuous-monitoring service.
+          Idempotent — no-op when the repo is already enabled.
+        required: false
+        type: boolean
+        default: true
 
       # ----- Release pipeline: Balena stage --------------------------------
       block_name:
@@ -195,6 +239,73 @@ name: Release-from-upstream pipeline (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      balena_generate_yml:
+        description: >-
+          Render `balena.yml` dynamically inside the balena stage instead
+          of reading it from the caller repo. Lets consumer repos drop the
+          checked-in `balena.yml` entirely. When `true`, the balena commit-
+          back job is skipped (the manifest is regenerated each run).
+        required: false
+        type: boolean
+        default: false
+      balena_type:
+        description: >-
+          Top-level `type:` written to the rendered manifest. Used only
+          when `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: sw.block
+      balena_description:
+        description: >-
+          Rendered `description:` field. Optional. Used only when
+          `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_post_provisioning:
+        description: >-
+          Rendered `post-provisioning:` Markdown. Multi-line; pass as a
+          YAML literal block (`|`). Used only when `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_repository_url:
+        description: >-
+          `assets.repository.data.url` for the rendered manifest. When
+          empty, defaults to the caller repo URL. Used only when
+          `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_logo_url:
+        description: >-
+          Optional `assets.logo.data.url`. Must be `https://` when set.
+          Used only when `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_default_device_type:
+        description: >-
+          `data.defaultDeviceType` slug. Optional — when empty, the
+          renderer uses the first entry of the resolved
+          `supportedDeviceTypes`. Used only when
+          `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
+      balena_supported_device_types:
+        description: >-
+          Explicit `data.supportedDeviceTypes` (newline- and/or
+          comma-separated balena device-type slugs). Optional — when
+          empty, the renderer derives the list automatically from the
+          published docker image (`needs.docker.outputs.image` +
+          version) and falls back to the workflow-level `platforms`
+          input (which already defaults to `linux/amd64,linux/arm64`).
+          Set this only to force a specific list. Used only when
+          `balena_generate_yml: true`.
+        required: false
+        type: string
+        default: ''
 
       # ----- Release pipeline: GitHub Release stage ------------------------
       release_template_path:
@@ -283,7 +394,7 @@ concurrency:
   # Single in-flight upstream-tracked release per ref. We never cancel —
   # a partial release can leave the registry / fleet in a half-published
   # state that subsequent re-runs reconcile.
-  group: release-from-upstream-${{ github.workflow }}-${{ github.ref }}
+  group: bos-launchpad-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -309,6 +420,11 @@ jobs:
       source:            ${{ inputs.source }}
       upstream_branch:   ${{ inputs.upstream_branch }}
       version_file_path: ${{ inputs.version_file_path }}
+      image_ref:         ${{ inputs.image_ref }}
+      package_name:      ${{ inputs.package_name }}
+      version_url:       ${{ inputs.version_url }}
+      version_regex:     ${{ inputs.version_regex }}
+      tag_pattern:       ${{ inputs.tag_pattern }}
 
   # ---------------------------------------------------------------------------
   # Stage 2 — run the full release pipeline against the new upstream version.
@@ -334,8 +450,10 @@ jobs:
       github_release:                  ${{ inputs.github_release }}
       image_name:                      ${{ inputs.image_name }}
       dockerhub_namespace:             ${{ inputs.dockerhub_namespace }}
-      docker_extra_tags:               ${{ inputs.docker_extra_tags }}
-      docker_short_description:        ${{ inputs.docker_short_description }}
+      # Smart defaults so thin callers don't have to wire these every time.
+      # Override by passing the matching input on the caller side.
+      docker_extra_tags:               ${{ inputs.docker_extra_tags        || format('sha-{0}', github.sha) }}
+      docker_short_description:        ${{ inputs.docker_short_description || github.event.repository.description }}
       docker_latest:                   ${{ inputs.docker_latest }}
       docker_multi_arch:               ${{ inputs.docker_multi_arch }}
       docker_update_description:       ${{ inputs.docker_update_description }}
@@ -348,10 +466,26 @@ jobs:
       docker_scout_record_environment: ${{ inputs.docker_scout_record_environment }}
       docker_scout_sarif_upload:       ${{ inputs.docker_scout_sarif_upload }}
       docker_scout_exit_code:          ${{ inputs.docker_scout_exit_code }}
+      docker_scout_enable_repo:        ${{ inputs.docker_scout_enable_repo }}
       block_name:                      ${{ inputs.block_name }}
       balena_namespace:                ${{ inputs.balena_namespace }}
       balena_sync_yml:                 ${{ inputs.balena_sync_yml }}
       balena_draft:                    ${{ inputs.balena_draft }}
+      balena_generate_yml:             ${{ inputs.balena_generate_yml }}
+      balena_type:                     ${{ inputs.balena_type }}
+      balena_repository_url:           ${{ inputs.balena_repository_url }}
+      # Default to `<default-branch>/logo.png` in the caller repo so blocks
+      # render with a logo out of the box. Override to pin a different path.
+      balena_logo_url:                 ${{ inputs.balena_logo_url || format('https://raw.githubusercontent.com/{0}/{1}/logo.png', github.repository, github.event.repository.default_branch) }}
+      balena_default_device_type:      ${{ inputs.balena_default_device_type }}
+      # `|-` strips the trailing newline that a plain `|` block would add at
+      # each forwarding hop, so multi-line caller values stay byte-stable.
+      balena_description: |-
+        ${{ inputs.balena_description }}
+      balena_post_provisioning: |-
+        ${{ inputs.balena_post_provisioning }}
+      balena_supported_device_types: |-
+        ${{ inputs.balena_supported_device_types }}
       release_template_path:           ${{ inputs.release_template_path }}
       release_extra_context: |
         UPSTREAM_REPO=${{ inputs.upstream_repo }}

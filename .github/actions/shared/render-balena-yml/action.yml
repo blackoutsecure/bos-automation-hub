@@ -1,0 +1,179 @@
+name: Render balena.yml
+description: >-
+  Render a balena block / application manifest from scalar inputs via
+  PyYAML `safe_dump`. Validates path-traversal on the output, HTTPS-only
+  on asset URLs, and that `default_device_type` appears in the supported
+  list. Used by `balena-block-publish.yml` (`sw.block`) and
+  `balena-fleet-deploy.yml` (`sw.application`).
+
+  Device-type resolution waterfall (first non-empty wins):
+  `supported_device_types` -> `image_ref` sniff -> `architectures` ->
+  `platforms`. Default device type comes from `default_device_type` or
+  the first resolved entry.
+
+inputs:
+  out_path:
+    description: 'Repo-relative output path (must not start with `/` or contain `..`).'
+    required: true
+  name:
+    description: 'Top-level `name:`.'
+    required: true
+  version:
+    description: 'Top-level `version:`.'
+    required: true
+  block_type:
+    description: 'Top-level `type:` (e.g. `sw.block`, `sw.application`).'
+    required: false
+    default: sw.block
+  description:
+    description: 'Top-level `description:`. Omitted from the document when empty.'
+    required: false
+    default: ''
+  post_provisioning:
+    description: >-
+      Top-level `post-provisioning:` (Markdown). Omitted from the
+      document when empty/whitespace-only.
+    required: false
+    default: ''
+  assets_repository_url:
+    description: >-
+      `assets.repository.data.url`. When empty and `emit_assets` is
+      true, derived from
+      `${{ github.server_url }}/${{ github.repository }}`. Must be
+      `https://` when set.
+    required: false
+    default: ''
+  assets_logo_url:
+    description: >-
+      Optional `assets.logo.data.url`. Must be `https://` when set.
+      Omitted from the document when empty.
+    required: false
+    default: ''
+  emit_assets:
+    description: >-
+      When `true` (default), always emit the top-level `assets:`
+      block — `assets.repository.data.url` is derived from the github
+      context if `assets_repository_url` is empty. When `false`, the
+      `assets:` block is omitted entirely (legacy
+      `balena-fleet-deploy.yml` behavior).
+    required: false
+    default: 'true'
+  default_device_type:
+    description: >-
+      `data.defaultDeviceType` slug. Optional — when empty, the first
+      entry of the resolved `supportedDeviceTypes` list is used.
+      Validated to appear in the resolved list either way.
+    required: false
+    default: ''
+  supported_device_types:
+    description: >-
+      Newline- and/or comma-separated balena device-type slugs written
+      to `data.supportedDeviceTypes`. Order is preserved with
+      deduplication. Optional — when empty, the renderer derives the
+      list from (in waterfall order) `image_ref`, `architectures`, or
+      `platforms`. At least one of those four inputs must resolve to
+      a non-empty list.
+    required: false
+    default: ''
+  architectures:
+    description: >-
+      Newline- and/or comma-separated balena arch slugs (`aarch64`,
+      `amd64`, `armv7hf`, `rpi`, `i386`). Expanded into a curated
+      per-arch device-type list when `supported_device_types` is
+      empty and `image_ref` did not resolve.
+    required: false
+    default: ''
+  platforms:
+    description: >-
+      Comma-separated docker buildx platform list, e.g.
+      `linux/amd64,linux/arm64`. Each `linux/<arch>[/variant]` is
+      mapped to a balena arch (`amd64` -> `amd64`, `arm64` -> `aarch64`,
+      `arm/v7` -> `armv7hf`, `arm/v6` -> `rpi`, `386` -> `i386`) and
+      expanded via the curated map. Used only when `supported_device_types`,
+      `image_ref`, and `architectures` are all empty / unresolved.
+    required: false
+    default: ''
+  image_ref:
+    description: >-
+      Optional fully-qualified docker image reference
+      (`[registry/]namespace/name:tag`). When set and
+      `supported_device_types` is empty, the renderer runs
+      `docker buildx imagetools inspect` against the ref and uses the
+      published platform list as the source of truth. Requires `docker`
+      on the runner and (for private registries) prior `docker login`.
+      Silent fallthrough to `architectures` / `platforms` on sniff
+      failure — the warning is emitted to stderr.
+    required: false
+    default: ''
+
+outputs:
+  path:
+    description: 'Path the rendered file was written to (echoes back `out_path`).'
+    value: ${{ steps.render.outputs.path }}
+
+runs:
+  using: composite
+  steps:
+    - id: sniff
+      shell: bash
+      env:
+        IMAGE_REF:              ${{ inputs.image_ref }}
+        SUPPORTED_DEVICE_TYPES: ${{ inputs.supported_device_types }}
+      run: |
+        set -euo pipefail
+        # Skip the docker manifest sniff entirely when an explicit device
+        # list is supplied (the renderer would ignore the result anyway) or
+        # when no image_ref was passed.
+        if [ -z "${IMAGE_REF}" ] || [ -n "${SUPPORTED_DEVICE_TYPES}" ]; then
+          echo "platforms=" >> "${GITHUB_OUTPUT}"
+          exit 0
+        fi
+        if ! command -v docker >/dev/null 2>&1; then
+          echo "WARN: image_ref set but 'docker' not found on PATH; skipping sniff" >&2
+          echo "platforms=" >> "${GITHUB_OUTPUT}"
+          exit 0
+        fi
+        TMP="$(mktemp)"
+        ERR="$(mktemp)"
+        if ! docker buildx imagetools inspect "${IMAGE_REF}" \
+              --format '{{json .}}' > "${TMP}" 2> "${ERR}"; then
+          echo "WARN: failed to sniff image_ref '${IMAGE_REF}':" >&2
+          sed 's/^/  /' "${ERR}" >&2 || true
+          echo "platforms=" >> "${GITHUB_OUTPUT}"
+          rm -f "${TMP}" "${ERR}"
+          exit 0
+        fi
+        PLATFORMS="$(python3 "${GITHUB_ACTION_PATH}/sniff_platforms.py" "${TMP}")"
+        rm -f "${TMP}" "${ERR}"
+        echo "Sniffed platforms from ${IMAGE_REF}: ${PLATFORMS}"
+        echo "platforms=${PLATFORMS}" >> "${GITHUB_OUTPUT}"
+
+    - id: render
+      shell: bash
+      env:
+        OUT_PATH:                ${{ inputs.out_path }}
+        BLOCK_NAME:              ${{ inputs.name }}
+        BLOCK_VERSION:           ${{ inputs.version }}
+        BLOCK_TYPE:              ${{ inputs.block_type }}
+        BLOCK_DESCRIPTION:       ${{ inputs.description }}
+        BLOCK_POST_PROVISIONING: ${{ inputs.post_provisioning }}
+        ASSETS_REPO_URL:         ${{ inputs.assets_repository_url }}
+        ASSETS_LOGO_URL:         ${{ inputs.assets_logo_url }}
+        EMIT_ASSETS:             ${{ inputs.emit_assets }}
+        DEFAULT_DEVICE_TYPE:     ${{ inputs.default_device_type }}
+        SUPPORTED_DEVICE_TYPES:  ${{ inputs.supported_device_types }}
+        ARCHITECTURES:           ${{ inputs.architectures }}
+        PLATFORMS:               ${{ inputs.platforms }}
+        SNIFFED_PLATFORMS:       ${{ steps.sniff.outputs.platforms }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/render.py"
+
+        echo "::group::Rendered ${OUT_PATH}"
+        cat -- "${OUT_PATH}"
+        echo "::endgroup::"
+
+        # Defensive re-parse before handing to the balena CLI.
+        python3 -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' -- "${OUT_PATH}"
+
+        echo "path=${OUT_PATH}" >> "${GITHUB_OUTPUT}"

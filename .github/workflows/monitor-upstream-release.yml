@@ -4,9 +4,10 @@ name: Monitor Upstream Release (reusable)
   workflow_call:
     inputs:
       upstream_repo:
-        description: 'Upstream repo to watch, as `owner/name` (e.g. `actions/runner`).'
-        required: true
+        description: 'Upstream repo to watch, as `owner/name`. Required for `source: github_release`, `github_branch_file`, and `github_tags`.'
+        required: false
         type: string
+        default: ''
       track_file:
         description: >-
           Repo-relative path to the tracking JSON file. Created on first
@@ -32,34 +33,76 @@ name: Monitor Upstream Release (reusable)
         default: 'false'
       source:
         description: >-
-          Where to read the upstream version from.
+          Where to read the upstream version from. Pluggable via the
+          `discover-upstream-release` composite action.
 
-          * `latest_release` (default) — poll `GET /repos/<repo>/releases/latest`.
-            Requires the upstream to publish GitHub Releases.
-          * `branch_head`    — fetch a single file from a branch's HEAD; the
-            file's raw contents are the version string. Use this when the
-            upstream ships rolling builds off a development branch and never
-            cuts GitHub Releases (e.g. `wiedehopf/readsb` `dev`). The
-            synthesized `upstream_tag` output equals `upstream_version`.
+          * `github_release` (alias: `latest_release`) — poll
+            `GET /repos/<repo>/releases/latest`. Default.
+          * `github_branch_file` (alias: `branch_head`) — fetch a single
+            file from a branch's HEAD; the raw contents are the version
+            string. Use for rolling-build projects that never cut a Release
+            (e.g. `wiedehopf/readsb` `dev`).
+          * `github_tags` — list `repos/<repo>/tags`, pick the highest
+            SemVer-matching tag.
+          * `container_image` — list Docker Hub tags for an image, pick
+            the highest SemVer.
+          * `npm` — `registry.npmjs.org/<package>/latest`.
+          * `pypi` — `pypi.org/pypi/<package>/json`.
+          * `generic_url` — fetch a URL and extract the version via a
+            user-supplied regex (first capture group).
         required: false
         type: string
-        default: latest_release
+        default: github_release
       upstream_branch:
         description: >-
-          Branch to track when `source: branch_head`. Ignored otherwise.
-          Required when `source: branch_head`.
+          Branch to track when `source: github_branch_file`. Required for
+          that mode, ignored otherwise.
         required: false
         type: string
         default: ''
       version_file_path:
         description: >-
           Repo-relative path inside the upstream branch whose raw contents are
-          the version string. Used only when `source: branch_head`. Default
-          `version` matches the convention used by `wiedehopf/readsb` and
-          similar projects.
+          the version string. Used only when `source: github_branch_file`.
+          Default `version` matches the convention used by `wiedehopf/readsb`
+          and similar projects.
         required: false
         type: string
         default: 'version'
+      image_ref:
+        description: >-
+          Container image reference (e.g. `docker.io/library/nginx`). Required
+          when `source: container_image`. Only docker.io is supported.
+        required: false
+        type: string
+        default: ''
+      package_name:
+        description: >-
+          Package name for `source: npm` (scoped names allowed) or
+          `source: pypi`.
+        required: false
+        type: string
+        default: ''
+      version_url:
+        description: 'URL to fetch when `source: generic_url`.'
+        required: false
+        type: string
+        default: ''
+      version_regex:
+        description: >-
+          Python regex applied to the `version_url` body. The first capture
+          group is taken as the version. Required when `source: generic_url`.
+        required: false
+        type: string
+        default: ''
+      tag_pattern:
+        description: >-
+          Optional regex used to filter candidate tags/versions for
+          `github_tags` and `container_image` before SemVer ranking. Default
+          accepts `[v]X.Y.Z[-suffix]`.
+        required: false
+        type: string
+        default: ''
       strip_v_prefix:
         description: 'Strip a leading `v` from the upstream tag before storing it.'
         required: false
@@ -106,8 +149,13 @@ name: Monitor Upstream Release (reusable)
         description: 'Raw upstream tag name (always with `v` if upstream uses one).'
         value: ${{ jobs.monitor.outputs.upstream_tag }}
       upstream_commit:
-        description: 'Resolved upstream commit SHA at the release tag.'
+        description: >-
+          Resolved upstream commit SHA. Empty for sources that do not map
+          to a commit (`container_image`, `npm`, `pypi`, `generic_url`).
         value: ${{ jobs.monitor.outputs.upstream_commit }}
+      upstream_source_url:
+        description: 'URL that was consulted, for traceability.'
+        value: ${{ jobs.monitor.outputs.upstream_source_url }}
       dispatched:
         description: 'Newline-separated list of workflows actually dispatched.'
         value: ${{ jobs.monitor.outputs.dispatched }}
@@ -123,39 +171,34 @@ concurrency:
 
 jobs:
   monitor:
-    name: Monitor ${{ inputs.upstream_repo }}
+    name: Monitor ${{ inputs.upstream_repo || inputs.package_name || inputs.image_ref || inputs.version_url }}
     runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: write
       actions: write
     outputs:
-      changed: ${{ steps.check.outputs.changed }}
-      upstream_version: ${{ steps.check.outputs.upstream_version }}
-      upstream_tag: ${{ steps.check.outputs.upstream_tag }}
-      upstream_commit: ${{ steps.check.outputs.upstream_commit }}
+      changed: ${{ steps.discover.outputs.changed }}
+      upstream_version: ${{ steps.discover.outputs.version }}
+      upstream_tag: ${{ steps.discover.outputs.tag }}
+      upstream_commit: ${{ steps.discover.outputs.commit }}
+      upstream_source_url: ${{ steps.discover.outputs.source_url }}
       dispatched: ${{ steps.dispatch.outputs.dispatched }}
     steps:
       - name: Preflight validation
         env:
-          UPSTREAM_REPO: ${{ inputs.upstream_repo }}
           TRACK_FILE: ${{ inputs.track_file }}
           TARGET_WORKFLOWS: ${{ inputs.target_workflows }}
           FORCE_DISPATCH: ${{ inputs.force_dispatch }}
           PUSH_RETRIES: ${{ inputs.push_retries }}
-          SOURCE: ${{ inputs.source }}
-          UPSTREAM_BRANCH: ${{ inputs.upstream_branch }}
-          VERSION_FILE_PATH: ${{ inputs.version_file_path }}
         run: |
           set -euo pipefail
           ERR=0
           fail() { echo "ERROR: $*" >&2; ERR=1; }
 
-          if ! printf '%s' "${UPSTREAM_REPO}" \
-            | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$'; then
-            fail "input 'upstream_repo' must be 'owner/name' (got '${UPSTREAM_REPO}')"
-          fi
-
+          # Per-source input validation is delegated to the discover action
+          # — keep this block focused on cross-cutting workflow concerns
+          # (paths, target-workflows list, retry count).
           case "${TRACK_FILE}" in
             /*|*..*) fail "input 'track_file' must be a repo-relative path: '${TRACK_FILE}'" ;;
             '')      fail "input 'track_file' is required" ;;
@@ -168,33 +211,6 @@ jobs:
 
           case "${PUSH_RETRIES}" in
             ''|*[!0-9]*) fail "input 'push_retries' must be a positive integer (got '${PUSH_RETRIES}')" ;;
-          esac
-
-          # `source` enum + per-mode required-input checks. The two modes have
-          # disjoint required inputs, so we validate them together rather than
-          # silently ignoring stale values from the unused mode.
-          case "${SOURCE}" in
-            latest_release)
-              if [ -n "${UPSTREAM_BRANCH}" ]; then
-                fail "input 'upstream_branch' is only valid when 'source: branch_head' (got '${UPSTREAM_BRANCH}')"
-              fi
-              ;;
-            branch_head)
-              if [ -z "${UPSTREAM_BRANCH}" ]; then
-                fail "input 'upstream_branch' is required when 'source: branch_head'"
-              fi
-              # Branch names can contain '/', so we restrict only against the
-              # characters Git itself rejects: spaces, '..', leading '-', etc.
-              if printf '%s' "${UPSTREAM_BRANCH}" | grep -Eq '(^-|[[:space:]]|\.\.|~|\^|:|\?|\*|\[|\\)'; then
-                fail "input 'upstream_branch' contains characters Git rejects: '${UPSTREAM_BRANCH}'"
-              fi
-              case "${VERSION_FILE_PATH}" in
-                ''|/*|*..*) fail "input 'version_file_path' must be a non-empty repo-relative path: '${VERSION_FILE_PATH}'" ;;
-              esac
-              ;;
-            *)
-              fail "input 'source' must be one of: latest_release, branch_head (got '${SOURCE}')"
-              ;;
           esac
 
           if [ -n "${TARGET_WORKFLOWS}" ]; then
@@ -212,135 +228,39 @@ jobs:
           [ "${ERR}" -eq 0 ] || { echo "Preflight failed." >&2; exit 1; }
 
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           # Need credentials to push the marker-file commit back.
           persist-credentials: true
 
-      - name: Fetch upstream release and detect change
-        id: check
-        env:
-          GH_TOKEN: ${{ github.token }}
-          UPSTREAM_REPO: ${{ inputs.upstream_repo }}
-          TRACK_FILE: ${{ inputs.track_file }}
-          STRIP_V_PREFIX: ${{ inputs.strip_v_prefix }}
-          SOURCE: ${{ inputs.source }}
-          UPSTREAM_BRANCH: ${{ inputs.upstream_branch }}
-          VERSION_FILE_PATH: ${{ inputs.version_file_path }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p "$(dirname "${TRACK_FILE}")"
-
-          case "${SOURCE}" in
-            latest_release)
-              UPSTREAM_TAG="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
-              if [ -z "${UPSTREAM_TAG}" ] || [ "${UPSTREAM_TAG}" = "null" ]; then
-                echo "ERROR: upstream ${UPSTREAM_REPO} has no latest release tag" >&2
-                exit 1
-              fi
-
-              # `commits/<tag>` resolves both lightweight and annotated tags to
-              # the underlying commit SHA in a single call. The Git Refs API
-              # would return the tag-object SHA for annotated tags, which is
-              # NOT the commit.
-              UPSTREAM_COMMIT="$(gh api "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_TAG}" --jq '.sha // empty')"
-              [ -n "${UPSTREAM_COMMIT}" ] || { echo "ERROR: could not resolve commit for ${UPSTREAM_TAG}" >&2; exit 1; }
-
-              if [ "${STRIP_V_PREFIX}" = "true" ]; then
-                UPSTREAM_VERSION="${UPSTREAM_TAG#v}"
-              else
-                UPSTREAM_VERSION="${UPSTREAM_TAG}"
-              fi
-
-              # `published_at` deliberately omitted — a re-published release
-              # would otherwise produce false-positive change events. Schema
-              # held byte-stable for back-compat with existing tracker files.
-              jq -n \
-                --arg repo "${UPSTREAM_REPO}" \
-                --arg tag "${UPSTREAM_TAG}" \
-                --arg version "${UPSTREAM_VERSION}" \
-                --arg commit "${UPSTREAM_COMMIT}" \
-                '{repo: $repo, tag: $tag, version: $version, commit: $commit}' \
-                > /tmp/upstream-release.json
-              ;;
-
-            branch_head)
-              # No upstream Release to consume. Read the version straight out
-              # of a file at the branch HEAD via raw.githubusercontent.com,
-              # then resolve the commit SHA via `git ls-remote` (cheaper than
-              # a shallow clone). Synthesize `upstream_tag = upstream_version`
-              # so downstream consumers see a uniform output shape across
-              # both source modes.
-              VERSION_URL="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_BRANCH}/${VERSION_FILE_PATH}"
-              UPSTREAM_VERSION="$(curl -fsSL --retry 3 --retry-delay 5 "${VERSION_URL}" | tr -d '[:space:]')"
-              if [ -z "${UPSTREAM_VERSION}" ]; then
-                echo "ERROR: empty version string at ${VERSION_URL}" >&2
-                exit 1
-              fi
-
-              UPSTREAM_COMMIT="$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" \
-                "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)"
-              if [ -z "${UPSTREAM_COMMIT}" ]; then
-                echo "ERROR: branch '${UPSTREAM_BRANCH}' not found in ${UPSTREAM_REPO}" >&2
-                exit 1
-              fi
-
-              # SemVer-validate here (the latest_release path doesn't, because
-              # upstream Release tags are operator-controlled). A non-SemVer
-              # string would otherwise be rejected mid-pipeline by `release.yml`
-              # with a confusing error — better to fail loud at the monitor.
-              if ! printf '%s' "${UPSTREAM_VERSION}" \
-                | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
-                echo "ERROR: version '${UPSTREAM_VERSION}' at ${VERSION_URL} is not SemVer" >&2
-                exit 1
-              fi
-
-              UPSTREAM_TAG="${UPSTREAM_VERSION}"
-
-              # Distinct schema for branch_head mode — includes `source` and
-              # `branch` so the tracker file is self-describing on inspection.
-              jq -n \
-                --arg repo    "${UPSTREAM_REPO}" \
-                --arg branch  "${UPSTREAM_BRANCH}" \
-                --arg version "${UPSTREAM_VERSION}" \
-                --arg commit  "${UPSTREAM_COMMIT}" \
-                '{repo: $repo, source: "branch_head", branch: $branch, version: $version, commit: $commit}' \
-                > /tmp/upstream-release.json
-              ;;
-          esac
-
-          {
-            echo "upstream_tag=${UPSTREAM_TAG}"
-            echo "upstream_version=${UPSTREAM_VERSION}"
-            echo "upstream_commit=${UPSTREAM_COMMIT}"
-          } >> "${GITHUB_OUTPUT}"
-
-          if [ -f "${TRACK_FILE}" ] && cmp -s "${TRACK_FILE}" /tmp/upstream-release.json; then
-            echo "No change: ${UPSTREAM_REPO} still at ${UPSTREAM_TAG}"
-            echo "changed=false" >> "${GITHUB_OUTPUT}"
-          else
-            echo "Change detected for ${UPSTREAM_REPO}:"
-            if [ -f "${TRACK_FILE}" ]; then
-              diff -u "${TRACK_FILE}" /tmp/upstream-release.json || true
-            else
-              echo "(no previous tracking file — treating as first run)"
-            fi
-            cp /tmp/upstream-release.json "${TRACK_FILE}"
-            echo "changed=true" >> "${GITHUB_OUTPUT}"
-          fi
+      - name: Discover upstream version
+        id: discover
+        uses: blackoutsecure/bos-automation-hub/.github/actions/discover-upstream-release@main
+        with:
+          source:            ${{ inputs.source }}
+          upstream_repo:     ${{ inputs.upstream_repo }}
+          upstream_branch:   ${{ inputs.upstream_branch }}
+          version_file_path: ${{ inputs.version_file_path }}
+          image_ref:         ${{ inputs.image_ref }}
+          package_name:      ${{ inputs.package_name }}
+          version_url:       ${{ inputs.version_url }}
+          version_regex:     ${{ inputs.version_regex }}
+          tag_pattern:       ${{ inputs.tag_pattern }}
+          strip_v_prefix:    ${{ inputs.strip_v_prefix }}
+          tracker_path:      ${{ inputs.track_file }}
+          gh_token:          ${{ github.token }}
 
       # Dispatch happens BEFORE the commit so a transient dispatch failure
       # leaves the marker file unchanged and the next scheduled run retries.
       - name: Dispatch downstream workflows
         id: dispatch
-        if: steps.check.outputs.changed == 'true' || inputs.force_dispatch == 'true'
+        if: steps.discover.outputs.changed == 'true' || inputs.force_dispatch == 'true'
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN || github.token }}
           REPO: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           TARGET_WORKFLOWS: ${{ inputs.target_workflows }}
-          UPSTREAM_VERSION: ${{ steps.check.outputs.upstream_version }}
+          UPSTREAM_VERSION: ${{ steps.discover.outputs.version }}
         run: |
           set -euo pipefail
           DISPATCHED=()
@@ -369,54 +289,43 @@ jobs:
             echo "__EOF__"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Commit and push tracking file
-        if: steps.check.outputs.changed == 'true'
+      - name: Resolve commit message
+        id: msg
+        if: steps.discover.outputs.changed == 'true'
         env:
-          TRACK_FILE: ${{ inputs.track_file }}
-          UPSTREAM_REPO: ${{ inputs.upstream_repo }}
-          UPSTREAM_VERSION: ${{ steps.check.outputs.upstream_version }}
-          GIT_USER_NAME: ${{ inputs.git_user_name }}
-          GIT_USER_EMAIL: ${{ inputs.git_user_email }}
+          UPSTREAM_LABEL: ${{ inputs.upstream_repo || inputs.package_name || inputs.image_ref || inputs.version_url }}
+          UPSTREAM_VERSION: ${{ steps.discover.outputs.version }}
           MSG_TEMPLATE: ${{ inputs.commit_message_template }}
-          PUSH_RETRIES: ${{ inputs.push_retries }}
         run: |
           set -euo pipefail
-
-          git config user.name  "${GIT_USER_NAME}"
-          git config user.email "${GIT_USER_EMAIL}"
-          git add -- "${TRACK_FILE}"
-
-          if git diff --cached --quiet; then
-            echo "No tracking-file changes to commit."
-            exit 0
-          fi
-
-          MSG="${MSG_TEMPLATE//\{repo\}/${UPSTREAM_REPO}}"
+          MSG="${MSG_TEMPLATE//\{repo\}/${UPSTREAM_LABEL}}"
           MSG="${MSG//\{version\}/${UPSTREAM_VERSION}}"
-          git commit -m "${MSG}"
+          # Reject newlines defensively — `commit-and-push` requires single-line.
+          case "${MSG}" in
+            *$'\n'*) echo "ERROR: rendered commit message contains a newline" >&2; exit 1 ;;
+          esac
+          echo "value=${MSG}" >> "${GITHUB_OUTPUT}"
 
-          # Retry with rebase to handle concurrent commits to default branch.
-          for attempt in $(seq 1 "${PUSH_RETRIES}"); do
-            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
-              echo "Pushed tracking file (attempt ${attempt})."
-              exit 0
-            fi
-            if [ "${attempt}" -eq "${PUSH_RETRIES}" ]; then
-              echo "ERROR: git push failed after ${PUSH_RETRIES} attempts" >&2
-              exit 1
-            fi
-            echo "git push attempt ${attempt}/${PUSH_RETRIES} failed; rebasing and retrying..."
-            git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
-          done
+      - name: Commit and push tracking file
+        if: steps.discover.outputs.changed == 'true'
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/commit-and-push@main
+        with:
+          files: ${{ inputs.track_file }}
+          message: ${{ steps.msg.outputs.value }}
+          git_user_name: ${{ inputs.git_user_name }}
+          git_user_email: ${{ inputs.git_user_email }}
+          push_retries: ${{ inputs.push_retries }}
 
       - name: Job summary
         if: always()
         env:
-          UPSTREAM_REPO: ${{ inputs.upstream_repo }}
-          UPSTREAM_TAG: ${{ steps.check.outputs.upstream_tag }}
-          UPSTREAM_VERSION: ${{ steps.check.outputs.upstream_version }}
-          UPSTREAM_COMMIT: ${{ steps.check.outputs.upstream_commit }}
-          CHANGED: ${{ steps.check.outputs.changed }}
+          UPSTREAM_LABEL: ${{ inputs.upstream_repo || inputs.package_name || inputs.image_ref || inputs.version_url }}
+          SOURCE: ${{ inputs.source }}
+          UPSTREAM_TAG: ${{ steps.discover.outputs.tag }}
+          UPSTREAM_VERSION: ${{ steps.discover.outputs.version }}
+          UPSTREAM_COMMIT: ${{ steps.discover.outputs.commit }}
+          UPSTREAM_SOURCE_URL: ${{ steps.discover.outputs.source_url }}
+          CHANGED: ${{ steps.discover.outputs.changed }}
           DISPATCHED: ${{ steps.dispatch.outputs.dispatched }}
         run: |
           {
@@ -424,10 +333,12 @@ jobs:
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Upstream repo | \`${UPSTREAM_REPO}\` |"
+            echo "| Source        | \`${SOURCE}\` |"
+            echo "| Upstream      | \`${UPSTREAM_LABEL:-n/a}\` |"
             echo "| Latest tag    | \`${UPSTREAM_TAG:-n/a}\` |"
             echo "| Version       | \`${UPSTREAM_VERSION:-n/a}\` |"
             echo "| Commit        | \`${UPSTREAM_COMMIT:-n/a}\` |"
+            echo "| Source URL    | ${UPSTREAM_SOURCE_URL:-n/a} |"
             echo "| Changed       | \`${CHANGED:-false}\` |"
             if [ -n "${DISPATCHED:-}" ]; then
               echo "| Dispatched    | \`$(printf '%s' "${DISPATCHED}" | tr '\n' ' ')\` |"
