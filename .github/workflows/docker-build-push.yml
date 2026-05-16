@@ -879,9 +879,11 @@ jobs:
     name: Docker Scout (published)
     needs: [setup, manifest]
     if: needs.setup.outputs.push == 'true' && inputs.enable_scout && needs.manifest.result == 'success'
+    # Scout indexing is CPU/RAM heavy; default to x64 runner to avoid
+    # arm64 self-hosted instability during scan/index steps.
     # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
     # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64, '[') && vars.RUNNER_X64 || format('"{0}"', vars.RUNNER_X64 || 'ubuntu-latest')) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -975,9 +977,11 @@ jobs:
     name: Enroll repo in Docker Scout
     needs: [setup, manifest]
     if: needs.setup.outputs.push == 'true' && inputs.scout_enable_repo && needs.manifest.result == 'success'
+    # Keep Scout-side enrollment on x64 too for consistency with the
+    # main Scout scan path.
     # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
     # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64, '[') && vars.RUNNER_X64 || format('"{0}"', vars.RUNNER_X64 || 'ubuntu-latest')) }}
     timeout-minutes: 5
     steps:
       - name: Enroll repository in Docker Scout
