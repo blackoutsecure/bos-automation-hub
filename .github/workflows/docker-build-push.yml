@@ -291,7 +291,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DIGESTS_DIR: /tmp/digests
+  DIGESTS_DIR: /tmp/digests-${{ github.run_id }}-${{ github.run_attempt }}
   DIGEST_ARTIFACT_PREFIX: digests
 
 jobs:
@@ -621,6 +621,7 @@ jobs:
         run: |
           set -euo pipefail
           [ -n "${DIGEST}" ] || { echo "ERROR: build did not produce a digest" >&2; exit 1; }
+          rm -rf "${DIGESTS_DIR}"
           mkdir -p "${DIGESTS_DIR}"
           touch "${DIGESTS_DIR}/${DIGEST#sha256:}"
 
@@ -663,6 +664,21 @@ jobs:
           path: ${{ env.DIGESTS_DIR }}
           pattern: ${{ env.DIGEST_ARTIFACT_PREFIX }}-*
           merge-multiple: true
+
+      - name: Verify downloaded digests
+        env:
+          EXPECTED_DIGESTS: ${{ inputs.multi_arch && '2' || '1' }}
+        run: |
+          set -euo pipefail
+          [ -d "${DIGESTS_DIR}" ] || { echo "ERROR: digest directory '${DIGESTS_DIR}' not found" >&2; exit 1; }
+          mapfile -t DIGEST_FILES < <(find "${DIGESTS_DIR}" -type f -printf '%f\n' | sort)
+          [ "${#DIGEST_FILES[@]}" -gt 0 ] || { echo "ERROR: no digest files downloaded" >&2; exit 1; }
+          if [ "${#DIGEST_FILES[@]}" -ne "${EXPECTED_DIGESTS}" ]; then
+            echo "ERROR: expected ${EXPECTED_DIGESTS} digest file(s), found ${#DIGEST_FILES[@]}" >&2
+            printf 'Downloaded digests:\n' >&2
+            printf '  - %s\n' "${DIGEST_FILES[@]}" >&2
+            exit 1
+          fi
 
       - name: Create and push manifest
         id: manifest
