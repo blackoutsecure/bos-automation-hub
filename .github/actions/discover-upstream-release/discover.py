@@ -81,7 +81,26 @@ def gh_api(path: str) -> Any:
         headers["Authorization"] = f"Bearer {token}"
     status, body = http_get(url, headers=headers, accept_json=True)
     if status >= 400:
-        die(f"GitHub API {status} for {url}: {body[:200].decode('utf-8', 'replace')}")
+        snippet = body[:400].decode("utf-8", "replace")
+        hint = ""
+        # Detect SAML-SSO-enforced org failures and point at the remediation,
+        # which is *not* a token-scope change but a one-time SSO authorization
+        # on the PAT itself at https://github.com/settings/tokens.
+        if status == 403 and "SAML enforcement" in snippet:
+            hint = (
+                "\nHINT: The token is valid but has not been authorized for the "
+                "organization's SAML SSO. Open https://github.com/settings/tokens, "
+                "find the PAT, click 'Configure SSO', and Authorize it for the "
+                "target org. Fine-grained PATs and GitHub App installation "
+                "tokens also work without per-PAT SSO authorization."
+            )
+        elif status in (401, 403):
+            hint = (
+                "\nHINT: Check that UPSTREAM_TOKEN (or GITHUB_TOKEN fallback) "
+                "has `contents: read` on the upstream repo and that the PAT "
+                "has not expired."
+            )
+        die(f"GitHub API {status} for {url}: {snippet}{hint}")
     return json.loads(body)
 
 
