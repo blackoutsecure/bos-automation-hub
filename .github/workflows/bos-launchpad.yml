@@ -360,6 +360,14 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       BALENA_API_TOKEN:
         description: 'balenaCloud API token. Required when `balena: true`.'
         required: false
+      UPSTREAM_TOKEN:
+        description: >-
+          Optional PAT/App token used to authenticate to the GitHub API when
+          polling the upstream repository. Forwarded to
+          `monitor-upstream-release.yml`. Required when `upstream_repo` is a
+          **private** repo outside the caller. See that workflow for scope
+          details. Falls back to `GITHUB_TOKEN`.
+        required: false
 
     outputs:
       changed:
@@ -425,6 +433,11 @@ jobs:
       version_url:       ${{ inputs.version_url }}
       version_regex:     ${{ inputs.version_regex }}
       tag_pattern:       ${{ inputs.tag_pattern }}
+    secrets:
+      # Forward upstream auth so callers tracking a private upstream repo
+      # can supply a PAT with `contents: read` on it. Unset = fall back to
+      # `GITHUB_TOKEN` inside the monitor (works for public upstreams only).
+      UPSTREAM_TOKEN: ${{ secrets.UPSTREAM_TOKEN }}
 
   # ---------------------------------------------------------------------------
   # Stage 2 — run the full release pipeline against the new upstream version.

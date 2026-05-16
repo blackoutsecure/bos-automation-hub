@@ -120,6 +120,8 @@ runs:
         REPOSITORY: ${{ inputs.repository }}
       run: |
         set -euo pipefail
+        ORG="${REPOSITORY%%/*}"
+        REPO_NAME="${REPOSITORY#*/}"
         # `docker scout repo enable` is idempotent — calling it on an
         # already-enrolled repository returns success without side effect.
         # The `repo list` probe is purely cosmetic so the log clearly
@@ -127,12 +129,12 @@ runs:
         # are surfaced immediately (no `continue-on-error`) so an
         # under-scoped PAT becomes a fixable failure rather than a
         # silent no-op.
-        if docker scout repo list 2>/dev/null | awk 'NR>1 {print $1}' | grep -Fxq "${REPOSITORY}"; then
+        if docker scout repo list --org "${ORG}" 2>/dev/null | awk 'NR>1 {print $1}' | grep -Fxq "${REPO_NAME}"; then
           echo "Docker Scout is already enabled for ${REPOSITORY}."
           STATE="already enabled"
         else
           echo "Enabling Docker Scout for ${REPOSITORY}…"
-          docker scout repo enable "${REPOSITORY}"
+          docker scout repo enable --org "${ORG}" "${REPOSITORY}"
           STATE="enabled"
         fi
         echo "state=${STATE}" >> "${GITHUB_OUTPUT}"

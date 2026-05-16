@@ -138,6 +138,18 @@ name: Monitor Upstream Release (reusable)
           itself triggers further `workflow_run`/`workflow_dispatch` chains
           that the default `GITHUB_TOKEN` is not allowed to start.
         required: false
+      UPSTREAM_TOKEN:
+        description: >-
+          Optional PAT/App token used to authenticate to the GitHub REST /
+          git APIs when polling the upstream repository. Falls back to
+          `GITHUB_TOKEN`, which only has access to the *caller* repository
+          — set this when `upstream_repo` (or the upstream behind
+          `source: github_branch_file` / `github_tags`) is a **private**
+          repo in another org/account. Needs `contents: read` scope on the
+          upstream repo (fine-grained PAT) or `repo` scope (classic PAT).
+          Ignored for `source: container_image` / `npm` / `pypi` /
+          `generic_url`, which do not call the GitHub API.
+        required: false
     outputs:
       changed:
         description: '`true` when the upstream version differed from the tracked file.'
@@ -256,7 +268,7 @@ jobs:
           tag_pattern:       ${{ inputs.tag_pattern }}
           strip_v_prefix:    ${{ inputs.strip_v_prefix }}
           tracker_path:      ${{ inputs.track_file }}
-          gh_token:          ${{ github.token }}
+          gh_token:          ${{ secrets.UPSTREAM_TOKEN || github.token }}
 
       # Dispatch happens BEFORE the commit so a transient dispatch failure
       # leaves the marker file unchanged and the next scheduled run retries.

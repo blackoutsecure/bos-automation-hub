@@ -5,6 +5,10 @@
 #
 # Required Actions vars:    DOCKERHUB_NAMESPACE, BALENA_NAMESPACE
 # Required Actions secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
+# Optional  Actions secrets: UPSTREAM_TOKEN  (PAT with `contents: read` on the
+#                            upstream repo — required only when `upstream_repo`
+#                            is a **private** repo outside the caller; the
+#                            default GITHUB_TOKEN cannot read other private repos)
 #
 # See https://github.com/blackoutsecure/bos-automation-hub for the full
 # input reference and gotchas (concurrency, source modes, force_release).
@@ -86,3 +90,6 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
       BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
+      # Uncomment when tracking a private upstream repo. Forwarded to the
+      # monitor stage's GitHub API calls. Falls back to GITHUB_TOKEN.
+      # UPSTREAM_TOKEN:   ${{ secrets.UPSTREAM_TOKEN }}
