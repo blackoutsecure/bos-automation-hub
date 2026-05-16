@@ -30,6 +30,36 @@ name: Monitor Upstream Release (reusable)
         required: false
         type: string
         default: 'false'
+      source:
+        description: >-
+          Where to read the upstream version from.
+
+          * `latest_release` (default) — poll `GET /repos/<repo>/releases/latest`.
+            Requires the upstream to publish GitHub Releases.
+          * `branch_head`    — fetch a single file from a branch's HEAD; the
+            file's raw contents are the version string. Use this when the
+            upstream ships rolling builds off a development branch and never
+            cuts GitHub Releases (e.g. `wiedehopf/readsb` `dev`). The
+            synthesized `upstream_tag` output equals `upstream_version`.
+        required: false
+        type: string
+        default: latest_release
+      upstream_branch:
+        description: >-
+          Branch to track when `source: branch_head`. Ignored otherwise.
+          Required when `source: branch_head`.
+        required: false
+        type: string
+        default: ''
+      version_file_path:
+        description: >-
+          Repo-relative path inside the upstream branch whose raw contents are
+          the version string. Used only when `source: branch_head`. Default
+          `version` matches the convention used by `wiedehopf/readsb` and
+          similar projects.
+        required: false
+        type: string
+        default: 'version'
       strip_v_prefix:
         description: 'Strip a leading `v` from the upstream tag before storing it.'
         required: false
@@ -113,6 +143,9 @@ jobs:
           TARGET_WORKFLOWS: ${{ inputs.target_workflows }}
           FORCE_DISPATCH: ${{ inputs.force_dispatch }}
           PUSH_RETRIES: ${{ inputs.push_retries }}
+          SOURCE: ${{ inputs.source }}
+          UPSTREAM_BRANCH: ${{ inputs.upstream_branch }}
+          VERSION_FILE_PATH: ${{ inputs.version_file_path }}
         run: |
           set -euo pipefail
           ERR=0
@@ -135,6 +168,33 @@ jobs:
 
           case "${PUSH_RETRIES}" in
             ''|*[!0-9]*) fail "input 'push_retries' must be a positive integer (got '${PUSH_RETRIES}')" ;;
+          esac
+
+          # `source` enum + per-mode required-input checks. The two modes have
+          # disjoint required inputs, so we validate them together rather than
+          # silently ignoring stale values from the unused mode.
+          case "${SOURCE}" in
+            latest_release)
+              if [ -n "${UPSTREAM_BRANCH}" ]; then
+                fail "input 'upstream_branch' is only valid when 'source: branch_head' (got '${UPSTREAM_BRANCH}')"
+              fi
+              ;;
+            branch_head)
+              if [ -z "${UPSTREAM_BRANCH}" ]; then
+                fail "input 'upstream_branch' is required when 'source: branch_head'"
+              fi
+              # Branch names can contain '/', so we restrict only against the
+              # characters Git itself rejects: spaces, '..', leading '-', etc.
+              if printf '%s' "${UPSTREAM_BRANCH}" | grep -Eq '(^-|[[:space:]]|\.\.|~|\^|:|\?|\*|\[|\\)'; then
+                fail "input 'upstream_branch' contains characters Git rejects: '${UPSTREAM_BRANCH}'"
+              fi
+              case "${VERSION_FILE_PATH}" in
+                ''|/*|*..*) fail "input 'version_file_path' must be a non-empty repo-relative path: '${VERSION_FILE_PATH}'" ;;
+              esac
+              ;;
+            *)
+              fail "input 'source' must be one of: latest_release, branch_head (got '${SOURCE}')"
+              ;;
           esac
 
           if [ -n "${TARGET_WORKFLOWS}" ]; then
@@ -164,39 +224,91 @@ jobs:
           UPSTREAM_REPO: ${{ inputs.upstream_repo }}
           TRACK_FILE: ${{ inputs.track_file }}
           STRIP_V_PREFIX: ${{ inputs.strip_v_prefix }}
+          SOURCE: ${{ inputs.source }}
+          UPSTREAM_BRANCH: ${{ inputs.upstream_branch }}
+          VERSION_FILE_PATH: ${{ inputs.version_file_path }}
         run: |
           set -euo pipefail
 
           mkdir -p "$(dirname "${TRACK_FILE}")"
 
-          UPSTREAM_TAG="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
-          if [ -z "${UPSTREAM_TAG}" ] || [ "${UPSTREAM_TAG}" = "null" ]; then
-            echo "ERROR: upstream ${UPSTREAM_REPO} has no latest release tag" >&2
-            exit 1
-          fi
+          case "${SOURCE}" in
+            latest_release)
+              UPSTREAM_TAG="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
+              if [ -z "${UPSTREAM_TAG}" ] || [ "${UPSTREAM_TAG}" = "null" ]; then
+                echo "ERROR: upstream ${UPSTREAM_REPO} has no latest release tag" >&2
+                exit 1
+              fi
 
-          # `commits/<tag>` resolves both lightweight and annotated tags to
-          # the underlying commit SHA in a single call. The Git Refs API
-          # would return the tag-object SHA for annotated tags, which is
-          # NOT the commit.
-          UPSTREAM_COMMIT="$(gh api "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_TAG}" --jq '.sha // empty')"
-          [ -n "${UPSTREAM_COMMIT}" ] || { echo "ERROR: could not resolve commit for ${UPSTREAM_TAG}" >&2; exit 1; }
+              # `commits/<tag>` resolves both lightweight and annotated tags to
+              # the underlying commit SHA in a single call. The Git Refs API
+              # would return the tag-object SHA for annotated tags, which is
+              # NOT the commit.
+              UPSTREAM_COMMIT="$(gh api "repos/${UPSTREAM_REPO}/commits/${UPSTREAM_TAG}" --jq '.sha // empty')"
+              [ -n "${UPSTREAM_COMMIT}" ] || { echo "ERROR: could not resolve commit for ${UPSTREAM_TAG}" >&2; exit 1; }
 
-          if [ "${STRIP_V_PREFIX}" = "true" ]; then
-            UPSTREAM_VERSION="${UPSTREAM_TAG#v}"
-          else
-            UPSTREAM_VERSION="${UPSTREAM_TAG}"
-          fi
+              if [ "${STRIP_V_PREFIX}" = "true" ]; then
+                UPSTREAM_VERSION="${UPSTREAM_TAG#v}"
+              else
+                UPSTREAM_VERSION="${UPSTREAM_TAG}"
+              fi
 
-          # `published_at` deliberately omitted — a re-published release
-          # would otherwise produce false-positive change events.
-          jq -n \
-            --arg repo "${UPSTREAM_REPO}" \
-            --arg tag "${UPSTREAM_TAG}" \
-            --arg version "${UPSTREAM_VERSION}" \
-            --arg commit "${UPSTREAM_COMMIT}" \
-            '{repo: $repo, tag: $tag, version: $version, commit: $commit}' \
-            > /tmp/upstream-release.json
+              # `published_at` deliberately omitted — a re-published release
+              # would otherwise produce false-positive change events. Schema
+              # held byte-stable for back-compat with existing tracker files.
+              jq -n \
+                --arg repo "${UPSTREAM_REPO}" \
+                --arg tag "${UPSTREAM_TAG}" \
+                --arg version "${UPSTREAM_VERSION}" \
+                --arg commit "${UPSTREAM_COMMIT}" \
+                '{repo: $repo, tag: $tag, version: $version, commit: $commit}' \
+                > /tmp/upstream-release.json
+              ;;
+
+            branch_head)
+              # No upstream Release to consume. Read the version straight out
+              # of a file at the branch HEAD via raw.githubusercontent.com,
+              # then resolve the commit SHA via `git ls-remote` (cheaper than
+              # a shallow clone). Synthesize `upstream_tag = upstream_version`
+              # so downstream consumers see a uniform output shape across
+              # both source modes.
+              VERSION_URL="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_BRANCH}/${VERSION_FILE_PATH}"
+              UPSTREAM_VERSION="$(curl -fsSL --retry 3 --retry-delay 5 "${VERSION_URL}" | tr -d '[:space:]')"
+              if [ -z "${UPSTREAM_VERSION}" ]; then
+                echo "ERROR: empty version string at ${VERSION_URL}" >&2
+                exit 1
+              fi
+
+              UPSTREAM_COMMIT="$(git ls-remote "https://github.com/${UPSTREAM_REPO}.git" \
+                "refs/heads/${UPSTREAM_BRANCH}" | cut -f1)"
+              if [ -z "${UPSTREAM_COMMIT}" ]; then
+                echo "ERROR: branch '${UPSTREAM_BRANCH}' not found in ${UPSTREAM_REPO}" >&2
+                exit 1
+              fi
+
+              # SemVer-validate here (the latest_release path doesn't, because
+              # upstream Release tags are operator-controlled). A non-SemVer
+              # string would otherwise be rejected mid-pipeline by `release.yml`
+              # with a confusing error — better to fail loud at the monitor.
+              if ! printf '%s' "${UPSTREAM_VERSION}" \
+                | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+                echo "ERROR: version '${UPSTREAM_VERSION}' at ${VERSION_URL} is not SemVer" >&2
+                exit 1
+              fi
+
+              UPSTREAM_TAG="${UPSTREAM_VERSION}"
+
+              # Distinct schema for branch_head mode — includes `source` and
+              # `branch` so the tracker file is self-describing on inspection.
+              jq -n \
+                --arg repo    "${UPSTREAM_REPO}" \
+                --arg branch  "${UPSTREAM_BRANCH}" \
+                --arg version "${UPSTREAM_VERSION}" \
+                --arg commit  "${UPSTREAM_COMMIT}" \
+                '{repo: $repo, source: "branch_head", branch: $branch, version: $version, commit: $commit}' \
+                > /tmp/upstream-release.json
+              ;;
+          esac
 
           {
             echo "upstream_tag=${UPSTREAM_TAG}"

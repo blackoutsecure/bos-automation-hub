@@ -217,6 +217,66 @@ jobs:
       BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
 ```
 
+#### 2a. Upstream-tracked release for projects without GitHub Releases (branch-HEAD mode)
+
+Some upstreams ship rolling builds off a development branch and never
+cut GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). The same
+`release-from-upstream.yml` meta-workflow handles that case via
+`source: branch_head` — the monitor reads a version file from the
+branch HEAD and resolves the commit SHA via `git ls-remote`.
+
+Required `vars` and `secrets` are identical to example 2.
+
+```yaml
+# .github/workflows/release-from-upstream.yml
+name: Release from upstream
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_release:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-from-upstream-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release-from-upstream.yml@main
+    with:
+      upstream_repo:     wiedehopf/readsb
+      source:            branch_head         # ← the only structural difference vs. example 2
+      upstream_branch:   dev                 # ← required when source: branch_head
+      track_file:        .github/upstream/readsb-dev.json
+      force_release:     ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
+
+      image_name:               ${{ vars.IMAGE_NAME }}
+      dockerhub_namespace:      ${{ vars.DOCKERHUB_NAMESPACE }}
+      docker_extra_tags:        sha-${{ github.sha }}
+      docker_short_description: ${{ github.event.repository.description }}
+      block_name:               ${{ vars.BALENA_BLOCK_NAME }}
+      balena_namespace:         ${{ vars.BALENA_NAMESPACE }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
+```
+
+The monitor SemVer-validates the fetched version string and synthesizes
+`upstream_tag = upstream_version`, so the downstream release pipeline
+sees a uniform output shape regardless of source mode. By default the
+file path is `version` (the wiedehopf convention); override with
+`version_file_path: path/to/your/version-file`.
+
 ### 3. Scheduled Docker Scout re-scan
 
 Calls the [`docker-scout-scan.yml`](#docker-scout-scanyml--reusable-workflow)
@@ -1102,25 +1162,45 @@ for the full input/output list.
 
 ## `monitor-upstream-release.yml` — reusable workflow
 
-Poll a public GitHub repo on a schedule and react when its `latest`
-release tag changes. Designed for downstream repos that wrap an upstream
+Poll a public GitHub repo on a schedule and react when its upstream
+version changes. Designed for downstream repos that wrap an upstream
 project (e.g. building a custom Docker image of `actions/runner`,
-`balena-io/balena-cli`, `k3s-io/k3s`) and want their pipeline to
-rebuild whenever upstream cuts a release — without polling logic
+`balena-io/balena-cli`, `wiedehopf/readsb`) and want their pipeline to
+rebuild whenever upstream advances — without polling logic
 living in every caller repo.
+
+### Source modes
+
+The `source` input selects how the upstream version is discovered.
+Both modes produce the same outputs (`upstream_tag`, `upstream_version`,
+`upstream_commit`, `changed`) so downstream consumers don't branch on it.
+
+| `source` | Behaviour | When to use |
+|---|---|---|
+| `latest_release` *(default)* | Polls `GET /repos/<repo>/releases/latest`. Uses the release's `tag_name` and resolves the commit via `repos/.../commits/<tag>`. | Upstream publishes proper GitHub Releases (the majority case). |
+| `branch_head` | `curl`s a `version` file from the branch HEAD; resolves the commit via `git ls-remote refs/heads/<branch>`. SemVer-validates the fetched string and synthesizes `upstream_tag = upstream_version`. | Upstream ships rolling builds off a development branch and never cuts GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). |
+
+`branch_head` requires `upstream_branch`; the file path defaults to
+`version` and is overridable via `version_file_path`.
 
 ### Default behaviour
 
 - **Tracking file.** A small JSON file at `inputs.track_file` (default
-  `.github/upstream/tracked-release.json`) records the last-seen `repo`,
-  `tag`, `version`, and resolved `commit` SHA. The file is committed
-  back to the default branch when the upstream changes; subsequent runs
-  diff against it to detect change.
-- **Real commit SHA.** The release's `target_commitish` field is often
-  a branch name (`main`), and the Git Refs API returns the *tag-object*
-  SHA for annotated tags — neither is the commit you want. The workflow
-  resolves the actual commit SHA via `repos/<owner>/<repo>/commits/<tag>`,
-  which handles lightweight and annotated tags uniformly.
+  `.github/upstream/tracked-release.json`) records the last-seen state.
+  Schema depends on `source`:
+  - `latest_release`: `{repo, tag, version, commit}` — held byte-stable
+    for back-compat with existing tracker files.
+  - `branch_head`: `{repo, source: "branch_head", branch, version, commit}` —
+    self-describing on inspection.
+  The file is committed back to the default branch when the upstream
+  changes; subsequent runs diff against it to detect change.
+- **Real commit SHA.** In `latest_release` mode, the release's
+  `target_commitish` field is often a branch name (`main`), and the Git
+  Refs API returns the *tag-object* SHA for annotated tags — neither is
+  the commit you want. The workflow resolves the actual commit SHA via
+  `repos/<owner>/<repo>/commits/<tag>`, which handles lightweight and
+  annotated tags uniformly. In `branch_head` mode, `git ls-remote` on
+  the branch ref returns the commit directly.
 - **Dispatch-then-commit ordering.** Downstream workflows are
   dispatched **before** the tracking file is committed — if dispatch
   fails, the marker is unchanged and the next scheduled run retries.

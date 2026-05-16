@@ -48,6 +48,30 @@ name: Release-from-upstream pipeline (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      source:
+        description: >-
+          Upstream-version discovery strategy. Forwarded to the monitor stage.
+          `latest_release` (default) polls `GET /repos/<repo>/releases/latest`;
+          `branch_head` reads a `version` file from a branch's HEAD. Use
+          `branch_head` when the upstream ships rolling builds and does not
+          cut GitHub Releases (e.g. `wiedehopf/readsb` `dev`).
+        required: false
+        type: string
+        default: latest_release
+      upstream_branch:
+        description: >-
+          Branch to track when `source: branch_head`. Required for that mode,
+          ignored otherwise.
+        required: false
+        type: string
+        default: ''
+      version_file_path:
+        description: >-
+          Repo-relative path to the version file inside `upstream_branch`.
+          Used only when `source: branch_head`. Default `version`.
+        required: false
+        type: string
+        default: 'version'
 
       # ----- Release pipeline: stage toggles -------------------------------
       docker:
@@ -274,10 +298,13 @@ jobs:
       contents: write   # commit the tracking file
     uses: blackoutsecure/bos-automation-hub/.github/workflows/monitor-upstream-release.yml@main
     with:
-      upstream_repo:    ${{ inputs.upstream_repo }}
-      track_file:       ${{ inputs.track_file }}
-      target_workflows: ''
-      force_dispatch:   ${{ inputs.force_release && 'true' || 'false' }}
+      upstream_repo:     ${{ inputs.upstream_repo }}
+      track_file:        ${{ inputs.track_file }}
+      target_workflows:  ''
+      force_dispatch:    ${{ inputs.force_release && 'true' || 'false' }}
+      source:            ${{ inputs.source }}
+      upstream_branch:   ${{ inputs.upstream_branch }}
+      version_file_path: ${{ inputs.version_file_path }}
 
   # ---------------------------------------------------------------------------
   # Stage 2 — run the full release pipeline against the new upstream version.
