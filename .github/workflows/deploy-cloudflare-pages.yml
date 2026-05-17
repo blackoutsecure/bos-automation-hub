@@ -7,16 +7,6 @@ name: Cloudflare Pages Deploy (reusable)
         description: 'Cloudflare Pages project name (lowercase letters, digits, hyphens; 1–58 chars).'
         required: true
         type: string
-      cloudflare_account_id:
-        description: >-
-          Cloudflare account ID (32-char hex). Prefer setting this via
-          a repository or organisation `vars.CLOUDFLARE_ACCOUNT_ID` —
-          account IDs appear in dashboard URLs and are not secret.
-          When empty, falls back to `secrets.CLOUDFLARE_ACCOUNT_ID`
-          for back-compat.
-        required: false
-        type: string
-        default: ''
       deployment_environment:
         description: >-
           Optional GitHub Environment to bind the deploy job to. When
@@ -147,27 +137,17 @@ name: Cloudflare Pages Deploy (reusable)
       purge_cache:
         description: >-
           When `true` (default), purge the entire Cloudflare edge cache
-          for the zone configured via `cloudflare_zone_id` after a
-          successful deploy, so subsequent requests pull the freshly
-          published assets. Has no effect when the deploy step is
-          skipped. When `true` but no zone ID is configured, the purge
-          is skipped with a notice annotation (existing callers without
-          a zone ID keep working). Set to `false` to disable purging
-          regardless of zone ID configuration.
+          for the production zone after a successful deploy, so subsequent
+          requests pull the freshly published assets. Has no effect when
+          the deploy step is skipped. The zone is identified in this
+          order: (1) `secrets.CLOUDFLARE_ZONE_ID` if set, (2) auto-resolved
+          from the `site_url` input via the Cloudflare API (requires the
+          API token to carry `Zone:Read`). When neither is available the
+          purge is skipped with a notice annotation. Set to `false` to
+          disable purging regardless of zone configuration.
         required: false
         type: boolean
         default: true
-      cloudflare_zone_id:
-        description: >-
-          Cloudflare zone ID (32-char hex) for the production domain
-          attached to this Pages project. Prefer setting this via a
-          repository or organisation `vars.CLOUDFLARE_ZONE_ID` — zone
-          IDs appear in the dashboard URL and are not secret. When
-          empty, falls back to `secrets.CLOUDFLARE_ZONE_ID`. Required
-          for the cache-purge step to do anything.
-        required: false
-        type: string
-        default: ''
 
       # ── Sitemap generator ──────────────────────────────────────────
       generate_sitemap:
@@ -264,17 +244,24 @@ name: Cloudflare Pages Deploy (reusable)
         required: true
       CLOUDFLARE_ACCOUNT_ID:
         description: >-
-          Cloudflare account ID (32-char hex). Optional fallback when
-          `inputs.cloudflare_account_id` is empty. Account IDs appear
-          in dashboard URLs — prefer `vars.CLOUDFLARE_ACCOUNT_ID` and
-          pass it via `inputs.cloudflare_account_id` instead.
+          Cloudflare account ID (32-char hex). Optional — when unset,
+          the workflow auto-resolves it via `GET /accounts` against
+          `CLOUDFLARE_API_TOKEN`. An account-scoped Pages:Edit token
+          returns exactly one account, so the lookup is unambiguous.
+          Provide it explicitly only when the token can access multiple
+          accounts (in which case set this secret to the desired
+          account ID) or to skip the lookup round trip on every run.
         required: false
       CLOUDFLARE_ZONE_ID:
         description: >-
-          Cloudflare zone ID (32-char hex). Optional fallback when
-          `inputs.cloudflare_zone_id` is empty. Zone IDs appear in
-          dashboard URLs — prefer `vars.CLOUDFLARE_ZONE_ID` and pass
-          it via `inputs.cloudflare_zone_id` instead.
+          Cloudflare zone ID (32-char hex) for the production domain
+          attached to this Pages project. Optional — the cache-purge
+          step auto-resolves the zone from the `site_url` input via the
+          Cloudflare API when this secret is unset, so most callers can
+          leave it empty and just ensure their `CLOUDFLARE_API_TOKEN`
+          carries `Zone → Zone → Read`. Provide it explicitly only when
+          the API token cannot be widened, or to skip the lookup round
+          trip on every run.
         required: false
     outputs:
       deployed:
@@ -293,7 +280,15 @@ name: Cloudflare Pages Deploy (reusable)
         description: 'Cloudflare Pages environment (`production` or `preview`).'
         value: ${{ jobs.deploy.outputs.environment }}
       account_id:
-        description: 'Resolved Cloudflare account ID (`inputs.cloudflare_account_id` or fallback secret).'
+        description: >-
+          Resolved Cloudflare account ID (from `secrets.CLOUDFLARE_ACCOUNT_ID`
+          when set, otherwise auto-resolved via `GET /accounts`).
+          NOTE: the resolver registers this value with `::add-mask::`,
+          which causes the runner to emit
+          `##[warning]Skip output 'account_id' since it may contain secret.`
+          and deliver an **empty string** to downstream callers reading
+          `needs.<job>.outputs.account_id`. Useful for same-job visibility
+          only; re-resolve in a downstream job if you need the value there.
         value: ${{ jobs.deploy.outputs.account_id }}
       purged:
         description: '`true` when the post-deploy zone cache purge ran successfully; `false` when skipped or failed.'
@@ -349,8 +344,8 @@ jobs:
         id: account
         uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-pages-resolve-account-id@main
         with:
-          account_id: ${{ inputs.cloudflare_account_id }}
-          fallback_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Preflight validation
         env:
@@ -621,8 +616,8 @@ jobs:
           DEPLOY_GATE: ${{ steps.gate.outputs.deploy }}
           DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
           PURGE_REQUESTED: ${{ inputs.purge_cache }}
-          ZONE_ID_INPUT: ${{ inputs.cloudflare_zone_id }}
-          ZONE_ID_FALLBACK: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          ZONE_ID_SECRET: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          SITE_URL: ${{ inputs.site_url }}
         run: |
           set -euo pipefail
           decide() {
@@ -642,24 +637,31 @@ jobs:
             decide false "opt-out"
             exit 0
           fi
-          ZONE_ID="$(printf '%s' "${ZONE_ID_INPUT:-${ZONE_ID_FALLBACK}}" | tr -d '[:space:]')"
-          if [ -z "${ZONE_ID}" ]; then
-            echo "::notice::purge_cache=true but no Cloudflare zone ID is configured (inputs.cloudflare_zone_id or secrets.CLOUDFLARE_ZONE_ID). Skipping cache purge."
-            decide false "no-zone-id"
+          ZONE_ID="$(printf '%s' "${ZONE_ID_SECRET}" | tr -d '[:space:]')"
+          if [ -n "${ZONE_ID}" ]; then
+            # Shape (`^[0-9a-f]{32}$`) is validated inside the purge
+            # action via shared/cloudflare-resolve-id — a malformed
+            # value fails loudly there.
+            decide true "explicit-zone-id"
             exit 0
           fi
-          # Shape (`^[0-9a-f]{32}$`) is validated inside the purge action
-          # via shared/cloudflare-resolve-id — a malformed value fails
-          # loudly there. This gate just answers go / no-go.
-          decide true "enabled"
+          if [ -n "${SITE_URL}" ]; then
+            # The action will auto-resolve via the Cloudflare API. The
+            # token needs `Zone:Read` in addition to `Cache Purge` for
+            # this path to work.
+            decide true "autoresolve-from-site-url"
+            exit 0
+          fi
+          echo "::notice::purge_cache=true but no zone source available (set secrets.CLOUDFLARE_ZONE_ID or pass site_url). Skipping cache purge."
+          decide false "no-zone-source"
 
       - name: Purge Cloudflare zone cache
         id: purge
         if: steps.purge_gate.outputs.purge == 'true'
         uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-purge@main
         with:
-          zone_id: ${{ inputs.cloudflare_zone_id }}
-          fallback_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          site_url: ${{ inputs.site_url }}
           api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
       - name: Job summary

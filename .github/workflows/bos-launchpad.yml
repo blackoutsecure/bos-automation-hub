@@ -1,30 +1,58 @@
-# Blackout Secure Launchpad — upstream-tracked release pipeline
-# (reusable meta-workflow).
+# Blackout Secure Launchpad — automated release / deploy meta-workflow.
 #
-# Composes two reusable workflows in this repo into a single end-to-end loop
-# so consumer repos that wrap an upstream project can drive the full
-# "detect new upstream release → cut a downstream release" pipeline from a
-# single ~15-line caller workflow:
+# Single front-door for every deploy topology this org runs. Composes the
+# stage-level reusable workflows into one end-to-end loop so consumer repos
+# can drive a full pipeline from a thin ~15-line caller:
 #
-#   1. monitor-upstream-release.yml  — poll upstream `latest`, commit a
-#                                      tracking file, emit `changed` flag
-#   2. release.yml                   — Docker → Balena → GitHub Release
-#                                      against the new upstream version
+#   1. monitor-upstream-release.yml   — poll upstream version, commit a
+#                                       tracking file, emit `changed` flag.
+#                                       Skipped when `upstream_repo` is empty.
+#   2. release.yml                    — Docker → Balena → GitHub Release
+#                                       against the resolved upstream version.
+#                                       Requires an upstream version (i.e. the
+#                                       monitor stage must have run); skipped
+#                                       in static-site / direct-deploy mode.
+#   3. deploy-cloudflare-pages.yml    — stage and publish a static site to
+#                                       Cloudflare Pages (optionally generate
+#                                       sitemap/robots/security.txt/manifest;
+#                                       optional post-deploy edge purge).
+#                                       Independent of the monitor/release
+#                                       path; can run on its own on every push.
 #
-# Trigger model: this workflow is intended to be called from a thin
-# scheduled caller in a product repo (typically a 6h cron). It is **not**
-# intended to be triggered directly on this repo. See the README "Quick
-# start" section for a copy-paste caller example.
+# Two canonical use cases:
+#
+#   A. Upstream-tracked container release (cron-driven)
+#      `upstream_repo:` set, `docker|balena|github_release: true`,
+#      `cloudflare_pages: false`. The classic Launchpad loop.
+#
+#   B. Static-site continuous deploy (push-driven)
+#      `upstream_repo:` empty, `docker|balena|github_release: false`,
+#      `cloudflare_pages: true`. Monitor and release stages are skipped.
+#      The cloudflare-pages job runs straight off the caller event.
+#
+# Mixing is supported (e.g. tracked container release **and** companion
+# docs site deploy in the same run) — every stage is independently togglable.#
+# Stage toggle policy:
+#   Every stage toggle (`docker`, `balena`, `github_release`,
+#   `cloudflare_pages`) defaults to `false`. Callers MUST explicitly opt
+#   into each capability they want to use. This is a forward-compatibility
+#   guarantee: when we add a new stage to this workflow later (a 4th, 5th,
+#   \u2026), existing kickstarted callers continue to run exactly the stages\n#   they originally asked for \u2014 nothing more, nothing less.#
+# Trigger model: this workflow is intended to be called from a thin caller
+# in a product repo (typically a 6h cron for upstream-tracked releases, or
+# `push: branches: [main]` for static sites). It is **not** intended to be
+# triggered directly on this repo. See the README "Quick start" section for
+# copy-paste caller examples covering both use cases.
 #
 # Constraints:
-#   * Upstream tag must be SemVer (`X.Y.Z[-suffix]`, optionally `v`-prefixed).
-#     The release stage rejects calendar-versioned or non-SemVer tags.
-#   * The release stage creates a GitHub Release whose tag is `v<upstream_version>`,
-#     pointing at the default-branch HEAD that the monitor ran on.
-#
-# Stage toggles (`docker`, `balena`, `github_release`) are forwarded to the
-# release pipeline so the same wrapper can power Docker-only / Balena-only /
-# any-combination releases of an upstream project.
+#   * When the monitor stage runs, upstream tag must be SemVer
+#     (`X.Y.Z[-suffix]`, optionally `v`-prefixed). The release stage rejects
+#     calendar-versioned or non-SemVer tags.
+#   * The release stage creates a GitHub Release whose tag is
+#     `v<upstream_version>`, pointing at the default-branch HEAD that the
+#     monitor ran on. It is **not** reachable in static-site mode (no tag
+#     to resolve) — for tag-driven container releases without upstream
+#     polling, call `release.yml` directly instead.
 name: Blackout Secure Launchpad (reusable meta-workflow)
 
 "on":
@@ -110,21 +138,27 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         default: ''
 
       # ----- Release pipeline: stage toggles -------------------------------
+      # Policy: every stage toggle defaults to `false`. Callers must
+      # **explicitly opt in** to each capability they want to use. This
+      # protects existing kickstarted callers from silently enabling new
+      # stages we add to this workflow later — a caller written today only
+      # runs the stages it asks for today, even if we add five more stages
+      # tomorrow.
       docker:
-        description: 'Run the docker-build-push stage.'
+        description: 'Run the docker-build-push stage. Default `false` — opt in explicitly.'
         required: false
         type: boolean
-        default: true
+        default: false
       balena:
-        description: 'Run the balena-block-publish stage.'
+        description: 'Run the balena-block-publish stage. Default `false` — opt in explicitly.'
         required: false
         type: boolean
-        default: true
+        default: false
       github_release:
-        description: 'Run the github-release publish stage.'
+        description: 'Run the github-release publish stage. Default `false` — opt in explicitly.'
         required: false
         type: boolean
-        default: true
+        default: false
 
       # ----- Release pipeline: Docker stage --------------------------------
       image_name:
@@ -220,7 +254,11 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
 
       # ----- Release pipeline: Balena stage --------------------------------
       block_name:
-        description: 'Balena block slug (without namespace). Required when `balena: true`.'
+        description: >-
+          Balena block slug (without namespace). Defaults to `image_name`
+          when empty \u2014 most repos publish the docker image and the balena
+          block under the same slug. Required only when `balena: true` and
+          the two intentionally diverge.
         required: false
         type: string
         default: ''
@@ -307,6 +345,196 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         type: string
         default: ''
 
+      # ----- Cloudflare Pages stage ----------------------------------------
+      # Runs independently of the monitor + release path. Enable for static-
+      # site repos (push-driven continuous deploy) or alongside the container
+      # pipeline for projects that ship a companion docs site. All inputs
+      # are forwarded verbatim to `deploy-cloudflare-pages.yml` — see that
+      # workflow's input reference for the full semantics of each field.
+      cloudflare_pages:
+        description: 'Run the deploy-cloudflare-pages stage. Default `false` — opt in explicitly.'
+        required: false
+        type: boolean
+        default: false
+      cloudflare_project_name:
+        description: 'Cloudflare Pages project name. Required when `cloudflare_pages: true`.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_deployment_environment:
+        description: >-
+          Optional GitHub Environment to bind the deploy job to (production
+          gates, env-scoped secrets).
+        required: false
+        type: string
+        default: ''
+      cloudflare_site_url:
+        description: 'Canonical site URL. Required when any Cloudflare generator is enabled.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_public_dir:
+        description: 'Source directory in the caller repo to copy from.'
+        required: false
+        type: string
+        default: '.'
+      cloudflare_deploy_dir:
+        description: 'Staging directory uploaded to Cloudflare Pages.'
+        required: false
+        type: string
+        default: './dist'
+      cloudflare_clean_deploy_dir:
+        description: 'Remove `cloudflare_deploy_dir` before staging files.'
+        required: false
+        type: boolean
+        default: true
+      cloudflare_copy_files:
+        description: 'Newline-separated files (or globs) under `cloudflare_public_dir` copied into the root of `cloudflare_deploy_dir`.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_copy_dirs:
+        description: 'Newline-separated `SRC[:DEST]` directory entries copied recursively into `cloudflare_deploy_dir`.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_prebuild_command:
+        description: >-
+          Optional shell command run before staging (e.g. `npm ci && npm run build`).
+          ⚠️ SECURITY: executed verbatim under `bash -c` — never interpolate
+          untrusted data (PR titles, issue bodies, `github.event.*` strings,
+          repository_dispatch payloads).
+        required: false
+        type: string
+        default: ''
+      cloudflare_working_directory:
+        description: 'Working dir for `cloudflare_prebuild_command` and wrangler.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_branch:
+        description: 'Override the deploy branch passed to `wrangler pages deploy`.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_commit_message:
+        description: 'Override the Pages deploy commit message.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_wrangler_version:
+        description: 'Pin wrangler (e.g. `4`, `^4.0.0`, `latest`). Empty uses the action default.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_extra_wrangler_args:
+        description: 'Extra args appended to `wrangler pages deploy` (newlines = spaces).'
+        required: false
+        type: string
+        default: ''
+      cloudflare_deploy:
+        description: "`'true'`/`'false'` to force the deploy step. Empty deploys only on default-branch pushes."
+        required: false
+        type: string
+        default: ''
+      cloudflare_runs_on:
+        description: >-
+          Optional runner override for the Cloudflare Pages deploy job. Empty
+          inherits from org-shared `vars.DEFAULT_RUNNER`. See the deploy-
+          cloudflare-pages workflow for accepted shapes.
+        required: false
+        type: string
+        default: ''
+      cloudflare_checkout_fetch_depth:
+        description: '`fetch-depth` passed to `actions/checkout` for the Cloudflare stage.'
+        required: false
+        type: number
+        default: 0
+      cloudflare_purge_cache:
+        description: >-
+          Purge the entire Cloudflare edge cache for the production
+          zone after a successful deploy. The zone is taken from
+          `secrets.CLOUDFLARE_ZONE_ID` when set, otherwise auto-resolved
+          from `cloudflare_site_url` via the Cloudflare API.
+        required: false
+        type: boolean
+        default: true
+      cloudflare_generate_sitemap:
+        description: 'Run the Blackout Secure sitemap generator before deploy.'
+        required: false
+        type: boolean
+        default: false
+      cloudflare_generate_robots:
+        description: 'Run the Blackout Secure robots.txt generator before deploy.'
+        required: false
+        type: boolean
+        default: false
+      cloudflare_generate_security_txt:
+        description: 'Run the Blackout Secure security.txt generator before deploy.'
+        required: false
+        type: boolean
+        default: false
+      cloudflare_security_contact:
+        description: '`Contact:` value written to `/.well-known/security.txt`. Required when `cloudflare_generate_security_txt: true`.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_generate_manifest:
+        description: 'Run the Blackout Secure Web App Manifest generator before deploy.'
+        required: false
+        type: boolean
+        default: false
+      cloudflare_manifest_name:
+        description: 'PWA manifest `name`. Required when `cloudflare_generate_manifest: true`.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_manifest_short_name:
+        description: 'PWA manifest `short_name`.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_manifest_description:
+        description: 'PWA manifest `description`.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_manifest_orientation:
+        description: 'PWA manifest `orientation`.'
+        required: false
+        type: string
+        default: ''
+      cloudflare_manifest_theme_color:
+        description: 'PWA manifest `theme_color` (CSS hex).'
+        required: false
+        type: string
+        default: ''
+      cloudflare_manifest_background_color:
+        description: 'PWA manifest `background_color` (CSS hex).'
+        required: false
+        type: string
+        default: ''
+      cloudflare_manifest_lang:
+        description: 'PWA manifest `lang` (BCP 47 tag).'
+        required: false
+        type: string
+        default: ''
+      cloudflare_manifest_dir:
+        description: 'PWA manifest `dir` (`ltr`/`rtl`/`auto`).'
+        required: false
+        type: string
+        default: ''
+      cloudflare_manifest_categories:
+        description: 'PWA manifest `categories` (comma-separated).'
+        required: false
+        type: string
+        default: ''
+      cloudflare_manifest_icons_dir:
+        description: 'Directory inside `cloudflare_deploy_dir` to scan for icons (e.g. `/assets/`).'
+        required: false
+        type: string
+        default: ''
+
       # ----- Release pipeline: GitHub Release stage ------------------------
       release_template_path:
         description: 'Path to a Markdown template inside the caller repo.'
@@ -360,6 +588,38 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       BALENA_API_TOKEN:
         description: 'balenaCloud API token. Required when `balena: true`.'
         required: false
+      CLOUDFLARE_API_TOKEN:
+        description: >-
+          Cloudflare API token. Required when `cloudflare_pages: true`.
+          Needs `Account → Cloudflare Pages → Edit`; add `Zone → Cache
+          Purge → Purge` for the post-deploy purge step, and
+          `Zone → Zone → Read` so the purge step can auto-resolve the
+          zone ID from `cloudflare_site_url` (lets you skip
+          `CLOUDFLARE_ZONE_ID` entirely). One token can carry all three
+          scopes.
+        required: false
+      CLOUDFLARE_ACCOUNT_ID:
+        description: >-
+          Cloudflare account ID (32-char hex). Optional — when
+          `cloudflare_pages: true` and this secret is unset, the
+          deploy workflow auto-resolves it via `GET /accounts` against
+          `CLOUDFLARE_API_TOKEN`. An account-scoped Pages:Edit token
+          returns exactly one account, so the lookup is unambiguous.
+          Provide it explicitly only when the token can access
+          multiple accounts, or to skip the lookup round trip on
+          every run.
+        required: false
+      CLOUDFLARE_ZONE_ID:
+        description: >-
+          Cloudflare zone ID (32-char hex) for the production domain.
+          Optional — when `cloudflare_purge_cache: true` (the default)
+          the purge step auto-resolves the zone from
+          `cloudflare_site_url` via the Cloudflare API, so most callers
+          can leave this unset as long as `CLOUDFLARE_API_TOKEN` carries
+          `Zone → Zone → Read`. Provide it explicitly only when the
+          token cannot be widened, or to skip the lookup round trip on
+          every run.
+        required: false
       UPSTREAM_TOKEN:
         description: >-
           Optional PAT/App token used to authenticate to the GitHub API when
@@ -371,22 +631,22 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
 
     outputs:
       changed:
-        description: '`true` when the upstream version differed from the tracked file.'
+        description: '`true` when the upstream version differed from the tracked file. Empty when the monitor stage was skipped (no `upstream_repo`).'
         value: ${{ jobs.monitor.outputs.changed }}
       upstream_version:
-        description: 'Latest upstream version (with `v` stripped).'
+        description: 'Latest upstream version (with `v` stripped). Empty when the monitor stage was skipped.'
         value: ${{ jobs.monitor.outputs.upstream_version }}
       upstream_tag:
-        description: 'Raw upstream tag name.'
+        description: 'Raw upstream tag name. Empty when the monitor stage was skipped.'
         value: ${{ jobs.monitor.outputs.upstream_tag }}
       upstream_commit:
-        description: 'Resolved upstream commit SHA at the release tag.'
+        description: 'Resolved upstream commit SHA at the release tag. Empty when the monitor stage was skipped.'
         value: ${{ jobs.monitor.outputs.upstream_commit }}
       tag_name:
-        description: 'Resolved release tag (with `v` prefix).'
+        description: 'Resolved release tag (with `v` prefix). Empty when the release stage was skipped.'
         value: ${{ jobs.release.outputs.tag_name }}
       version:
-        description: 'Resolved version (tag with leading `v` stripped).'
+        description: 'Resolved version (tag with leading `v` stripped). Empty when the release stage was skipped.'
         value: ${{ jobs.release.outputs.version }}
       image:
         description: 'Fully qualified Docker image reference (when the docker stage ran).'
@@ -394,6 +654,21 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       release_url:
         description: 'GitHub Release HTML URL (when the github-release stage ran).'
         value: ${{ jobs.release.outputs.release_url }}
+      cloudflare_deployed:
+        description: '`true` when the Cloudflare Pages stage actually pushed a deploy.'
+        value: ${{ jobs.cloudflare-pages.outputs.deployed }}
+      cloudflare_deployment_url:
+        description: 'Primary Cloudflare Pages deployment URL (when the cloudflare-pages stage ran).'
+        value: ${{ jobs.cloudflare-pages.outputs.deployment_url }}
+      cloudflare_deployment_id:
+        description: 'Cloudflare Pages deployment ID (when the cloudflare-pages stage ran).'
+        value: ${{ jobs.cloudflare-pages.outputs.deployment_id }}
+      cloudflare_environment:
+        description: 'Cloudflare Pages environment (`production` or `preview`) for the deploy.'
+        value: ${{ jobs.cloudflare-pages.outputs.environment }}
+      cloudflare_purged:
+        description: '`true` when the post-deploy zone cache purge ran successfully.'
+        value: ${{ jobs.cloudflare-pages.outputs.purged }}
 
 permissions:
   contents: read
@@ -410,9 +685,15 @@ jobs:
   # Stage 1 — detect upstream change (commits tracking file on the default branch).
   # `target_workflows` is left empty so we chain to the release job via `needs:`
   # instead of dispatching a separate workflow run (no DISPATCH_TOKEN needed).
+  #
+  # Skipped in static-site / direct-deploy mode (when `upstream_repo` is empty).
+  # A skipped job still satisfies `needs:` for downstream jobs, but its outputs
+  # come back as empty strings — the release gate below treats that as "no
+  # release possible" and skips the release stage too.
   # ---------------------------------------------------------------------------
   monitor:
     name: Monitor ${{ inputs.upstream_repo }}
+    if: ${{ inputs.upstream_repo != '' }}
     permissions:
       contents: write   # commit the tracking file
       actions:  write   # nested `monitor-upstream-release.yml` declares this for
@@ -442,12 +723,24 @@ jobs:
   # ---------------------------------------------------------------------------
   # Stage 2 — run the full release pipeline against the new upstream version.
   # Skipped when nothing changed unless the operator passed `force_release`.
+  # Also skipped entirely when the monitor stage didn't run (static-site mode
+  # has no upstream version to release against — use `release.yml` directly
+  # for tag-driven container releases without upstream polling).
   # ---------------------------------------------------------------------------
   release:
     name: Release v${{ needs.monitor.outputs.upstream_version }}
     needs: monitor
+    # Three gates, all must hold:
+    #   1. The monitor stage actually ran (i.e. an `upstream_repo` was given) —
+    #      otherwise there is no `upstream_version` to release.
+    #   2. Either the upstream version changed or the operator forced a re-run.
+    #   3. At least one of the release stages is enabled (skip the whole job
+    #      when the caller only wants the Cloudflare Pages stage).
     if: >-
-      needs.monitor.outputs.changed == 'true' || inputs.force_release
+      always()
+      && needs.monitor.result == 'success'
+      && (needs.monitor.outputs.changed == 'true' || inputs.force_release)
+      && (inputs.docker || inputs.balena || inputs.github_release)
     permissions:
       contents:        write   # balena sync_balena_yml + GitHub Release publish
       pull-requests:   write   # nested docker-build-push declares this for Docker
@@ -480,7 +773,10 @@ jobs:
       docker_scout_sarif_upload:       ${{ inputs.docker_scout_sarif_upload }}
       docker_scout_exit_code:          ${{ inputs.docker_scout_exit_code }}
       docker_scout_enable_repo:        ${{ inputs.docker_scout_enable_repo }}
-      block_name:                      ${{ inputs.block_name }}
+      # `block_name` defaults to `image_name` when empty \u2014 the overwhelming
+      # majority of consumer repos publish a Docker image and a Balena block
+      # under the same slug. Override only when they intentionally diverge.
+      block_name:                      ${{ inputs.block_name || inputs.image_name }}
       balena_namespace:                ${{ inputs.balena_namespace }}
       balena_sync_yml:                 ${{ inputs.balena_sync_yml }}
       balena_draft:                    ${{ inputs.balena_draft }}
@@ -514,3 +810,65 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
       BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 3 — Cloudflare Pages deploy (static-site path).
+  #
+  # Independent of the monitor + release stages: runs straight off the caller
+  # event (typically `push: branches: [main]` for continuous deploy) and does
+  # not require an upstream version. Static-site repos enable this stage and
+  # leave `docker|balena|github_release` off; mixed repos can enable it
+  # alongside the container pipeline (e.g. companion docs site).
+  #
+  # Skipped via the explicit `cloudflare_pages` toggle, default `false`, so
+  # existing upstream-tracked callers stay byte-stable.
+  # ---------------------------------------------------------------------------
+  cloudflare-pages:
+    name: Cloudflare Pages deploy
+    if: ${{ inputs.cloudflare_pages }}
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
+    with:
+      cloudflare_project_name:    ${{ inputs.cloudflare_project_name }}
+      deployment_environment:     ${{ inputs.cloudflare_deployment_environment }}
+      site_url:                   ${{ inputs.cloudflare_site_url }}
+      public_dir:                 ${{ inputs.cloudflare_public_dir }}
+      deploy_dir:                 ${{ inputs.cloudflare_deploy_dir }}
+      clean_deploy_dir:           ${{ inputs.cloudflare_clean_deploy_dir }}
+      # `|-` strips the trailing newline that a plain `|` block would add at
+      # each forwarding hop, so multi-line caller values (one path per line)
+      # stay byte-stable across the launchpad → deploy-cloudflare-pages hop.
+      copy_files: |-
+        ${{ inputs.cloudflare_copy_files }}
+      copy_dirs: |-
+        ${{ inputs.cloudflare_copy_dirs }}
+      prebuild_command:           ${{ inputs.cloudflare_prebuild_command }}
+      working_directory:          ${{ inputs.cloudflare_working_directory }}
+      branch:                     ${{ inputs.cloudflare_branch }}
+      commit_message:             ${{ inputs.cloudflare_commit_message }}
+      wrangler_version:           ${{ inputs.cloudflare_wrangler_version }}
+      extra_wrangler_args:        ${{ inputs.cloudflare_extra_wrangler_args }}
+      deploy:                     ${{ inputs.cloudflare_deploy }}
+      runs_on:                    ${{ inputs.cloudflare_runs_on }}
+      checkout_fetch_depth:       ${{ inputs.cloudflare_checkout_fetch_depth }}
+      purge_cache:                ${{ inputs.cloudflare_purge_cache }}
+      generate_sitemap:           ${{ inputs.cloudflare_generate_sitemap }}
+      generate_robots:            ${{ inputs.cloudflare_generate_robots }}
+      generate_security_txt:      ${{ inputs.cloudflare_generate_security_txt }}
+      security_contact:           ${{ inputs.cloudflare_security_contact }}
+      generate_manifest:          ${{ inputs.cloudflare_generate_manifest }}
+      manifest_name:              ${{ inputs.cloudflare_manifest_name }}
+      manifest_short_name:        ${{ inputs.cloudflare_manifest_short_name }}
+      manifest_description:       ${{ inputs.cloudflare_manifest_description }}
+      manifest_orientation:       ${{ inputs.cloudflare_manifest_orientation }}
+      manifest_theme_color:       ${{ inputs.cloudflare_manifest_theme_color }}
+      manifest_background_color:  ${{ inputs.cloudflare_manifest_background_color }}
+      manifest_lang:              ${{ inputs.cloudflare_manifest_lang }}
+      manifest_dir:               ${{ inputs.cloudflare_manifest_dir }}
+      manifest_categories:        ${{ inputs.cloudflare_manifest_categories }}
+      manifest_icons_dir:         ${{ inputs.cloudflare_manifest_icons_dir }}
+    secrets:
+      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}

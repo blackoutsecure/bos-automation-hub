@@ -1,0 +1,113 @@
+# Reference consumer template for the `bos-launchpad.yml` hub meta-workflow
+# in **static-site / Cloudflare Pages** mode.
+#
+# Copy to the calling repo as `.github/workflows/bos-launchpad.yml`, then
+# fill in the `# TODO` placeholders. The launchpad runs the cloudflare-pages
+# stage on every push to `main` (and on-demand via `workflow_dispatch`).
+# Monitor + release stages are skipped (static sites don't track upstream).
+#
+# Required Actions vars:    CLOUDFLARE_PROJECT_NAME
+# Required Actions secrets: CLOUDFLARE_API_TOKEN — needs Account →
+#   Cloudflare Pages → Edit, plus Zone → Cache Purge → Purge and
+#   Zone → Zone → Read when `cloudflare_purge_cache: true`. Zone:Read
+#   lets the purge step auto-resolve the zone ID from
+#   `cloudflare_site_url`; the account ID is auto-resolved via
+#   `GET /accounts` (token must be account-scoped or accompanied by
+#   `cloudflare_account_name` if it can see multiple accounts).
+# Optional Actions secrets: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_ZONE_ID —
+#   32-char hex; set only to pin a specific account/zone or skip the
+#   auto-resolve round trip on every run.
+#
+# See https://github.com/blackoutsecure/bos-automation-hub for the full
+# input reference and the companion `bos-launchpad-release-example.yml` for the
+# upstream-tracked container-release variant.
+
+name: Blackout Secure Launchpad
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: Push a deploy even if no source files changed (always true here).
+        type: boolean
+        default: true
+
+# Do NOT declare a top-level `concurrency:` — the hub workflow owns
+# per-project Cloudflare Pages serialization; both sides would deadlock.
+
+permissions:
+  contents: read
+
+jobs:
+  launchpad:
+    permissions:
+      contents:        read    # static-site mode: no monitor / release commits
+      # Nested Docker Scout paths in the hub's release job declare
+      # these permissions. They don't run here, but GHA validates
+      # nested permissions statically so they must still be granted.
+      pull-requests:   write
+      security-events: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
+    with:
+      # Only the Cloudflare Pages stage runs. `docker`, `balena`, and
+      # `github_release` default to `false` in the hub.
+      cloudflare_pages: true
+
+      # ── Cloudflare Pages stage ───────────────────────────────────
+      # TODO: project name as registered in the Cloudflare dashboard.
+      cloudflare_project_name: ${{ vars.CLOUDFLARE_PROJECT_NAME }}
+
+
+      # TODO: canonical site URL — used by every generator below.
+      cloudflare_site_url: https://example.com
+
+      # TODO: list of repo-root files copied verbatim into the deploy bundle.
+      # Globs are expanded by the shell; missing entries fail the run.
+      cloudflare_copy_files: |
+        index.html
+        favicon.ico
+        apple-touch-icon.png
+        humans.txt
+        _headers
+        _redirects
+
+      # TODO: directories copied recursively. Entries are `SRC` or `SRC:DEST`.
+      # `.well-known` carries the (generated) security.txt; `assets` carries
+      # CSS, images, and icons referenced from index.html.
+      cloudflare_copy_dirs: |
+        assets
+        .well-known
+
+      # ── Generators (each opt-in) ─────────────────────────────────
+      # Each one runs against the staged deploy directory and overwrites any
+      # checked-in copy. Site-wide URLs flow from `cloudflare_site_url` above.
+      cloudflare_generate_sitemap:      true
+      cloudflare_generate_robots:       true
+      cloudflare_generate_security_txt: true
+      # TODO: responsible-disclosure contact (email or `https://` URL).
+      cloudflare_security_contact:      security@example.com
+
+      cloudflare_generate_manifest:        true
+      # TODO: PWA manifest fields.
+      cloudflare_manifest_name:            'Example Site'
+      cloudflare_manifest_short_name:      'Example'
+      cloudflare_manifest_description:     'One-line description of the site.'
+      cloudflare_manifest_orientation:     portrait-primary
+      cloudflare_manifest_theme_color:     '#000000'
+      cloudflare_manifest_background_color: '#000000'
+      cloudflare_manifest_lang:            'en-US'
+      cloudflare_manifest_dir:             ltr
+      cloudflare_manifest_categories:      'business,productivity'
+      cloudflare_manifest_icons_dir:       '/assets/'
+
+      # ── Post-deploy edge cache purge ────────────────────────────
+      # Default `true`; zone is auto-resolved from `cloudflare_site_url`.
+      # API token needs `Zone → Zone → Read` plus `Cache Purge`.
+      cloudflare_purge_cache: true
+    secrets:
+      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # Both optional — auto-resolved when omitted. Uncomment to pin.
+      # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}

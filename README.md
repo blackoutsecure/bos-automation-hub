@@ -72,7 +72,7 @@ one job; leave it empty to inherit.
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
 | [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Discover the latest upstream version from a pluggable source (GitHub Releases / branch HEAD / tag list / container registry / npm / PyPI / generic URL), dispatch downstream workflows on change, and commit a tracking file. Provider plugins live in `.github/actions/discover-upstream-release/`. |
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
-| [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml) | Reusable **meta-workflow** | Schedule-driven "follow upstream" loop (Blackout Secure Launchpad). Composes `monitor-upstream-release.yml` → `release.yml`: detects a new upstream release and runs the full Docker → Balena → GitHub Release pipeline against the new version, in one caller workflow. |
+| [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Launchpad). **Container mode:** composes `monitor-upstream-release.yml` → `release.yml` to detect a new upstream release and run the full Docker → Balena → GitHub Release pipeline against the new version. **Static-site mode:** runs `deploy-cloudflare-pages.yml` on every push for continuous Cloudflare Pages deploys. Both modes can run side-by-side in the same call. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
 | [.github/workflows/sync-managed-files.yml](.github/workflows/sync-managed-files.yml) | Reusable workflow | Keep standardized "managed" sections of `.gitignore`, `.dockerignore`, `.editorconfig`, and `.gitattributes` in sync with canonical blocks. Pluggable per-service: `common`, `docker`, `balena`, `node`, `python`, `lf_line_endings`. Two modes: `commit` (write + push) and `check` (PR drift-check). Disabled services are skipped entirely — their existing blocks are never removed. |
 | [.github/actions/shared/resolve-docker-image-tags/action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
@@ -164,14 +164,14 @@ a new release, the full Docker → Balena → GitHub Release pipeline runs
 against `v<upstream_version>` automatically — no tag push required in
 the consumer repo.
 
-> **Full annotated template:** [examples/bos-launchpad-example.yml](examples/bos-launchpad-example.yml).
+> **Full annotated template:** [examples/bos-launchpad-release-example.yml](examples/bos-launchpad-release-example.yml).
 > Copy that file to your repo as `.github/workflows/bos-launchpad.yml`,
-> fill in the four `# TODO` placeholders, and you're done. The minimal
+> fill in the `# TODO` placeholders, and you're done. The minimal
 > shape below is for reading; the template has every comment and
 > structural guard rail the production callers use.
 
 Required `vars`: `UPSTREAM_REPO`, `IMAGE_NAME`, `DOCKERHUB_NAMESPACE`,
-`BALENA_BLOCK_NAME`, `BALENA_NAMESPACE`.
+`BALENA_NAMESPACE`.
 Required `secrets`: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`,
 `BALENA_API_TOKEN`.
 
@@ -203,11 +203,19 @@ jobs:
       security-events: write   # nested Docker Scout SARIF upload
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
     with:
+      # Every launchpad stage defaults to `false`. Opt in explicitly so
+      # this caller keeps doing only what it asked for, even if the hub
+      # grows new stages later.
+      docker:         true
+      balena:         true
+      github_release: true
+
       upstream_repo:       ${{ vars.UPSTREAM_REPO }}
       force_release:       ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
       image_name:          ${{ vars.IMAGE_NAME }}
       dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
-      block_name:          ${{ vars.BALENA_BLOCK_NAME }}
+      # `block_name` defaults to `image_name` when omitted — only set it
+      # when the docker image and balena block slugs intentionally diverge.
       balena_namespace:    ${{ vars.BALENA_NAMESPACE }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -252,15 +260,18 @@ jobs:
       security-events: write
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
     with:
+      docker:            true                # opt in explicitly (default `false`)
+      balena:            true
+      github_release:    true
       upstream_repo:     wiedehopf/readsb
-      source:            github_branch_file  # ← the only structural difference vs. example 2
-      upstream_branch:   dev                 # ← required when source: github_branch_file
+      source:            github_branch_file  # \u2190 the only structural difference vs. example 2
+      upstream_branch:   dev                 # \u2190 required when source: github_branch_file
       track_file:        .github/upstream/readsb-dev.json
       force_release:     ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
 
       image_name:          ${{ vars.IMAGE_NAME }}
       dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
-      block_name:          ${{ vars.BALENA_BLOCK_NAME }}
+      # `block_name` defaults to `image_name` when omitted.
       balena_namespace:    ${{ vars.BALENA_NAMESPACE }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -404,11 +415,78 @@ type, use [`balena-fleet-deploy.yml`](#balena-fleet-deployyml--reusable-workflow
 section. (This is a different topology from `balena-block-publish.yml`
 and is **not** part of the `release.yml` pipeline.)
 
-### 7. Cloudflare Pages deploy
+### 7. Cloudflare Pages deploy (static-site launchpad)
 
-For static-site repos, use [`deploy-cloudflare-pages.yml`](#deploy-cloudflare-pagesyml--reusable-workflow)
-— see the [Minimal caller](#minimal-caller-organisation-shared-pattern)
-example in that section.
+For static-site repos, drive the deploy through the
+[`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow)
+meta-workflow with only the `cloudflare_pages` stage enabled. The
+launchpad gives every consumer one canonical front door — container
+releases, upstream-tracked releases, and static-site deploys all wire
+the same way — and forwards every input straight through to
+[`deploy-cloudflare-pages.yml`](#deploy-cloudflare-pagesyml--reusable-workflow).
+
+> **Full annotated template:** [examples/bos-launchpad-cloudflare-pages-example.yml](examples/bos-launchpad-cloudflare-pages-example.yml).
+> Copy that file to your repo as `.github/workflows/bos-launchpad.yml`,
+> fill in the `# TODO` placeholders, and you're done.
+
+Required `vars`: `CLOUDFLARE_PROJECT_NAME`.
+Required `secrets`: `CLOUDFLARE_API_TOKEN`.
+Optional `secrets`: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` —
+both auto-resolved via the Cloudflare API when omitted (token then
+needs `Zone:Read` for the zone resolve). Set only to pin a specific
+account/zone or skip the auto-resolve round trip on every run.
+
+```yaml
+# .github/workflows/bos-launchpad.yml
+name: Blackout Secure Launchpad
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# No top-level `concurrency:` — the hub workflow owns serialization.
+permissions:
+  contents: read
+
+jobs:
+  launchpad:
+    permissions:
+      contents:        read    # static-site mode: no monitor / release commits
+      pull-requests:   write   # nested Docker Scout paths validated statically
+      security-events: write   # at workflow-call time even when release: false
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
+    with:
+      cloudflare_pages: true
+
+      cloudflare_project_name: ${{ vars.CLOUDFLARE_PROJECT_NAME }}
+      cloudflare_site_url:     https://example.com
+      cloudflare_copy_files: |
+        index.html
+        favicon.ico
+        _headers
+        _redirects
+      cloudflare_copy_dirs: |
+        assets
+        .well-known
+    secrets:
+      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # Both optional — auto-resolved when omitted. Uncomment to pin.
+      # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
+```
+
+The launchpad skips its `monitor` and `release` stages when
+`upstream_repo` is empty, so the only job that actually runs is
+`cloudflare-pages`. Mixed repos (e.g. a container product that also
+ships a docs site) can enable `cloudflare_pages: true` alongside
+`docker|balena|github_release: true` to run both pipelines in the
+same launchpad call.
+
+If you'd rather skip the launchpad and call
+[`deploy-cloudflare-pages.yml`](#deploy-cloudflare-pagesyml--reusable-workflow)
+directly, the [Minimal caller](#minimal-caller-organisation-shared-pattern)
+example in that section still works — same workflow, same inputs.
 
 ### Topology
 
@@ -418,14 +496,17 @@ the orchestrator, which fans out to the per-task stage workflows.
 
 ```mermaid
 flowchart LR
-    cron([cron schedule]):::trigger --> rfu
+    cron([cron schedule]):::trigger --> launchpad
+    push([push to default branch]):::trigger --> launchpad
     tag([git tag push / release]):::trigger --> release
-    dispatch([workflow_dispatch]):::trigger --> release
+    dispatch([workflow_dispatch]):::trigger --> launchpad
+    dispatch --> release
 
-    rfu["bos-launchpad.yml<br/><i>composes monitor + release</i>"]:::orchestrator
+    launchpad["bos-launchpad.yml<br/><i>monitor + release + cloudflare-pages</i>"]:::orchestrator
     release["release.yml<br/><i>release pipeline</i>"]:::orchestrator
 
-    rfu --> release
+    launchpad -->|upstream-tracked mode| release
+    launchpad -->|static-site mode| pages["deploy-cloudflare-pages.yml"]:::stage
 
     release --> docker["docker-build-push.yml"]:::stage
     release --> balena["balena-block-publish.yml"]:::stage
@@ -437,8 +518,8 @@ flowchart LR
 ```
 
 Stage workflows are also reusable on their own — a consumer that only
-needs `docker-build-push.yml` calls it directly without the
-orchestrator.
+needs `docker-build-push.yml` or `deploy-cloudflare-pages.yml` calls
+it directly without going through the launchpad.
 
 ---
 
@@ -1397,24 +1478,49 @@ the authoritative list. High-level groups:
 
 ## `bos-launchpad.yml` — reusable **meta-workflow**
 
-Schedule-driven "follow upstream" loop — the **Blackout Secure
-Launchpad**. Composes two reusable workflows in this repo into one
-end-to-end pipeline so consumer repos that wrap an upstream project
-can drive everything from a single ~25-line caller workflow:
+Single front-door composer — the **Blackout Secure Launchpad**. One
+caller workflow, one input contract, three stages — consumer repos
+enable the stages they need and leave the rest at their default-off
+toggles.
 
-1. [`monitor-upstream-release.yml`](#monitor-upstream-releaseyml--reusable-workflow) —
+1. **Monitor** —
+   [`monitor-upstream-release.yml`](#monitor-upstream-releaseyml--reusable-workflow):
    poll the upstream `latest` release, commit a tracking JSON file,
-   emit a `changed` flag.
-2. [`release.yml`](#releaseyml--reusable-meta-workflow) — when
-   upstream changed, run the full Docker → Balena → GitHub Release
-   pipeline against `v<upstream_version>`.
+   emit a `changed` flag. Skipped when `upstream_repo` is empty.
+2. **Release** —
+   [`release.yml`](#releaseyml--reusable-meta-workflow): when upstream
+   changed (or `force_release: true`), run the full Docker → Balena →
+   GitHub Release pipeline against `v<upstream_version>`. Skipped
+   when monitor was skipped or when every `docker|balena|github_release`
+   toggle is `false`.
+3. **Cloudflare Pages** —
+   [`deploy-cloudflare-pages.yml`](#deploy-cloudflare-pagesyml--reusable-workflow):
+   continuous deploy of a static site, including optional sitemap /
+   robots.txt / security.txt / PWA manifest generators and a post-deploy
+   edge cache purge. Skipped unless `cloudflare_pages: true`.
 
-The two stages are wired together with a job-level `needs:` (no
-`workflow_dispatch` hop, so no `DISPATCH_TOKEN` PAT is required).
-All [`release.yml`](#releaseyml--reusable-meta-workflow) inputs that
-matter for the upstream-tracked use case are surfaced as inputs on
-this workflow so consumers don't need to fork it to tweak Scout
-settings, stage toggles, release templates, etc.
+The two **container** stages chain via a job-level `needs:` (no
+`workflow_dispatch` hop, so no `DISPATCH_TOKEN` PAT is required). The
+**Cloudflare Pages** stage runs independently of the container chain
+and off the caller event — typically `push: branches: [main]` — so
+static-site repos do not need a tag or an upstream version. All
+[`release.yml`](#releaseyml--reusable-meta-workflow) and
+[`deploy-cloudflare-pages.yml`](#deploy-cloudflare-pagesyml--reusable-workflow)
+inputs that matter for each use case are surfaced as launchpad inputs
+so consumers don't need to fork either workflow to tweak stage
+settings.
+
+### Operating modes at a glance
+
+| Use case | Stages that run | Required toggles |
+|----------|-----------------|------------------|
+| Upstream-tracked container release | monitor → release | `upstream_repo` set; one or more of `docker`/`balena`/`github_release` true |
+| Static-site continuous deploy | cloudflare-pages | `cloudflare_pages: true`; `upstream_repo` empty |
+| Mixed (container release + companion docs site) | monitor → release; cloudflare-pages (parallel) | both of the above |
+
+For tag-driven container releases **without** upstream polling, call
+[`release.yml`](#releaseyml--reusable-meta-workflow) directly —
+launchpad always runs through the monitor in container mode.
 
 ### Tag and version resolution
 
@@ -1424,14 +1530,59 @@ default), then re-prefixed by this workflow. Upstream tags must be
 SemVer (`X.Y.Z[-suffix]`); the release stage rejects calendar-versioned
 or otherwise non-SemVer tags.
 
-### Caller example
+### Caller examples
 
-The full annotated template lives at
-[examples/bos-launchpad-example.yml](examples/bos-launchpad-example.yml) — copy it
-verbatim into a consumer repo as `.github/workflows/bos-launchpad.yml`
-and fill in the four `# TODO` placeholders. See
-[Quick start §2](#2-upstream-tracked-release-poll-upstream-then-run-the-same-pipeline)
-for the inline minimal-shape walkthrough. The minimum viable shape is:
+Two annotated templates ship with the hub — pick the one that matches
+your use case, copy it verbatim into a consumer repo as
+`.github/workflows/bos-launchpad.yml`, and fill in the `# TODO`
+placeholders.
+
+- **Upstream-tracked container release:**
+  [examples/bos-launchpad-release-example.yml](examples/bos-launchpad-release-example.yml).
+  See [Quick start §2](#2-upstream-tracked-release-poll-upstream-then-run-the-same-pipeline)
+  for the inline minimal-shape walkthrough.
+- **Static-site Cloudflare Pages deploy:**
+  [examples/bos-launchpad-cloudflare-pages-example.yml](examples/bos-launchpad-cloudflare-pages-example.yml).
+  See [Quick start §7](#7-cloudflare-pages-deploy-static-site-launchpad)
+  for the inline minimal-shape walkthrough.
+
+### Stage toggle policy (forward-compatibility guarantee)
+
+Every stage toggle on this workflow — `docker`, `balena`,
+`github_release`, `cloudflare_pages`, and any future additions —
+defaults to `false`. Callers MUST explicitly opt into each capability
+they want.
+
+**Why:** when we add a new stage (a 4th, 5th, …), existing
+kickstarted callers continue to run exactly the stages they originally
+asked for. We never silently enable new behavior on a caller that
+wasn't updated to acknowledge it. If you copy this caller in 2026 and
+we ship a `signing` stage in 2027, your caller doesn't suddenly start
+signing images.
+
+**What to do:** the two example templates above (docker + Cloudflare
+Pages) already opt in explicitly. When you adopt a new stage on an
+existing caller, add the `<stage>: true` line and any related inputs;
+until you do, the new stage is a no-op for your repo.
+
+The same `default: false` policy applies to every secret on the
+`workflow_call` contract — unused secrets are not required, and a
+stage that you didn't opt into never demands its secrets.
+
+### Smart fallbacks
+
+Where it's obvious what a caller meant, the launchpad fills in a
+sensible default so the caller doesn't have to. Today the list is
+short and conservative; we add more as patterns prove themselves:
+
+| Input | Fallback when empty |
+|-------|---------------------|
+| `block_name` | `image_name` — most repos publish the docker image and balena block under the same slug. |
+| `balena_logo_url` | `https://raw.githubusercontent.com/<repo>/<default-branch>/logo.png` — drop a `logo.png` in the repo root and every Balena block in the org gets a logo automatically. |
+
+Set the input explicitly to override.
+
+The minimum viable shape (upstream-tracked) is:
 
 ```yaml
 jobs:
@@ -1443,10 +1594,15 @@ jobs:
       security-events: write
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
     with:
+      # Explicit opt-in to the stages this caller wants (all default `false`).
+      docker:              true
+      balena:              true
+      github_release:      true
+
       upstream_repo:       wiedehopf/readsb
       image_name:          ${{ vars.IMAGE_NAME }}
       dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
-      block_name:          ${{ vars.BALENA_BLOCK_NAME }}
+      # `block_name` defaults to `image_name` when omitted.
       balena_namespace:    ${{ vars.BALENA_NAMESPACE }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -1460,24 +1616,34 @@ See [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml)
 for the authoritative list. High-level groups:
 
 - **Monitor stage:** `upstream_repo`, `track_file`, `force_release`
-- **Stage toggles:** `docker`, `balena`, `github_release` (forwarded)
+- **Container stage toggles:** `docker`, `balena`, `github_release` (forwarded)
 - **Docker / Scout / Balena / GitHub Release:** every `release.yml`
   input is proxied through with the same name so it works as a
   drop-in replacement for `release.yml` callers that want
   upstream-driven scheduling instead of tag-driven.
+- **Cloudflare Pages stage:** `cloudflare_pages` toggle plus every
+  `deploy-cloudflare-pages.yml` input, prefixed with `cloudflare_`
+  to avoid colliding with `release_*` / `docker_*` / `balena_*`
+  names (e.g. `cloudflare_site_url`, `cloudflare_copy_files`,
+  `cloudflare_generate_sitemap`).
 
 ### Outputs
 
 | Output | Description |
 |--------|-------------|
-| `changed` | `true` when the upstream version differed from the tracked file. |
-| `upstream_version` | Latest upstream version (with `v` stripped). |
-| `upstream_tag` | Raw upstream tag name. |
-| `upstream_commit` | Resolved upstream commit SHA at the release tag. |
-| `tag_name` | Resolved release tag (with `v` prefix). |
-| `version` | Resolved version (tag with leading `v` stripped). |
+| `changed` | `true` when the upstream version differed from the tracked file. Empty when monitor was skipped. |
+| `upstream_version` | Latest upstream version (with `v` stripped). Empty when monitor was skipped. |
+| `upstream_tag` | Raw upstream tag name. Empty when monitor was skipped. |
+| `upstream_commit` | Resolved upstream commit SHA at the release tag. Empty when monitor was skipped. |
+| `tag_name` | Resolved release tag (with `v` prefix). Empty when release was skipped. |
+| `version` | Resolved version (tag with leading `v` stripped). Empty when release was skipped. |
 | `image` | Fully qualified Docker image reference (when the docker stage ran). |
 | `release_url` | GitHub Release HTML URL (when the github-release stage ran). |
+| `cloudflare_deployed` | `true` when the Cloudflare Pages stage pushed a deploy. |
+| `cloudflare_deployment_url` | Primary Cloudflare Pages deployment URL. |
+| `cloudflare_deployment_id` | Cloudflare Pages deployment ID. |
+| `cloudflare_environment` | `production` or `preview` for the deploy. |
+| `cloudflare_purged` | `true` when the post-deploy zone cache purge ran. |
 
 ### Release-notes integration
 
@@ -1612,8 +1778,9 @@ SEO/PWA companion files (`sitemap.xml`, `robots.txt`,
 
 ### Minimal caller (organisation-shared pattern)
 
-Configure the project name and account ID once at the org or repo
-level, then any caller stays free of literals:
+Configure the project name once at the org or repo level, store the
+account ID as an org-scoped secret, then any caller stays free of
+literals:
 
 ```yaml
 name: Deploy site
@@ -1631,19 +1798,24 @@ jobs:
     uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
     with:
       cloudflare_project_name: ${{ vars.CLOUDFLARE_PROJECT_NAME }}
-      cloudflare_account_id:   ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       copy_files: |
         index.html
         favicon.ico
       copy_dirs: |
         assets
     secrets:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # Both optional — auto-resolved when omitted. Uncomment to pin.
+      # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
 ```
 
-Already storing the account ID as `secrets.CLOUDFLARE_ACCOUNT_ID`?
-Pass it through the `secrets:` block instead — `inputs.cloudflare_account_id`
-falls back to the secret for back-compat.
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_ZONE_ID` are both optional
+in this org — the workflow auto-resolves each from the Cloudflare
+API using `CLOUDFLARE_API_TOKEN`. Set them explicitly only when the
+token can access multiple accounts/zones, or to skip the round trip
+on every run. The API token then needs `Zone → Zone → Read` on top
+of `Cache Purge` for the zone auto-resolve path.
 
 ### Default behaviour
 
@@ -1682,22 +1854,23 @@ applies here:
 | Kind         | Name                       | Used for |
 |--------------|----------------------------|----------|
 | **Variable** | `CLOUDFLARE_PROJECT_NAME`  | Pages project name. Pass through `inputs.cloudflare_project_name`. |
-| **Variable** | `CLOUDFLARE_ACCOUNT_ID`    | 32-char hex account ID (appears in dashboard URLs — not secret). Pass through `inputs.cloudflare_account_id`. |
-| **Variable** | `CLOUDFLARE_ZONE_ID`       | 32-char hex zone ID for the production domain (appears in dashboard URLs — not secret). Pass through `inputs.cloudflare_zone_id`. Required by the post-deploy cache-purge step. |
-| **Secret**   | `CLOUDFLARE_API_TOKEN`     | Cloudflare API token. Requires `Account → Cloudflare Pages → Edit` for the deploy step, plus `Zone → Cache Purge → Purge` on the target zone when `purge_cache` is enabled. The same token can carry both scopes. |
-| Secret       | `CLOUDFLARE_ACCOUNT_ID`    | **Optional / back-compat.** Used only if `inputs.cloudflare_account_id` is empty. Prefer the `vars.` form. |
-| Secret       | `CLOUDFLARE_ZONE_ID`       | **Optional / back-compat.** Used only if `inputs.cloudflare_zone_id` is empty. Prefer the `vars.` form. |
+| **Secret**   | `CLOUDFLARE_API_TOKEN`     | Cloudflare API token. Requires `Account → Cloudflare Pages → Edit` for the deploy step; add `Zone → Cache Purge → Purge` and `Zone → Zone → Read` for the purge step (the Zone:Read scope lets the purge step auto-resolve the zone from `site_url`, removing the need for a `CLOUDFLARE_ZONE_ID` secret). The same token can carry all three scopes. |
+| **Secret**   | `CLOUDFLARE_ACCOUNT_ID`    | 32-char hex account ID. Optional — the workflow auto-resolves it via `GET /accounts` using `CLOUDFLARE_API_TOKEN` when this secret is unset. Provide it explicitly only when the token can access multiple accounts (the lookup needs a deterministic choice in that case) or to skip the round trip on every run. |
+| Secret       | `CLOUDFLARE_ZONE_ID`       | 32-char hex zone ID for the production domain. Optional — the purge step auto-resolves it from `site_url` via the Cloudflare API when this secret is unset. Provide it explicitly only when the API token cannot be widened to include `Zone:Read`, or to skip the auto-resolve round trip on every run. |
 
-Set `vars.CLOUDFLARE_PROJECT_NAME` and `vars.CLOUDFLARE_ACCOUNT_ID`
-once at the **organisation** level for shared defaults, override at
-the repo level when a project differs.
+Set `vars.CLOUDFLARE_PROJECT_NAME` once at the **organisation** level
+for a shared default, override at the repo level when a project
+differs. `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_ZONE_ID` are both
+optional — auto-resolved via the Cloudflare API using
+`CLOUDFLARE_API_TOKEN`. Set them as **organisation secrets** only
+to pin a specific account/zone or skip the auto-resolve round trip
+on every run.
 
 ### Inputs
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
 | `cloudflare_project_name` | string | **required** | Pages project name (lowercase, digits, `-`; 1–58 chars). |
-| `cloudflare_account_id` | string | `''` | 32-char hex account ID. Falls back to `secrets.CLOUDFLARE_ACCOUNT_ID`. |
 | `deployment_environment` | string | `''` | GitHub Environment name to bind the deploy job to (production gates, env-scoped secrets). |
 | `site_url` | string | `''` | Canonical site URL. Required when any generator is enabled. |
 | `public_dir` | string | `.` | Source root in the caller repo. |
@@ -1714,8 +1887,7 @@ the repo level when a project differs.
 | `deploy` | string | `''` | `'true'`/`'false'` to force; empty deploys only on default-branch pushes. |
 | `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","ARM64"]`) to override. See [Runner resolution](#runner-resolution). |
 | `checkout_fetch_depth` | number | `0` | `fetch-depth` for `actions/checkout`. |
-| `purge_cache` | boolean | `true` | Purge the entire Cloudflare edge cache for `cloudflare_zone_id` after a successful deploy. Skips with a `::notice::` if no zone ID is configured. Set to `false` to disable. |
-| `cloudflare_zone_id` | string | `''` | 32-char hex zone ID for the production domain. Falls back to `secrets.CLOUDFLARE_ZONE_ID`. Required for the cache-purge step to do anything. |
+| `purge_cache` | boolean | `true` | Purge the entire Cloudflare edge cache after a successful deploy. Zone is taken from `secrets.CLOUDFLARE_ZONE_ID` when set, otherwise auto-resolved from `site_url` via the Cloudflare API (token needs `Zone:Read`). Skips with a `::notice::` when neither source is available. Set to `false` to disable. |
 | `generate_sitemap` | boolean | `false` | Run `bos-sitemap-generator`. |
 | `generate_robots` | boolean | `false` | Run `bos-robotstxt-generator`. |
 | `generate_security_txt` | boolean | `false` | Run `bos-securitytxt-generator`. |
@@ -1741,7 +1913,7 @@ the repo level when a project differs.
 | `deployment_id` | Cloudflare Pages deployment ID. |
 | `deployment_alias_url` | Deployment alias URL (preview/branch deploys). |
 | `environment` | `production` or `preview`. |
-| `account_id` | Resolved Cloudflare account ID (input or fallback secret). |
+| `account_id` | Resolved Cloudflare account ID. Sourced from `secrets.CLOUDFLARE_ACCOUNT_ID` when set; otherwise auto-resolved via `GET /accounts` using `CLOUDFLARE_API_TOKEN`. **Note:** the resolver registers this value with `::add-mask::`, which makes the runner skip it as a downstream job output — useful for same-job visibility only. |
 | `purged` | `true` when the post-deploy zone cache purge ran successfully; `false` when it was skipped (opt-out, no zone ID, deploy skipped) or failed. |
 
 ### Production gating with GitHub Environments
@@ -1757,11 +1929,12 @@ jobs:
     uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
     with:
       cloudflare_project_name: ${{ vars.CLOUDFLARE_PROJECT_NAME }}
-      cloudflare_account_id:   ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       deployment_environment:  production
       branch: main
     secrets:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # Optional — auto-resolved via `GET /accounts` when omitted.
+      # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 ```
 
 The deploy job inherits the `production` environment's required
@@ -1775,24 +1948,33 @@ it can be audited independently and reused on its own:
 
 | Action | Path | Purpose |
 |--------|------|---------|
-| `shared/cloudflare-resolve-id` | [.github/actions/shared/cloudflare-resolve-id/action.yml](.github/actions/shared/cloudflare-resolve-id/action.yml) | Generic resolver/validator for any Cloudflare 32-char hex ID (account, zone, …). Strips whitespace, asserts `^[0-9a-f]{32}$`, and registers `::add-mask::`. Lives under `shared/` because it's reused by both the account-ID and zone-purge actions. New Cloudflare-flavored actions should call it directly with the appropriate `kind`. |
-| `cloudflare-pages-resolve-account-id` | [.github/actions/cloudflare-pages-resolve-account-id/action.yml](.github/actions/cloudflare-pages-resolve-account-id/action.yml) | Thin back-compat wrapper around `shared/cloudflare-resolve-id` (`kind: account`) that preserves the historical `account_id` / `fallback_account_id` inputs. |
+| `shared/cloudflare-resolve-id` | [.github/actions/shared/cloudflare-resolve-id/action.yml](.github/actions/shared/cloudflare-resolve-id/action.yml) | Generic resolver/validator for any Cloudflare 32-char hex ID (account, zone, …). Strips whitespace, asserts `^[0-9a-f]{32}$`, and registers `::add-mask::`. Lives under `shared/` because it's reused by every Cloudflare-flavored resolver. New Cloudflare-flavored actions should call it directly with the appropriate `kind`. |
+| `cloudflare-pages-resolve-account-id` | [.github/actions/cloudflare-pages-resolve-account-id/action.yml](.github/actions/cloudflare-pages-resolve-account-id/action.yml) | Resolves a Cloudflare account ID from one of three sources: the explicit `account_id` input, the `fallback_account_id` input, or auto-resolves via `GET /accounts` using `api_token` when both are empty. The resolved value flows through `shared/cloudflare-resolve-id` (`kind: account`) for shape validation + masking. Auto-resolve is unambiguous for account-scoped Pages:Edit tokens (the common case); supply `account_name` when the token can access multiple accounts. |
+| `cloudflare-zone-resolve-id` | [.github/actions/cloudflare-zone-resolve-id/action.yml](.github/actions/cloudflare-zone-resolve-id/action.yml) | Resolves a Cloudflare zone ID from one of three sources: the explicit `zone_id` input, the `fallback_zone_id` input, or auto-resolves via `GET /zones?name=<apex>` using `api_token` when both are empty (apex is derived from `site_url`). The resolved value flows through `shared/cloudflare-resolve-id` (`kind: zone`) for shape validation + masking. General-purpose — callable from any workflow that needs a zone ID (cache purge, DNS updates, Workers routes, page rules, etc.). |
 | `stage-deploy-dir` | [.github/actions/shared/stage-deploy-dir/action.yml](.github/actions/shared/stage-deploy-dir/action.yml) | Generic deploy-directory stager (`copy_files` + `copy_dirs` with `SRC:DEST` rewrite, glob expansion, and path-traversal rejection). Lives under `shared/` because it's not Cloudflare-specific — any static-site deploy can reuse it. |
 | `cloudflare-pages-compose-command` | [.github/actions/cloudflare-pages-compose-command/action.yml](.github/actions/cloudflare-pages-compose-command/action.yml) | Builds the `wrangler pages deploy` argv as a properly shell-quoted string for `cloudflare/wrangler-action`'s `command:` input. |
-| `cloudflare-zone-purge` | [.github/actions/cloudflare-zone-purge/action.yml](.github/actions/cloudflare-zone-purge/action.yml) | Post-deploy edge-cache purge for the zone serving the deployed Pages domain. Calls `POST /zones/{zone_id}/purge_cache` with `{"purge_everything":true}`; resolves/validates the zone ID via `shared/cloudflare-resolve-id` (`kind: zone`). |
+| `cloudflare-zone-purge` | [.github/actions/cloudflare-zone-purge/action.yml](.github/actions/cloudflare-zone-purge/action.yml) | Post-deploy edge-cache purge for the zone serving the deployed Pages domain. Calls `POST /zones/{zone_id}/purge_cache` with `{"purge_everything":true}`; delegates zone-ID resolution to `cloudflare-zone-resolve-id` (supports explicit `zone_id`, `fallback_zone_id`, or auto-resolve from `site_url` via `GET /zones?name=<apex>` — token then needs `Zone:Read` in addition to `Cache Purge`). |
 
 Use them directly from any workflow when you don't need the full
 reusable workflow — for example, the account-ID wrapper works with any
-wrangler command, not just `pages deploy`:
+wrangler command, not just `pages deploy`. Supply the account ID
+explicitly, or let the action auto-resolve it via `GET /accounts` so
+no `CLOUDFLARE_ACCOUNT_ID` secret is required:
 
 ```yaml
 - uses: actions/checkout@v4
   with: { persist-credentials: false }
+# Explicit account ID
 - id: account
   uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-pages-resolve-account-id@main
   with:
-    account_id:          ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-    fallback_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+# Auto-resolved from the API token (no account-ID secret required)
+- id: account
+  uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-pages-resolve-account-id@main
+  with:
+    api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 - uses: cloudflare/wrangler-action@v3
   with:
     apiToken:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -1800,14 +1982,44 @@ wrangler command, not just `pages deploy`:
     command:   r2 object list my-bucket
 ```
 
-Or purge a zone's edge cache from any workflow that already knows the
-zone ID:
+Or purge a zone's edge cache from any workflow — supply the zone ID
+explicitly, or let the action auto-resolve it from a site URL via the
+Cloudflare API (the token then needs `Zone:Read` in addition to
+`Cache Purge`):
 
 ```yaml
+# Explicit zone ID
 - uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-purge@main
   with:
-    zone_id:   ${{ vars.CLOUDFLARE_ZONE_ID }}
+    zone_id:   ${{ secrets.CLOUDFLARE_ZONE_ID }}
     api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+# Auto-resolved from site URL (no zone-ID secret required)
+- uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-purge@main
+  with:
+    site_url:  https://example.com
+    api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+```
+
+Or resolve a zone ID standalone (for any workflow that needs one —
+DNS updates, Workers routes, page rules, etc.):
+
+```yaml
+- id: zone
+  uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-resolve-id@main
+  with:
+    site_url:  https://example.com
+    api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+- name: Update a DNS record
+  env:
+    ZONE_ID:   ${{ steps.zone.outputs.value }}
+    API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  run: |
+    curl --request POST \
+      --url "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records" \
+      --header "Authorization: Bearer ${API_TOKEN}" \
+      --header 'Content-Type: application/json' \
+      --data '{"type":"A","name":"example.com","content":"203.0.113.1","ttl":120}'
 ```
 
 ### Security notes specific to this workflow
@@ -1830,21 +2042,53 @@ zone ID:
   preflight, once again inside the compose-command action right before
   the wrangler argv is built) so a runtime change cannot smuggle shell
   metacharacters through.
-- `cloudflare_account_id` (or its `CLOUDFLARE_ACCOUNT_ID` fallback) is
-  required to be a 32-char hex string. The shared
-  `cloudflare-resolve-id` action registers it with `::add-mask::` so
-  it never appears verbatim in subsequent logs.
-- `cloudflare_zone_id` (or its `CLOUDFLARE_ZONE_ID` fallback), when
-  the cache-purge step runs, goes through the same
+- `secrets.CLOUDFLARE_ACCOUNT_ID`, when supplied, is required to be a
+  32-char hex string. The shared `cloudflare-resolve-id` action
+  registers it with `::add-mask::` so it never appears verbatim in
+  subsequent logs. When the secret is unset, the
+  `cloudflare-pages-resolve-account-id` action auto-resolves it via
+  `GET /accounts` using `CLOUDFLARE_API_TOKEN`; the response is
+  parsed without an external JSON dependency and the resolved value
+  flows through the same validator + mask. The auto-resolve path
+  refuses to silently pick when the token can access multiple
+  accounts — callers must either set the secret explicitly or pass
+  `account_name` to the action.
+- `secrets.CLOUDFLARE_ZONE_ID`, when supplied, goes through the same
   `cloudflare-resolve-id` validator — same `^[0-9a-f]{32}$` shape
-  check and same `::add-mask::` treatment.
+  check and same `::add-mask::` treatment. When the secret is unset,
+  the purge step auto-resolves the zone from `site_url` via
+  `GET /zones?name=<apex>` against the Cloudflare API; the response
+  is parsed without an external JSON dependency and the resolved
+  value flows through the same validator + mask before reaching
+  `POST /zones/{zone_id}/purge_cache`.
+- Defence-in-depth on the auto-resolve paths: both
+  `cloudflare-pages-resolve-account-id` and `cloudflare-zone-resolve-id`
+  register `::add-mask::` on the parsed ID *inside* the auto-resolve
+  step (before `GITHUB_OUTPUT` is written), in addition to the mask
+  the downstream `shared/cloudflare-resolve-id` step applies. Error-
+  path response-body dumps are run through a `sed` filter that
+  replaces every 32-char hex sequence with `***REDACTED-32HEX***`,
+  so a failure surfacing a multi-zone or multi-account API response
+  cannot leak the IDs of zones/accounts that don't belong to the
+  current deploy.
+- Trade-off from the mask: because the resolved IDs are registered
+  with `::add-mask::`, the runner refuses to write them as workflow
+  outputs to downstream jobs (`##[warning]Skip output 'X' since it
+  may contain secret.` → `needs.<job>.outputs.account_id` arrives as
+  an empty string in a separate job). The `outputs.account_id` /
+  `outputs.zone_id` on the reusable workflows are therefore only
+  useful for same-job visibility; downstream jobs that need the IDs
+  should re-resolve them (the actions are cheap to re-run with the
+  same `api_token`).
 - `CLOUDFLARE_API_TOKEN` is rejected if it contains whitespace
   (newlines in a secret silently truncate `GITHUB_OUTPUT`) — the
   check runs in both the workflow preflight and inside
   `cloudflare-zone-purge` (defence in depth). When `purge_cache` is
   enabled, the token must additionally carry `Zone → Cache Purge →
-  Purge` on the target zone; a missing scope surfaces as an HTTP 403
-  in the purge step.
+  Purge` on the target zone; add `Zone → Zone → Read` as well to let
+  the action auto-resolve the zone ID from `site_url` instead of
+  requiring `CLOUDFLARE_ZONE_ID`. A missing scope surfaces as an
+  HTTP 403 in the purge step.
 - The cache-purge step calls a fixed-URL endpoint
   (`POST /zones/{zone_id}/purge_cache`) with a literal JSON body
   (`{"purge_everything":true}`) — no caller-supplied data is

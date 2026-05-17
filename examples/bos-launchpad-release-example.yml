@@ -1,7 +1,10 @@
-# Reference consumer template for the `bos-launchpad.yml` hub meta-workflow.
+# Reference consumer template for the `bos-launchpad.yml` hub meta-workflow
+# in **upstream-tracked container release** mode (Docker + Balena +
+# GitHub Release). Companion to `bos-launchpad-cloudflare-pages-example.yml`
+# for static-site mode.
 #
-# Copy to the calling repo as `.github/workflows/bos-launchpad.yml`, then fill
-# in the five `# TODO` placeholders. Everything else is structural.
+# Copy to the calling repo as `.github/workflows/bos-launchpad.yml`, then
+# fill in the `# TODO` placeholders. Everything else is structural.
 #
 # Required Actions vars:    DOCKERHUB_NAMESPACE, BALENA_NAMESPACE
 # Required Actions secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
@@ -40,6 +43,15 @@ jobs:
       security-events: write   # nested Docker Scout SARIF upload
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
     with:
+      # ── Stage toggles ────────────────────────────────────────────
+      # Every launchpad stage defaults to `false`. Opt in explicitly
+      # to each capability so existing callers keep doing only what
+      # they originally asked for, even if the hub grows new stages
+      # later (forward-compatibility guarantee).
+      docker:         true
+      balena:         true
+      github_release: true
+
       # TODO: upstream repo whose releases drive yours.
       upstream_repo: <UPSTREAM_OWNER>/<UPSTREAM_REPO>
 
@@ -54,10 +66,11 @@ jobs:
 
       force_release: ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
 
-      # TODO: image name (no namespace) and balena block slug — usually identical.
+      # TODO: image name (no namespace). The Balena block slug defaults to
+      # `image_name` when `block_name` is omitted, which matches every repo
+      # in this org today. Set `block_name` only if they should diverge.
       image_name:          <APP_NAME>
       dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
-      block_name:          <APP_NAME>
       balena_namespace:    ${{ vars.BALENA_NAMESPACE }}
 
       # Generate balena.yml at publish time so the repo doesn't need a checked-in copy.

@@ -119,8 +119,11 @@ _DOCKERIGNORE_DOCKER = """\
 Thumbs.db
 ._*
 
-# Documentation / metadata (re-include explicitly above this block if
-# your image legitimately needs e.g. README.md inside the runtime).
+# Documentation / metadata (if your image legitimately needs one of
+# these inside the runtime, add a `!README.md` style re-include AFTER
+# this managed block — `.dockerignore` is last-match-wins, so a
+# re-include placed BEFORE the block would be overridden by these
+# excludes).
 README.md
 LICENSE
 SECURITY.md

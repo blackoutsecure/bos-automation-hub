@@ -2,34 +2,55 @@ name: Purge Cloudflare zone cache
 description: >-
   Purge the entire edge cache for a Cloudflare zone via
   `POST /zones/{zone_id}/purge_cache` with `{"purge_everything":true}`.
-  Validates the zone-id shape, masks it in logs, and surfaces the API
-  response body (never the token) for forensics.
+  The zone ID is resolved via
+  [`cloudflare-zone-resolve-id`](../cloudflare-zone-resolve-id/action.yml)
+  — it can be supplied explicitly, or auto-resolved from a `site_url`
+  via `GET /zones?name=<apex>` so callers don't have to store the
+  zone ID as a secret. Surfaces the API response body (never the
+  token) for forensics.
 
 inputs:
   zone_id:
     description: >-
-      Cloudflare zone ID (32-char lowercase hex). Preferred source —
-      pass `vars.CLOUDFLARE_ZONE_ID` from the calling workflow. Zone
-      IDs appear in the Cloudflare dashboard URL for the zone and are
-      not secret.
+      Cloudflare zone ID (32-char lowercase hex). Optional — when
+      empty, the action falls back to `fallback_zone_id`, then
+      auto-resolves from `site_url` via the Cloudflare API.
+      Forwarded to `cloudflare-zone-resolve-id`.
     required: false
     default: ''
   fallback_zone_id:
     description: >-
-      Optional back-compat fallback (e.g. `secrets.CLOUDFLARE_ZONE_ID`).
-      Used only when `zone_id` is empty.
+      Optional secondary source (e.g. for callers that historically
+      stored the value under a different secret name). Used only when
+      `zone_id` is empty. Forwarded to `cloudflare-zone-resolve-id`.
+    required: false
+    default: ''
+  site_url:
+    description: >-
+      Public site URL (e.g. `https://example.com`). When both
+      `zone_id` and `fallback_zone_id` are empty, the apex hostname
+      is derived from this URL and looked up via
+      `GET /zones?name=<apex>` using `api_token`. The token must
+      additionally carry `Zone → Zone → Read` for the auto-resolve
+      path to work (the explicit-ID path needs only `Cache Purge`).
+      Forwarded to `cloudflare-zone-resolve-id`.
     required: false
     default: ''
   api_token:
     description: >-
       Cloudflare API token with `Zone → Cache Purge → Purge` permission
-      on the target zone. The token from `secrets.CLOUDFLARE_API_TOKEN`
-      can be reused if the same token also carries the Pages:Edit scope.
+      on the target zone. When auto-resolving via `site_url`, the token
+      must also carry `Zone → Zone → Read`. The token from
+      `secrets.CLOUDFLARE_API_TOKEN` can be reused if the same token
+      also carries the Pages:Edit scope.
     required: true
   mask_zone_id:
     description: >-
       When `true` (default) the resolved zone ID is registered with
       `::add-mask::` so it never appears verbatim in subsequent logs.
+      Defaulted on as cheap defense-in-depth; the resolved value
+      itself is not stored as a secret anywhere when auto-resolved.
+      Forwarded to `cloudflare-zone-resolve-id` as `mask`.
     required: false
     default: 'true'
 
@@ -47,14 +68,15 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Resolve & validate zone ID
+    - name: Resolve zone ID
       id: resolve
-      uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-resolve-id@main
+      uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-resolve-id@main
       with:
-        value: ${{ inputs.zone_id }}
-        fallback: ${{ inputs.fallback_zone_id }}
-        kind: zone
-        mask: ${{ inputs.mask_zone_id }}
+        zone_id:          ${{ inputs.zone_id }}
+        fallback_zone_id: ${{ inputs.fallback_zone_id }}
+        site_url:         ${{ inputs.site_url }}
+        api_token:        ${{ inputs.api_token }}
+        mask:             ${{ inputs.mask_zone_id }}
 
     - name: Purge zone cache
       id: purge
