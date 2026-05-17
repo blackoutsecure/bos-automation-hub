@@ -456,9 +456,14 @@ permissions:
 jobs:
   launchpad:
     permissions:
-      contents:        read    # static-site mode: no monitor / release commits
-      pull-requests:   write   # nested Docker Scout paths validated statically
-      security-events: write   # at workflow-call time even when release: false
+      # GHA validates nested reusable-workflow permissions statically
+      # at workflow-call time, so static-site callers must still grant
+      # the full superset declared by the hub's monitor + release leaf
+      # jobs even though those stages are `if:`-skipped at runtime.
+      contents:        write   # nested monitor / github-release
+      actions:         write   # nested monitor (`gh workflow run`)
+      pull-requests:   write   # nested Docker Scout PR annotations
+      security-events: write   # nested Docker Scout SARIF upload
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
     with:
       cloudflare_pages: true

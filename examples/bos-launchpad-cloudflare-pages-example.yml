@@ -66,12 +66,16 @@ permissions:
 jobs:
   launchpad:
     permissions:
-      contents:        read    # static-site mode: no monitor / release commits
-      # Nested Docker Scout paths in the hub's release job demand
-      # these; GHA validates nested permissions statically even when
-      # those stages are `if:`-skipped at runtime.
-      pull-requests:   write
-      security-events: write
+      # GHA validates nested reusable-workflow permissions STATICALLY
+      # at workflow-call time, so the full superset declared by leaf
+      # jobs in the hub (monitor, release → docker-build-push,
+      # balena-block-publish, github-release) must be granted here
+      # even though those stages are `if:`-skipped at runtime in
+      # static-site mode.
+      contents:        write   # nested monitor / github-release
+      actions:         write   # nested monitor (`gh workflow run`)
+      pull-requests:   write   # nested Docker Scout PR annotations
+      security-events: write   # nested Docker Scout SARIF upload
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
     with:
       # Push runs use the defaults; manual runs honour the dispatch
