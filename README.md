@@ -431,10 +431,14 @@ the same way — and forwards every input straight through to
 
 Required `vars`: `CLOUDFLARE_PROJECT_NAME`.
 Required `secrets`: `CLOUDFLARE_API_TOKEN`.
-Optional `secrets`: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` —
-both auto-resolved via the Cloudflare API when omitted (token then
-needs `Zone:Read` for the zone resolve). Set only to pin a specific
-account/zone or skip the auto-resolve round trip on every run.
+Optional `vars`: `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID` — both
+auto-resolved via the Cloudflare API when omitted (token then needs
+`Zone:Read` for the zone resolve). Prefer `vars` over `secrets` for
+these IDs: they're public Cloudflare identifiers (visible in dashboard
+URLs), and storing them as secrets makes the runner auto-mask them,
+which prevents the resolved values from flowing through `GITHUB_OUTPUT`
+to downstream jobs. The legacy `secrets.CLOUDFLARE_ACCOUNT_ID` /
+`secrets.CLOUDFLARE_ZONE_ID` inputs are still honoured for back-compat.
 
 ```yaml
 # .github/workflows/bos-launchpad.yml
@@ -471,9 +475,14 @@ jobs:
         .well-known
     secrets:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      # Both optional — auto-resolved when omitted. Uncomment to pin.
-      # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      # CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      # CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_ZONE_ID:
+      #   Prefer setting `vars.CLOUDFLARE_ACCOUNT_ID` /
+      #   `vars.CLOUDFLARE_ZONE_ID` at org or repo level — they're
+      #   inherited automatically and don't need to appear in this
+      #   `secrets:` block. Forward them as secrets only for back-compat
+      #   if you can't migrate the storage, e.g.:
+      #   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      #   CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
 ```
 
 The launchpad skips its `monitor` and `release` stages when
@@ -1805,17 +1814,27 @@ jobs:
         assets
     secrets:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      # Both optional — auto-resolved when omitted. Uncomment to pin.
+      # CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_ZONE_ID:
+      #   Prefer setting `vars.CLOUDFLARE_ACCOUNT_ID` /
+      #   `vars.CLOUDFLARE_ZONE_ID` at org or repo level — vars are
+      #   inherited automatically and don't need to appear here. Only
+      #   uncomment the lines below for back-compat with callers that
+      #   already provisioned the IDs as secrets:
       # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       # CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
 ```
 
 `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_ZONE_ID` are both optional
 in this org — the workflow auto-resolves each from the Cloudflare
-API using `CLOUDFLARE_API_TOKEN`. Set them explicitly only when the
-token can access multiple accounts/zones, or to skip the round trip
-on every run. The API token then needs `Zone → Zone → Read` on top
-of `Cache Purge` for the zone auto-resolve path.
+API using `CLOUDFLARE_API_TOKEN`. **Prefer `vars.*` over `secrets.*`**
+for both: they're public Cloudflare identifiers (visible in dashboard
+URLs), and storing them as secrets makes the runner auto-mask them,
+which prevents the resolved values from flowing through
+`needs.<job>.outputs.account_id` to downstream jobs. Set them
+explicitly only when the token can access multiple accounts/zones, or
+to skip the round trip on every run. The API token then needs
+`Zone → Zone → Read` on top of `Cache Purge` for the zone auto-resolve
+path.
 
 ### Default behaviour
 
@@ -1854,17 +1873,17 @@ applies here:
 | Kind         | Name                       | Used for |
 |--------------|----------------------------|----------|
 | **Variable** | `CLOUDFLARE_PROJECT_NAME`  | Pages project name. Pass through `inputs.cloudflare_project_name`. |
-| **Secret**   | `CLOUDFLARE_API_TOKEN`     | Cloudflare API token. Requires `Account → Cloudflare Pages → Edit` for the deploy step; add `Zone → Cache Purge → Purge` and `Zone → Zone → Read` for the purge step (the Zone:Read scope lets the purge step auto-resolve the zone from `site_url`, removing the need for a `CLOUDFLARE_ZONE_ID` secret). The same token can carry all three scopes. |
-| **Secret**   | `CLOUDFLARE_ACCOUNT_ID`    | 32-char hex account ID. Optional — the workflow auto-resolves it via `GET /accounts` using `CLOUDFLARE_API_TOKEN` when this secret is unset. Provide it explicitly only when the token can access multiple accounts (the lookup needs a deterministic choice in that case) or to skip the round trip on every run. |
-| Secret       | `CLOUDFLARE_ZONE_ID`       | 32-char hex zone ID for the production domain. Optional — the purge step auto-resolves it from `site_url` via the Cloudflare API when this secret is unset. Provide it explicitly only when the API token cannot be widened to include `Zone:Read`, or to skip the auto-resolve round trip on every run. |
+| **Secret**   | `CLOUDFLARE_API_TOKEN`     | Cloudflare API token. Requires `Account → Cloudflare Pages → Edit` for the deploy step; add `Zone → Cache Purge → Purge` and `Zone → Zone → Read` for the purge step (the Zone:Read scope lets the purge step auto-resolve the zone from `site_url`, removing the need to provision `CLOUDFLARE_ZONE_ID` at all). The same token can carry all three scopes. |
+| **Variable** | `CLOUDFLARE_ACCOUNT_ID`    | 32-char hex account ID. **Optional, prefer `vars` over `secrets`** — it's a public Cloudflare identifier (visible in dashboard URLs), and storing it as a secret makes the runner auto-mask it, which prevents the resolved value from flowing through `needs.<job>.outputs.account_id` to downstream jobs. When neither the var nor the secret is set, the workflow auto-resolves it via `GET /accounts` using `CLOUDFLARE_API_TOKEN`. Provide it explicitly only when the token can access multiple accounts (the lookup needs a deterministic choice in that case) or to skip the round trip on every run. `secrets.CLOUDFLARE_ACCOUNT_ID` is still honoured for back-compat. |
+| **Variable** | `CLOUDFLARE_ZONE_ID`       | 32-char hex zone ID for the production domain. **Optional, prefer `vars` over `secrets`** for the same reason as the account ID. When neither the var nor the secret is set, the purge step auto-resolves it from `site_url` via the Cloudflare API. Provide it explicitly only when the API token cannot be widened to include `Zone:Read`, or to skip the auto-resolve round trip on every run. `secrets.CLOUDFLARE_ZONE_ID` is still honoured for back-compat. |
 
 Set `vars.CLOUDFLARE_PROJECT_NAME` once at the **organisation** level
 for a shared default, override at the repo level when a project
 differs. `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_ZONE_ID` are both
 optional — auto-resolved via the Cloudflare API using
-`CLOUDFLARE_API_TOKEN`. Set them as **organisation secrets** only
-to pin a specific account/zone or skip the auto-resolve round trip
-on every run.
+`CLOUDFLARE_API_TOKEN`. Set them as **organisation variables** (or
+secrets, for back-compat) only to pin a specific account/zone or skip
+the auto-resolve round trip on every run.
 
 ### Inputs
 
@@ -1887,7 +1906,7 @@ on every run.
 | `deploy` | string | `''` | `'true'`/`'false'` to force; empty deploys only on default-branch pushes. |
 | `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","ARM64"]`) to override. See [Runner resolution](#runner-resolution). |
 | `checkout_fetch_depth` | number | `0` | `fetch-depth` for `actions/checkout`. |
-| `purge_cache` | boolean | `true` | Purge the entire Cloudflare edge cache after a successful deploy. Zone is taken from `secrets.CLOUDFLARE_ZONE_ID` when set, otherwise auto-resolved from `site_url` via the Cloudflare API (token needs `Zone:Read`). Skips with a `::notice::` when neither source is available. Set to `false` to disable. |
+| `purge_cache` | boolean | `true` | Purge the entire Cloudflare edge cache after a successful deploy. Zone is taken from `vars.CLOUDFLARE_ZONE_ID` when set, otherwise `secrets.CLOUDFLARE_ZONE_ID` (back-compat), otherwise auto-resolved from `site_url` via the Cloudflare API (token needs `Zone:Read`). Skips with a `::notice::` when none are available. Set to `false` to disable. |
 | `generate_sitemap` | boolean | `false` | Run `bos-sitemap-generator`. |
 | `generate_robots` | boolean | `false` | Run `bos-robotstxt-generator`. |
 | `generate_security_txt` | boolean | `false` | Run `bos-securitytxt-generator`. |
@@ -1913,7 +1932,7 @@ on every run.
 | `deployment_id` | Cloudflare Pages deployment ID. |
 | `deployment_alias_url` | Deployment alias URL (preview/branch deploys). |
 | `environment` | `production` or `preview`. |
-| `account_id` | Resolved Cloudflare account ID. Sourced from `secrets.CLOUDFLARE_ACCOUNT_ID` when set; otherwise auto-resolved via `GET /accounts` using `CLOUDFLARE_API_TOKEN`. **Note:** the resolver registers this value with `::add-mask::`, which makes the runner skip it as a downstream job output — useful for same-job visibility only. |
+| `account_id` | Resolved Cloudflare account ID. Sourced from `vars.CLOUDFLARE_ACCOUNT_ID` when set; otherwise `secrets.CLOUDFLARE_ACCOUNT_ID` for back-compat; otherwise auto-resolved via `GET /accounts` using `CLOUDFLARE_API_TOKEN`. When sourced from a secret the runner auto-masks the value and this output arrives **empty** in downstream jobs reading `needs.<job>.outputs.account_id` — migrate to `vars.CLOUDFLARE_ACCOUNT_ID` to fix. |
 | `purged` | `true` when the post-deploy zone cache purge ran successfully; `false` when it was skipped (opt-out, no zone ID, deploy skipped) or failed. |
 
 ### Production gating with GitHub Environments
@@ -1933,7 +1952,9 @@ jobs:
       branch: main
     secrets:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      # Optional — auto-resolved via `GET /accounts` when omitted.
+      # Optional — prefer `vars.CLOUDFLARE_ACCOUNT_ID` (var, not
+      # secret) at org/env scope. Auto-resolved via `GET /accounts`
+      # when neither is set. Uncomment only for back-compat:
       # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 ```
 
@@ -1948,78 +1969,29 @@ it can be audited independently and reused on its own:
 
 | Action | Path | Purpose |
 |--------|------|---------|
-| `shared/cloudflare-resolve-id` | [.github/actions/shared/cloudflare-resolve-id/action.yml](.github/actions/shared/cloudflare-resolve-id/action.yml) | Generic resolver/validator for any Cloudflare 32-char hex ID (account, zone, …). Strips whitespace, asserts `^[0-9a-f]{32}$`, and registers `::add-mask::`. Lives under `shared/` because it's reused by every Cloudflare-flavored resolver. New Cloudflare-flavored actions should call it directly with the appropriate `kind`. |
-| `cloudflare-pages-resolve-account-id` | [.github/actions/cloudflare-pages-resolve-account-id/action.yml](.github/actions/cloudflare-pages-resolve-account-id/action.yml) | Resolves a Cloudflare account ID from one of three sources: the explicit `account_id` input, the `fallback_account_id` input, or auto-resolves via `GET /accounts` using `api_token` when both are empty. The resolved value flows through `shared/cloudflare-resolve-id` (`kind: account`) for shape validation + masking. Auto-resolve is unambiguous for account-scoped Pages:Edit tokens (the common case); supply `account_name` when the token can access multiple accounts. |
-| `cloudflare-zone-resolve-id` | [.github/actions/cloudflare-zone-resolve-id/action.yml](.github/actions/cloudflare-zone-resolve-id/action.yml) | Resolves a Cloudflare zone ID from one of three sources: the explicit `zone_id` input, the `fallback_zone_id` input, or auto-resolves via `GET /zones?name=<apex>` using `api_token` when both are empty (apex is derived from `site_url`). The resolved value flows through `shared/cloudflare-resolve-id` (`kind: zone`) for shape validation + masking. General-purpose — callable from any workflow that needs a zone ID (cache purge, DNS updates, Workers routes, page rules, etc.). |
+| `shared/cloudflare-resolve-id` | [.github/actions/shared/cloudflare-resolve-id/action.yml](.github/actions/shared/cloudflare-resolve-id/action.yml) | Shape validator for any Cloudflare 32-char hex ID. Strips whitespace and asserts `^[0-9a-f]{32}$`. Does NOT mask the value — Cloudflare account/zone IDs are public identifiers and masking blocks `GITHUB_OUTPUT` passthrough. |
 | `stage-deploy-dir` | [.github/actions/shared/stage-deploy-dir/action.yml](.github/actions/shared/stage-deploy-dir/action.yml) | Generic deploy-directory stager (`copy_files` + `copy_dirs` with `SRC:DEST` rewrite, glob expansion, and path-traversal rejection). Lives under `shared/` because it's not Cloudflare-specific — any static-site deploy can reuse it. |
 | `cloudflare-pages-compose-command` | [.github/actions/cloudflare-pages-compose-command/action.yml](.github/actions/cloudflare-pages-compose-command/action.yml) | Builds the `wrangler pages deploy` argv as a properly shell-quoted string for `cloudflare/wrangler-action`'s `command:` input. |
-| `cloudflare-zone-purge` | [.github/actions/cloudflare-zone-purge/action.yml](.github/actions/cloudflare-zone-purge/action.yml) | Post-deploy edge-cache purge for the zone serving the deployed Pages domain. Calls `POST /zones/{zone_id}/purge_cache` with `{"purge_everything":true}`; delegates zone-ID resolution to `cloudflare-zone-resolve-id` (supports explicit `zone_id`, `fallback_zone_id`, or auto-resolve from `site_url` via `GET /zones?name=<apex>` — token then needs `Zone:Read` in addition to `Cache Purge`). |
+| `cloudflare-zone-purge` | [.github/actions/cloudflare-zone-purge/action.yml](.github/actions/cloudflare-zone-purge/action.yml) | Post-deploy edge-cache purge. Accepts an explicit `zone_id`/`fallback_zone_id`, or auto-resolves from `site_url` via `GET /zones?name=<apex>` (token then needs `Zone:Read`). Implementation lives in [purge.py](.github/actions/cloudflare-zone-purge/purge.py) (stdlib `urllib` + `json`). |
 
 Use them directly from any workflow when you don't need the full
-reusable workflow — for example, the account-ID wrapper works with any
-wrangler command, not just `pages deploy`. Supply the account ID
-explicitly, or let the action auto-resolve it via `GET /accounts` so
-no `CLOUDFLARE_ACCOUNT_ID` secret is required:
+reusable workflow. Purge a zone's edge cache from any workflow —
+supply the zone ID explicitly, or let the action auto-resolve it from
+a site URL via the Cloudflare API (the token then needs `Zone:Read`
+in addition to `Cache Purge`):
 
 ```yaml
-- uses: actions/checkout@v4
-  with: { persist-credentials: false }
-# Explicit account ID
-- id: account
-  uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-pages-resolve-account-id@main
-  with:
-    account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-# Auto-resolved from the API token (no account-ID secret required)
-- id: account
-  uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-pages-resolve-account-id@main
-  with:
-    api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-- uses: cloudflare/wrangler-action@v3
-  with:
-    apiToken:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
-    accountId: ${{ steps.account.outputs.value }}
-    command:   r2 object list my-bucket
-```
-
-Or purge a zone's edge cache from any workflow — supply the zone ID
-explicitly, or let the action auto-resolve it from a site URL via the
-Cloudflare API (the token then needs `Zone:Read` in addition to
-`Cache Purge`):
-
-```yaml
-# Explicit zone ID
+# Explicit zone ID (prefer a var over a secret — zone IDs are public)
 - uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-purge@main
   with:
-    zone_id:   ${{ secrets.CLOUDFLARE_ZONE_ID }}
+    zone_id:   ${{ vars.CLOUDFLARE_ZONE_ID }}
     api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
-# Auto-resolved from site URL (no zone-ID secret required)
+# Auto-resolved from site URL (no zone-ID provisioning required)
 - uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-purge@main
   with:
     site_url:  https://example.com
     api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-```
-
-Or resolve a zone ID standalone (for any workflow that needs one —
-DNS updates, Workers routes, page rules, etc.):
-
-```yaml
-- id: zone
-  uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-resolve-id@main
-  with:
-    site_url:  https://example.com
-    api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-- name: Update a DNS record
-  env:
-    ZONE_ID:   ${{ steps.zone.outputs.value }}
-    API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  run: |
-    curl --request POST \
-      --url "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_records" \
-      --header "Authorization: Bearer ${API_TOKEN}" \
-      --header 'Content-Type: application/json' \
-      --data '{"type":"A","name":"example.com","content":"203.0.113.1","ttl":120}'
 ```
 
 ### Security notes specific to this workflow
@@ -2042,58 +2014,32 @@ DNS updates, Workers routes, page rules, etc.):
   preflight, once again inside the compose-command action right before
   the wrangler argv is built) so a runtime change cannot smuggle shell
   metacharacters through.
-- `secrets.CLOUDFLARE_ACCOUNT_ID`, when supplied, is required to be a
-  32-char hex string. The shared `cloudflare-resolve-id` action
-  registers it with `::add-mask::` so it never appears verbatim in
-  subsequent logs. When the secret is unset, the
-  `cloudflare-pages-resolve-account-id` action auto-resolves it via
-  `GET /accounts` using `CLOUDFLARE_API_TOKEN`; the response is
-  parsed without an external JSON dependency and the resolved value
-  flows through the same validator + mask. The auto-resolve path
-  refuses to silently pick when the token can access multiple
-  accounts — callers must either set the secret explicitly or pass
-  `account_name` to the action.
-- `secrets.CLOUDFLARE_ZONE_ID`, when supplied, goes through the same
-  `cloudflare-resolve-id` validator — same `^[0-9a-f]{32}$` shape
-  check and same `::add-mask::` treatment. When the secret is unset,
-  the purge step auto-resolves the zone from `site_url` via
-  `GET /zones?name=<apex>` against the Cloudflare API; the response
-  is parsed without an external JSON dependency and the resolved
-  value flows through the same validator + mask before reaching
-  `POST /zones/{zone_id}/purge_cache`.
-- Defence-in-depth on the auto-resolve paths: both
-  `cloudflare-pages-resolve-account-id` and `cloudflare-zone-resolve-id`
-  register `::add-mask::` on the parsed ID *inside* the auto-resolve
-  step (before `GITHUB_OUTPUT` is written), in addition to the mask
-  the downstream `shared/cloudflare-resolve-id` step applies. Error-
-  path response-body dumps are run through a `sed` filter that
-  replaces every 32-char hex sequence with `***REDACTED-32HEX***`,
-  so a failure surfacing a multi-zone or multi-account API response
-  cannot leak the IDs of zones/accounts that don't belong to the
-  current deploy.
-- Trade-off from the mask: because the resolved IDs are registered
-  with `::add-mask::`, the runner refuses to write them as workflow
-  outputs to downstream jobs (`##[warning]Skip output 'X' since it
-  may contain secret.` → `needs.<job>.outputs.account_id` arrives as
-  an empty string in a separate job). The `outputs.account_id` /
-  `outputs.zone_id` on the reusable workflows are therefore only
-  useful for same-job visibility; downstream jobs that need the IDs
-  should re-resolve them (the actions are cheap to re-run with the
-  same `api_token`).
+- `vars.CLOUDFLARE_ACCOUNT_ID` / `vars.CLOUDFLARE_ZONE_ID` (or the
+  back-compat `secrets.*` equivalents) are validated against
+  `^[0-9a-f]{32}$` before use. When unset, the workflow auto-resolves
+  each via the Cloudflare API (`GET /accounts`, `GET /zones?name=<apex>`).
+  Auto-resolve refuses to silently pick when `GET /accounts` returns
+  more than one account — the caller must set the var (or secret)
+  explicitly in that case.
+- The IDs are deliberately NOT registered with `::add-mask::`.
+  Cloudflare account/zone IDs are documented public identifiers
+  (visible in dashboard URLs); masking them is what makes the runner
+  refuse to forward them through `GITHUB_OUTPUT` to downstream jobs.
+  Sourcing the value from a `secret` triggers the runner's auto-mask
+  and re-introduces that problem; prefer `vars.*` whenever possible.
 - `CLOUDFLARE_API_TOKEN` is rejected if it contains whitespace
-  (newlines in a secret silently truncate `GITHUB_OUTPUT`) — the
-  check runs in both the workflow preflight and inside
-  `cloudflare-zone-purge` (defence in depth). When `purge_cache` is
-  enabled, the token must additionally carry `Zone → Cache Purge →
-  Purge` on the target zone; add `Zone → Zone → Read` as well to let
-  the action auto-resolve the zone ID from `site_url` instead of
-  requiring `CLOUDFLARE_ZONE_ID`. A missing scope surfaces as an
-  HTTP 403 in the purge step.
-- The cache-purge step calls a fixed-URL endpoint
-  (`POST /zones/{zone_id}/purge_cache`) with a literal JSON body
-  (`{"purge_everything":true}`) — no caller-supplied data is
-  interpolated into the curl invocation. The token is sent via an
-  `Authorization:` header and never echoed to the log.
+  (newlines in a secret silently truncate `GITHUB_OUTPUT`). When
+  `purge_cache` is enabled, the token must carry `Zone -> Cache
+  Purge -> Purge` on the target zone; add `Zone -> Zone -> Read` to
+  let the action auto-resolve the zone from `site_url`. A missing
+  scope surfaces as an HTTP 403 in the purge step.
+- The cache-purge call is a fixed endpoint
+  (`POST /zones/{zone_id}/purge_cache`) with a literal
+  `{"purge_everything":true}` body — no caller-supplied data is
+  interpolated into the request. The token rides in the
+  `Authorization:` header and is never echoed to logs. JSON parsing
+  uses Python's stdlib (`urllib` + `json`) rather than `grep`/`sed`
+  to remove a whole class of parser-edge-case bugs.
 - `deployment_environment` is regex-validated against GitHub's
   environment-name shape before being bound to the job.
 - The wrangler command is assembled as a properly shell-quoted argv

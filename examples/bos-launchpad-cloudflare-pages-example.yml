@@ -14,9 +14,17 @@
 #   `cloudflare_site_url`; the account ID is auto-resolved via
 #   `GET /accounts` (token must be account-scoped or accompanied by
 #   `cloudflare_account_name` if it can see multiple accounts).
-# Optional Actions secrets: CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_ZONE_ID —
-#   32-char hex; set only to pin a specific account/zone or skip the
-#   auto-resolve round trip on every run.
+# Optional Actions vars (preferred) or secrets (back-compat):
+#   CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_ZONE_ID — 32-char hex; set only
+#   to pin a specific account/zone or skip the auto-resolve round
+#   trip on every run. Prefer storing them as `vars` (org or repo
+#   level) over `secrets`: they're public Cloudflare identifiers
+#   (visible in dashboard URLs), and storing them as secrets makes
+#   the runner auto-mask them, which prevents the resolved values
+#   from flowing through `needs.<job>.outputs.account_id` to
+#   downstream jobs. Vars at org/repo scope are inherited
+#   automatically and don't need to appear in the `secrets:` block
+#   below. The legacy secret names are still honoured for back-compat.
 #
 # See https://github.com/blackoutsecure/bos-automation-hub for the full
 # input reference and the companion `bos-launchpad-release-example.yml` for the
@@ -108,6 +116,11 @@ jobs:
       cloudflare_purge_cache: true
     secrets:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      # Both optional — auto-resolved when omitted. Uncomment to pin.
+      # CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_ZONE_ID:
+      #   Prefer setting `vars.CLOUDFLARE_ACCOUNT_ID` /
+      #   `vars.CLOUDFLARE_ZONE_ID` at org or repo level — vars are
+      #   inherited automatically and don't need to appear here.
+      #   Uncomment the lines below only for back-compat with callers
+      #   that already provisioned the IDs as secrets:
       # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       # CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
