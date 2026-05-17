@@ -69,12 +69,13 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: string
         default: .github/upstream/tracked-release.json
-      force_release:
+      force_run:
         description: >-
-          When `true`, run the release pipeline even if the upstream version
-          is unchanged. Forwards `force_dispatch` to the monitor stage and
-          unconditionally runs the release job. Intended for
-          `workflow_dispatch` callers re-triggering on demand.
+          When `true`, run the pipeline even if the upstream version is
+          unchanged. Forwards `force_dispatch` to the monitor stage and
+          unconditionally runs the release job (subject to the per-stage
+          toggles `docker`/`balena`/`github_release`/`cloudflare_pages`).
+          Intended for `workflow_dispatch` callers re-triggering on demand.
         required: false
         type: boolean
         default: false
@@ -705,7 +706,7 @@ jobs:
       upstream_repo:     ${{ inputs.upstream_repo }}
       track_file:        ${{ inputs.track_file }}
       target_workflows:  ''
-      force_dispatch:    ${{ inputs.force_release && 'true' || 'false' }}
+      force_dispatch:    ${{ inputs.force_run && 'true' || 'false' }}
       source:            ${{ inputs.source }}
       upstream_branch:   ${{ inputs.upstream_branch }}
       version_file_path: ${{ inputs.version_file_path }}
@@ -722,7 +723,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Stage 2 — run the full release pipeline against the new upstream version.
-  # Skipped when nothing changed unless the operator passed `force_release`.
+  # Skipped when nothing changed unless the operator passed `force_run`.
   # Also skipped entirely when the monitor stage didn't run (static-site mode
   # has no upstream version to release against — use `release.yml` directly
   # for tag-driven container releases without upstream polling).
@@ -739,7 +740,7 @@ jobs:
     if: >-
       always()
       && needs.monitor.result == 'success'
-      && (needs.monitor.outputs.changed == 'true' || inputs.force_release)
+      && (needs.monitor.outputs.changed == 'true' || inputs.force_run)
       && (inputs.docker || inputs.balena || inputs.github_release)
     permissions:
       contents:        write   # balena sync_balena_yml + GitHub Release publish

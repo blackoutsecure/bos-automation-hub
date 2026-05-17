@@ -184,8 +184,8 @@ on:
     - cron: '17 */6 * * *'   # stagger off :00 to dodge org cron pile-ups
   workflow_dispatch:
     inputs:
-      force_release:
-        description: Run the release pipeline even if upstream is unchanged.
+      force_run:
+        description: Run the pipeline even if upstream is unchanged.
         type: boolean
         default: false
 
@@ -211,7 +211,7 @@ jobs:
       github_release: true
 
       upstream_repo:       ${{ vars.UPSTREAM_REPO }}
-      force_release:       ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
+      force_run:           ${{ github.event_name == 'workflow_dispatch' && inputs.force_run }}
       image_name:          ${{ vars.IMAGE_NAME }}
       dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
       # `block_name` defaults to `image_name` when omitted — only set it
@@ -243,7 +243,7 @@ on:
     - cron: '17 */6 * * *'
   workflow_dispatch:
     inputs:
-      force_release:
+      force_run:
         type: boolean
         default: false
 
@@ -267,7 +267,7 @@ jobs:
       source:            github_branch_file  # \u2190 the only structural difference vs. example 2
       upstream_branch:   dev                 # \u2190 required when source: github_branch_file
       track_file:        .github/upstream/readsb-dev.json
-      force_release:     ${{ github.event_name == 'workflow_dispatch' && inputs.force_release }}
+      force_run:         ${{ github.event_name == 'workflow_dispatch' && inputs.force_run }}
 
       image_name:          ${{ vars.IMAGE_NAME }}
       dockerhub_namespace: ${{ vars.DOCKERHUB_NAMESPACE }}
@@ -475,14 +475,10 @@ jobs:
         .well-known
     secrets:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      # CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_ZONE_ID:
-      #   Prefer setting `vars.CLOUDFLARE_ACCOUNT_ID` /
-      #   `vars.CLOUDFLARE_ZONE_ID` at org or repo level — they're
-      #   inherited automatically and don't need to appear in this
-      #   `secrets:` block. Forward them as secrets only for back-compat
-      #   if you can't migrate the storage, e.g.:
-      #   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      #   CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      # Back-compat only — prefer `vars.CLOUDFLARE_ACCOUNT_ID` /
+      # `vars.CLOUDFLARE_ZONE_ID` (see the note above this example).
+      # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
 ```
 
 The launchpad skips its `monitor` and `release` stages when
@@ -1498,7 +1494,7 @@ toggles.
    emit a `changed` flag. Skipped when `upstream_repo` is empty.
 2. **Release** —
    [`release.yml`](#releaseyml--reusable-meta-workflow): when upstream
-   changed (or `force_release: true`), run the full Docker → Balena →
+   changed (or `force_run: true`), run the full Docker → Balena →
    GitHub Release pipeline against `v<upstream_version>`. Skipped
    when monitor was skipped or when every `docker|balena|github_release`
    toggle is `false`.
@@ -1624,7 +1620,7 @@ jobs:
 See [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml)
 for the authoritative list. High-level groups:
 
-- **Monitor stage:** `upstream_repo`, `track_file`, `force_release`
+- **Monitor stage:** `upstream_repo`, `track_file`, `force_run`
 - **Container stage toggles:** `docker`, `balena`, `github_release` (forwarded)
 - **Docker / Scout / Balena / GitHub Release:** every `release.yml`
   input is proxied through with the same name so it works as a
