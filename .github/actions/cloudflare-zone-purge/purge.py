@@ -60,6 +60,31 @@ def require_token(token: str) -> str:
     return token
 
 
+def verify_token(token: str) -> None:
+    """Confirm the token is recognised and active. Surface a clear,
+    permission-specific diagnostic when verify fails.
+
+    Cloudflare's `/user/tokens/verify` endpoint only reports the token
+    LIFECYCLE state (active / expired / disabled). It does NOT enumerate
+    granted permissions, so a passing verify does not guarantee that
+    `Zone:Cache Purge:Purge` is on the token. Verify is still useful
+    because it distinguishes 'token is wrong / rotated / expired' from
+    'token is fine but missing a specific permission'.
+    """
+    log("Verifying Cloudflare API token")
+    status, payload = cf_request("GET", "/user/tokens/verify", token=token)
+    if status == 200 and payload.get("success"):
+        token_status = (payload.get("result") or {}).get("status") or "unknown"
+        log(f"Token is valid (status={token_status})")
+        return
+    die(
+        f"Cloudflare /user/tokens/verify returned HTTP {status} success={payload.get('success')}",
+        "The token is invalid, expired, disabled, or has been rotated.",
+        "Re-issue at https://dash.cloudflare.com/profile/api-tokens and update the workflow secret.",
+        f"Response: {json.dumps(payload)[:400]}",
+    )
+
+
 def cf_request(
     method: str, path: str, *, token: str, query: dict[str, str] | None = None,
     body: bytes | None = None,
@@ -129,8 +154,35 @@ def purge_zone(zone_id: str, token: str) -> tuple[int, dict]:
     )
 
 
+def explain_purge_failure(zone_id: str, status: int, payload: dict) -> list[str]:
+    """Map known Cloudflare error shapes to a specific remediation hint."""
+    errors = payload.get("errors") or []
+    codes = {err.get("code") for err in errors if isinstance(err, dict)}
+    hints: list[str] = []
+    if status in (401, 403) or 10000 in codes:
+        hints.append(
+            "Token authenticated but is not authorised to purge this zone.",
+        )
+        hints.append(
+            f"Grant `Zone -> Cache Purge -> Purge` on zone {zone_id} "
+            "(or 'All zones from an account' covering it) at "
+            "https://dash.cloudflare.com/profile/api-tokens, then re-run.",
+        )
+        hints.append(
+            "The token already has Zone:Read (the auto-resolve succeeded) "
+            "but lacks Cache Purge; these are two separate permissions.",
+        )
+    elif status == 429:
+        hints.append("Cloudflare rate-limited the purge. Retry after a short backoff.")
+    elif status >= 500:
+        hints.append("Cloudflare side error. Retry; if it persists, check https://www.cloudflarestatus.com/.")
+    return hints
+
+
 def main() -> int:
     token = require_token(os.environ.get("API_TOKEN", "").strip())
+    verify_token(token)
+
     explicit = (os.environ.get("ZONE_ID") or os.environ.get("FALLBACK_ZONE_ID") or "").strip()
     site_url = os.environ.get("SITE_URL", "").strip()
 
@@ -153,7 +205,10 @@ def main() -> int:
     })
 
     if not success:
-        die(f"Cloudflare purge_cache returned HTTP {status} success={payload.get('success')}")
+        die(
+            f"Cloudflare purge_cache returned HTTP {status} success={payload.get('success')}",
+            *explain_purge_failure(zone_id, status, payload),
+        )
     log("Cache purge OK.")
     return 0
 
