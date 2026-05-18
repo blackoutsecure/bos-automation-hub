@@ -184,15 +184,31 @@ concurrency:
 jobs:
   monitor:
     name: Monitor ${{ inputs.upstream_repo || inputs.package_name || inputs.image_ref || inputs.version_url }}
-    # Resolve runner from org-shared `vars.DEFAULT_RUNNER`, falling back to
-    # GitHub-hosted `ubuntu-latest`. The `fromJSON` + `startsWith` dance is
-    # **load-bearing** — a JSON-array-shaped string substituted directly
-    # into `runs-on:` is treated as a single label by GHA's scheduler,
-    # so the job never gets picked up. Parsing it via `fromJSON` makes
-    # GHA see a real label list (e.g. `[self-hosted, Linux, ARM64]`).
-    # Bare single-label strings (e.g. `ubuntu-latest`) go through
-    # `format('"{0}"', ...)` so they survive `fromJSON` as a string.
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    # Pinned to `ubuntu-latest` (NOT `vars.DEFAULT_RUNNER`) — verified
+    # May 2026, bos-automation-hub. The monitor job's entire workload
+    # is `curl` + `jq` against public registries (Docker Hub, GHCR,
+    # GitHub releases). Zero benefit from self-hosted hardware.
+    #
+    # More importantly, routing this stage to a self-hosted fleet
+    # creates a chicken-and-egg deadlock for consumers whose runner
+    # IS the fleet being monitored/deployed (e.g. `blackoutmode/runner`
+    # → fleet `blackoutsecure/runner-arm64`). When a deploy happens
+    # concurrent with a monitor run:
+    #   1. Monitor job picks up on a fleet runner (e.g. `simple-moon`).
+    #   2. Balena finishes downloading the new image & restarts the
+    #      whole compose group to materialize the topology change.
+    #   3. Runner container dies mid-step before recording "Set up job".
+    #   4. GHA's heartbeat timeout (10-15 min) eventually marks the
+    #      run as failed — until then it shows `steps: []` and looks
+    #      hung. The run is unrecoverable; manual `gh run cancel` is
+    #      required to unblock subsequent runs.
+    # See `bos-launchpad` consumer in `blackoutmode/runner` repo —
+    # this exact symptom hit on the Phase 15 commit `2ab7780`.
+    #
+    # If a future consumer genuinely needs monitor on self-hosted
+    # (e.g. IP-allowlisted upstream), promote `runs-on:` to a workflow
+    # input so they can opt in without re-introducing the deadlock.
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write
