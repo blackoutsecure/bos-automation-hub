@@ -278,6 +278,17 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      balena_force:
+        description: >-
+          Force a fresh balena release even when an existing release
+          matches the current source revision. Forwarded to `release.yml`
+          → `balena-block-publish.yml` as `force:`, which sets
+          `cache: false` on `deploy-to-balena-action`. Pair with
+          `force_run: true` to bypass both the upstream-moved gate and
+          balena's same-commit cache for a full forced rebuild.
+        required: false
+        type: boolean
+        default: false
       balena_generate_yml:
         description: >-
           Render `balena.yml` dynamically inside the balena stage instead
@@ -812,6 +823,7 @@ jobs:
       balena_namespace:                ${{ inputs.balena_namespace }}
       balena_sync_yml:                 ${{ inputs.balena_sync_yml }}
       balena_draft:                    ${{ inputs.balena_draft }}
+      balena_force:                    ${{ inputs.balena_force }}
       balena_generate_yml:             ${{ inputs.balena_generate_yml }}
       balena_type:                     ${{ inputs.balena_type }}
       balena_repository_url:           ${{ inputs.balena_repository_url }}

@@ -168,6 +168,17 @@ name: Release pipeline (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      balena_force:
+        description: >-
+          Force a fresh balena release even when an existing release
+          matches the current source revision. Forwarded to
+          `balena-block-publish.yml` as `force:`, which sets
+          `cache: false` on `deploy-to-balena-action`. Useful when
+          re-running an unchanged release to bump the release timestamp,
+          re-trigger device pulls, or recover from a partial publish.
+        required: false
+        type: boolean
+        default: false
       balena_generate_yml:
         description: >-
           Render `balena.yml` dynamically inside the balena stage instead
@@ -436,6 +447,7 @@ jobs:
       publish:          'true'
       sync_balena_yml:  ${{ inputs.balena_sync_yml }}
       draft:            ${{ inputs.balena_draft }}
+      force:            ${{ inputs.balena_force }}
       generate_balena_yml:          ${{ inputs.balena_generate_yml }}
       block_type:                   ${{ inputs.balena_type }}
       block_assets_repository_url:  ${{ inputs.balena_repository_url }}

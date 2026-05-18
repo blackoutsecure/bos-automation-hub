@@ -89,6 +89,19 @@ name: Balena Fleet Deploy (reusable)
         required: false
         type: boolean
         default: false
+      force:
+        description: >-
+          Force a fresh release even when `deploy-to-balena-action`
+          finds an existing release matching the source revision.
+          Sets `cache: false` on the action; balena will rebuild from
+          cached layers (so `layer_cache` is intentionally left alone
+          — a force-redeploy of an unchanged tree should still be
+          fast) and create a brand-new release record so devices
+          tracking `latest` re-pull the image. Wire your consumer's
+          `force_redeploy` (or equivalent) flag here.
+        required: false
+        type: boolean
+        default: false
       runs_on:
         description: >-
           Optional runner override for the deploy job. When empty (the
@@ -421,7 +434,11 @@ jobs:
           balena_token: ${{ secrets.BALENA_API_TOKEN }}
           fleet: ${{ matrix.fleet }}
           source: ${{ inputs.source }}
-          cache: ${{ inputs.cache }}
+          # `force: true` overrides `cache: true` so the action
+          # always builds a fresh release even when a release already
+          # exists for this commit SHA. `layer_cache` is untouched so
+          # the rebuild still hits balena's layer cache and stays fast.
+          cache: ${{ inputs.force && false || inputs.cache }}
           layer_cache: ${{ inputs.layer_cache }}
           debug: ${{ inputs.debug }}
           finalize: ${{ inputs.draft && 'false' || 'true' }}
