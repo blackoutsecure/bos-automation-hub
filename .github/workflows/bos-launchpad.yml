@@ -587,11 +587,6 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: boolean
         default: false
-      release_prerelease:
-        description: "`true`/`false` to force the pre-release flag. Empty auto-detects."
-        required: false
-        type: string
-        default: ''
 
       # ----- Shared / advanced ---------------------------------------------
       platforms:
@@ -859,7 +854,6 @@ jobs:
       generate_release_notes:          ${{ inputs.generate_release_notes }}
       release_files:                   ${{ inputs.release_files }}
       release_draft:                   ${{ inputs.release_draft }}
-      release_prerelease:              ${{ inputs.release_prerelease }}
       platforms:                       ${{ inputs.platforms }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
