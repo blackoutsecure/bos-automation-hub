@@ -799,16 +799,22 @@ jobs:
   release:
     name: Release v${{ needs.monitor.outputs.upstream_version }}
     needs: monitor
-    # Three gates, all must hold:
-    #   1. The monitor stage actually ran (i.e. the caller supplied at least
+    # Four gates, all must hold:
+    #   1. The run is NOT cancelled. `always()` alone would happily start
+    #      the release job after a web-UI "Cancel workflow" click, which
+    #      defeats the whole point of the cancel button (see GitHub docs:
+    #      `always()` returns true even when the workflow has been
+    #      cancelled; pair it with `!cancelled()` to honour cancels).
+    #   2. The monitor stage actually ran (i.e. the caller supplied at least
     #      one upstream source identifier — `upstream_repo`, `image_ref`,
     #      `package_name`, or `version_url`). Otherwise there is no
     #      `upstream_version` to release.
-    #   2. Either the upstream version changed or the operator forced a re-run.
-    #   3. At least one of the release stages is enabled (skip the whole job
+    #   3. Either the upstream version changed or the operator forced a re-run.
+    #   4. At least one of the release stages is enabled (skip the whole job
     #      when the caller only wants the Cloudflare Pages stage).
     if: >-
       always()
+      && !cancelled()
       && needs.monitor.result == 'success'
       && (needs.monitor.outputs.changed == 'true' || inputs.force_run)
       && (inputs.docker || inputs.companion_docker || inputs.balena || inputs.github_release)

@@ -420,8 +420,14 @@ jobs:
   publish:
     name: Publish block
     needs: [setup, sync-balena-yml]
+    # `!cancelled()` keeps web-UI / API cancels from punching through this
+    # gate: `always()` on its own returns true even after cancellation
+    # (per GitHub docs), so without the explicit cancel check a click on
+    # "Cancel workflow" mid-`sync-balena-yml` would still trigger a
+    # balena release publish on the next runner.
     if: >-
       always()
+      && !cancelled()
       && needs.setup.result == 'success'
       && needs.setup.outputs.publish == 'true'
       && (needs.sync-balena-yml.result == 'success' || needs.sync-balena-yml.result == 'skipped')

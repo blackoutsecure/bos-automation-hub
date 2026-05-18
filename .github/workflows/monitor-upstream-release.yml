@@ -184,10 +184,10 @@ concurrency:
 jobs:
   monitor:
     name: Monitor ${{ inputs.upstream_repo || inputs.package_name || inputs.image_ref || inputs.version_url }}
-    # Pinned to `ubuntu-latest` (NOT `vars.DEFAULT_RUNNER`) — verified
-    # May 2026, bos-automation-hub. The monitor job's entire workload
-    # is `curl` + `jq` against public registries (Docker Hub, GHCR,
-    # GitHub releases). Zero benefit from self-hosted hardware.
+    # Pinned to `ubuntu-latest` (NOT `vars.DEFAULT_RUNNER`). The monitor
+    # job's entire workload is `curl` + `jq` against public registries
+    # (Docker Hub, GHCR, GitHub releases). Zero benefit from self-hosted
+    # hardware.
     #
     # More importantly, routing this stage to a self-hosted fleet
     # creates a chicken-and-egg deadlock for consumers whose runner
