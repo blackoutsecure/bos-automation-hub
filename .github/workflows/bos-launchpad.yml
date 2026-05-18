@@ -160,6 +160,11 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      companion_docker:
+        description: 'Run the companion docker-build-push stage. Default `false` — opt in explicitly.'
+        required: false
+        type: boolean
+        default: false
 
       # ----- Release pipeline: Docker stage --------------------------------
       image_name:
@@ -207,6 +212,21 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      companion_image_name:
+        description: 'Companion Docker image name (no namespace). Required when `companion_docker: true`.'
+        required: false
+        type: string
+        default: ''
+      companion_build_target:
+        description: 'Optional Dockerfile stage target for the companion image build.'
+        required: false
+        type: string
+        default: ''
+      companion_docker_short_description:
+        description: 'Docker Hub short description for the companion image (<=100 chars). Empty leaves it untouched.'
+        required: false
+        type: string
+        default: ''
 
       # ----- Release pipeline: Docker Scout (forwarded to release.yml) -----
       docker_enable_scout:
@@ -668,6 +688,9 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       image:
         description: 'Fully qualified Docker image reference (when the docker stage ran).'
         value: ${{ jobs.release.outputs.image }}
+      companion_image:
+        description: 'Fully qualified companion Docker image reference (when the companion docker stage ran).'
+        value: ${{ jobs.release.outputs.companion_image }}
       release_url:
         description: 'GitHub Release HTML URL (when the github-release stage ran).'
         value: ${{ jobs.release.outputs.release_url }}
@@ -788,7 +811,7 @@ jobs:
       always()
       && needs.monitor.result == 'success'
       && (needs.monitor.outputs.changed == 'true' || inputs.force_run)
-      && (inputs.docker || inputs.balena || inputs.github_release)
+      && (inputs.docker || inputs.companion_docker || inputs.balena || inputs.github_release)
     permissions:
       contents:        write   # balena sync_balena_yml + GitHub Release publish
       pull-requests:   write   # nested docker-build-push declares this for Docker
@@ -796,13 +819,16 @@ jobs:
                                # at workflow-call time regardless of runtime path.
       security-events: write   # nested docker-build-push declares this for SARIF
                                # upload to the GHAS code-scanning dashboard.
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/release.yml@main
+    uses: ./.github/workflows/release.yml
     with:
       tag_name:                        v${{ needs.monitor.outputs.upstream_version }}
       docker:                          ${{ inputs.docker }}
+      companion_docker:                ${{ inputs.companion_docker }}
       balena:                          ${{ inputs.balena }}
       github_release:                  ${{ inputs.github_release }}
       image_name:                      ${{ inputs.image_name }}
+      companion_image_name:            ${{ inputs.companion_image_name }}
+      companion_build_target:          ${{ inputs.companion_build_target }}
       dockerhub_namespace:             ${{ inputs.dockerhub_namespace }}
       # Smart defaults so thin callers don't have to wire these every time.
       # Override by passing the matching input on the caller side.
@@ -812,6 +838,7 @@ jobs:
       docker_multi_arch:               ${{ inputs.docker_multi_arch }}
       docker_update_description:       ${{ inputs.docker_update_description }}
       docker_force:                    ${{ inputs.docker_force }}
+      companion_docker_short_description: ${{ inputs.companion_docker_short_description }}
       docker_enable_scout:             ${{ inputs.docker_enable_scout }}
       docker_scout_command:            ${{ inputs.docker_scout_command }}
       docker_scout_severities:         ${{ inputs.docker_scout_severities }}
