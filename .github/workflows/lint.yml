@@ -25,29 +25,25 @@ concurrency:
 jobs:
   actionlint:
     name: actionlint
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (GHA treats JSON-array-shaped vars as a single label
-    # unless explicitly parsed).
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    # Pinned to ubuntu-latest intentionally — do NOT route this through
+    # vars.DEFAULT_RUNNER. raven-actions/actionlint pulls in a stack of
+    # CI helpers at runtime (npm for @actions/tool-cache, pipx for
+    # shellcheck-py if shellcheck isn't already on PATH, etc.) that
+    # ubuntu-latest maintains as a baseline but the minimal
+    # docker-github-runner image does not. Lint is ~30 s of work with
+    # no specialized hardware / local-secret / latency needs, so it
+    # gains nothing from self-hosted; the gain is on the deploy /
+    # multi-arch build side, which IS routed through vars.DEFAULT_RUNNER.
+    # If you want lint on self-hosted later, add nodejs, npm, shellcheck,
+    # and pipx to docker-github-runner/Dockerfile (apt-get install) and
+    # replace this line with the vars.DEFAULT_RUNNER expression used by
+    # other jobs (see monitor-upstream-release.yml for the canonical form).
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-
-      # raven-actions/actionlint@v2.1.2 shells out `npm install @actions/tool-cache`
-      # in its setup. ubuntu-latest has npm preinstalled; our self-hosted runner
-      # image (docker-github-runner) does NOT — the runner only bundles node20
-      # under _externals/ for its own JS-action execution, not on the system PATH.
-      # setup-node downloads a fresh Node distribution via its bundled tool-cache
-      # (no shell-out to npm), and after it runs `npm` is on PATH for the next
-      # step. Cheap on hosted runners (action is no-op when the requested version
-      # is already cached); required on self-hosted. See:
-      # https://github.com/raven-actions/actionlint/blob/main/action.yml
-      - name: Ensure Node.js (provides npm for raven-actions/actionlint)
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '20'
 
       - name: Run actionlint
         uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
