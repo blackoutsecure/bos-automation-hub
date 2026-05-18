@@ -438,7 +438,17 @@ jobs:
           # always builds a fresh release even when a release already
           # exists for this commit SHA. `layer_cache` is untouched so
           # the rebuild still hits balena's layer cache and stays fast.
-          cache: ${{ inputs.force && false || inputs.cache }}
+          #
+          # NOTE: the obvious GHA ternary `inputs.force && false ||
+          # inputs.cache` LOOKS right but is broken -- the literal
+          # `false` in the true branch is itself falsy, so the `||`
+          # short-circuits past it and returns `inputs.cache` (default
+          # true) regardless of `inputs.force`. Use the inverted form
+          # `!inputs.force && inputs.cache` instead: when force is true
+          # it returns false; when force is false it returns whatever
+          # `inputs.cache` is set to. Both shapes are stringified by GHA
+          # to 'true'/'false' before being passed to the action.
+          cache: ${{ !inputs.force && inputs.cache }}
           layer_cache: ${{ inputs.layer_cache }}
           debug: ${{ inputs.debug }}
           finalize: ${{ inputs.draft && 'false' || 'true' }}
