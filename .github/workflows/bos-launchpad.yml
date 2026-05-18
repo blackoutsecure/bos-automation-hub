@@ -687,14 +687,43 @@ jobs:
   # `target_workflows` is left empty so we chain to the release job via `needs:`
   # instead of dispatching a separate workflow run (no DISPATCH_TOKEN needed).
   #
-  # Skipped in static-site / direct-deploy mode (when `upstream_repo` is empty).
+  # Skipped in static-site / direct-deploy mode — i.e. when NO upstream source
+  # identifier is supplied. The monitor stage supports six `source` modes and
+  # each one has its own required identifier input; the gate below admits any
+  # of them:
+  #   * `github_release` / `github_branch_file` / `github_tags` → `upstream_repo`
+  #   * `container_image`                                       → `image_ref`
+  #   * `npm` / `pypi`                                          → `package_name`
+  #   * `generic_url`                                           → `version_url`
   # A skipped job still satisfies `needs:` for downstream jobs, but its outputs
   # come back as empty strings — the release gate below treats that as "no
   # release possible" and skips the release stage too.
   # ---------------------------------------------------------------------------
   monitor:
-    name: Monitor ${{ inputs.upstream_repo }}
-    if: ${{ inputs.upstream_repo != '' }}
+    # Display whichever identifier the caller used so the job name stays
+    # meaningful for non-`github_release` sources (container_image, npm, etc.).
+    name: >-
+      Monitor ${{
+        inputs.upstream_repo
+        || inputs.image_ref
+        || inputs.package_name
+        || inputs.version_url
+      }}
+    # Gate: any non-empty upstream source identifier opts the caller into the
+    # monitor stage. See the comment block above for the per-`source` mapping.
+    # Don't tighten this to `source`-conditional checks: callers that supply
+    # the wrong identifier for their chosen source mode should surface that as
+    # a clear validation error inside the monitor stage itself, NOT as a
+    # silently-skipped job (which is what the prior `upstream_repo`-only gate
+    # did to `source: container_image` callers — every downstream job was
+    # skipped with zero diagnostics).
+    if: >-
+      ${{
+        inputs.upstream_repo != ''
+        || inputs.image_ref    != ''
+        || inputs.package_name != ''
+        || inputs.version_url  != ''
+      }}
     permissions:
       contents: write   # commit the tracking file
       actions:  write   # nested `monitor-upstream-release.yml` declares this for
@@ -732,8 +761,10 @@ jobs:
     name: Release v${{ needs.monitor.outputs.upstream_version }}
     needs: monitor
     # Three gates, all must hold:
-    #   1. The monitor stage actually ran (i.e. an `upstream_repo` was given) —
-    #      otherwise there is no `upstream_version` to release.
+    #   1. The monitor stage actually ran (i.e. the caller supplied at least
+    #      one upstream source identifier — `upstream_repo`, `image_ref`,
+    #      `package_name`, or `version_url`). Otherwise there is no
+    #      `upstream_version` to release.
     #   2. Either the upstream version changed or the operator forced a re-run.
     #   3. At least one of the release stages is enabled (skip the whole job
     #      when the caller only wants the Cloudflare Pages stage).
