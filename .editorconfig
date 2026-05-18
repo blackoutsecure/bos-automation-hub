@@ -1,0 +1,34 @@
+# EditorConfig — consistent style across editors and CI.
+# https://editorconfig.org/
+
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+charset = utf-8
+indent_style = space
+indent_size = 2
+
+# Shell scripts use 4-space indentation (matches the existing
+# install-*.sh / configure-*.sh scripts under linux/ and macos/).
+[*.sh]
+indent_size = 4
+
+# Bash is shell.
+[*.bash]
+indent_size = 4
+
+# Markdown allows trailing whitespace (two trailing spaces = hard break).
+[*.md]
+trim_trailing_whitespace = false
+
+# Makefiles require literal tabs for recipe lines.
+[Makefile]
+indent_style = tab
+
+# YAML, JSON, TOML — 2-space is the de-facto convention and already
+# matches every workflow file under .github/workflows/.
+[*.{yml,yaml,json,toml}]
+indent_size = 2

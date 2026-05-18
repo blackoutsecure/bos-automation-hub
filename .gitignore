@@ -46,3 +46,16 @@ npm-debug.log*
 coverage/
 dist/
 build/
+
+# macOS resource forks (created on non-HFS volumes / network shares).
+._*
+.AppleDouble
+.LSOverride
+
+# Merge / patch conflict artifacts.
+*.orig
+*.rej
+
+# direnv — environment loaders are per-developer.
+.envrc
+.direnv/

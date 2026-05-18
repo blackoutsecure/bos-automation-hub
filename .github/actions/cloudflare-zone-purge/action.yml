@@ -1,0 +1,53 @@
+name: Purge Cloudflare zone cache
+description: >-
+  Purge an entire Cloudflare zone's edge cache. Accepts an explicit
+  zone ID, or auto-resolves it from a site URL via the Cloudflare API.
+  Zone IDs are public Cloudflare identifiers and are not masked.
+
+inputs:
+  zone_id:
+    description: >-
+      Cloudflare zone ID (32-char lowercase hex). Prefer
+      `vars.CLOUDFLARE_ZONE_ID`; `secrets.CLOUDFLARE_ZONE_ID` is
+      auto-masked by the runner and breaks `GITHUB_OUTPUT` passthrough.
+    required: false
+    default: ''
+  fallback_zone_id:
+    description: 'Back-compat fallback when `zone_id` is empty.'
+    required: false
+    default: ''
+  site_url:
+    description: >-
+      Public site URL used to auto-resolve the zone when neither
+      `zone_id` nor `fallback_zone_id` is set. Token must carry
+      `Zone:Read` for this path.
+    required: false
+    default: ''
+  api_token:
+    description: >-
+      Cloudflare API token with `Zone -> Cache Purge -> Purge` (and
+      `Zone:Read` when auto-resolving).
+    required: true
+
+outputs:
+  purged:
+    description: '`true` when the API returned `success`.'
+    value: ${{ steps.purge.outputs.purged }}
+  zone_id:
+    description: 'Resolved 32-char lowercase hex zone ID.'
+    value: ${{ steps.purge.outputs.zone_id }}
+  http_code:
+    description: 'HTTP status returned by the Cloudflare API.'
+    value: ${{ steps.purge.outputs.http_code }}
+
+runs:
+  using: composite
+  steps:
+    - id: purge
+      shell: bash
+      env:
+        ZONE_ID: ${{ inputs.zone_id }}
+        FALLBACK_ZONE_ID: ${{ inputs.fallback_zone_id }}
+        SITE_URL: ${{ inputs.site_url }}
+        API_TOKEN: ${{ inputs.api_token }}
+      run: python3 "${GITHUB_ACTION_PATH}/purge.py"

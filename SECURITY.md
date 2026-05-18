@@ -1,60 +1,58 @@
 # Security Policy
 
-## Supported versions
+This repository hosts **public reusable GitHub Actions workflows**, **composite actions**, and **OS administration scripts** consumed by downstream `blackoutsecure` repositories and end hosts. Vulnerabilities here can affect every dependent.
 
-Only the `main` branch of this repository is actively maintained. Downstream
-callers should pin to a specific commit SHA or release tag.
+## Supported Versions
 
-## Reporting a vulnerability
+| Surface | Supported |
+| --- | --- |
+| `main` branch (current `HEAD`) | ✅ |
+| Pinned commit SHAs / release tags | ✅ — fixes shipped as new releases; old refs remain immutable |
+| Forks or rewrites | ❌ |
 
-Please report security issues **privately** via GitHub's
-[private vulnerability reporting](https://github.com/blackoutsecure/bos-automation-hub/security/advisories/new)
-form. Do **not** open a public issue for security reports.
+Consumers should pin reusable workflows by **release tag or commit SHA**, not by mutable branch reference, per [GitHub's security hardening guide](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions).
 
-We aim to acknowledge new reports within 5 business days.
+## Reporting a Vulnerability
+
+Please **do not** open a public issue for security vulnerabilities.
+
+Report privately via **[GitHub Security Advisories](https://github.com/blackoutsecure/bos-automation-hub/security/advisories/new)** ("Report a vulnerability"). This delivers the report to maintainers only and provides a coordinated disclosure workflow.
+
+Include:
+
+- Affected workflow / action / script path and ref (`main`, tag, or SHA).
+- A minimal reproduction (caller workflow YAML, inputs, expected vs. observed behaviour).
+- Impact assessment — does it leak secrets, escalate permissions, or affect downstream consumers?
+- Any proposed mitigation.
+
+We aim to:
+
+- Acknowledge within **3 business days**.
+- Provide a remediation plan or disposition within **14 days**.
+- Publish a patched release and advisory on resolution. Critical issues may also be communicated to known downstream consumers.
 
 ## Scope
 
-In scope:
+In-scope examples:
 
-- The reusable workflows in [`.github/workflows/`](.github/workflows/).
-- The composite actions in [`.github/actions/`](.github/actions/).
-- The OS administration scripts under [`linux/`](linux/) and
-  [`macos/`](macos/) — they run as root on managed endpoints, so
-  command-injection, privilege-escalation, and TOCTOU bugs are in scope.
+- Secret exposure or log scrubbing bypass in any workflow.
+- Privilege escalation via `permissions:` mis-configuration or unsafe `pull_request_target` patterns.
+- Command/script injection via untrusted inputs reaching composite actions or shell.
+- Supply-chain risk in pinned action versions.
+- OS scripts under `linux/` and `macos/` writing world-writable artefacts, downloading unsigned binaries, or running unaudited remote shell.
 
-Out of scope:
+Out-of-scope examples:
 
-- Vulnerabilities in upstream actions we depend on (please report to the
-  maintaining org). We pin every third-party action to a commit SHA;
-  Dependabot opens PRs for new releases.
-- Vulnerabilities in upstream packages installed by the OS scripts
-  (NodeSource, Docker, Homebrew, Plex, Sublime Text, …) — please report
-  those to the upstream project.
-- Misconfiguration in downstream repositories that consume these workflows.
+- Vulnerabilities in upstream third-party actions or images. Report those to the respective project; we will bump pins promptly.
+- Issues that require attacker-controlled write access to the repo or org variables/secrets.
 
-## Hardening summary
+## Supply-Chain Hardening
 
-These workflows follow the practices recommended by
-[OpenSSF Scorecard](https://github.com/ossf/scorecard) and
-[Securing GitHub Actions](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions):
+- All third-party actions used in reusable workflows are pinned by **commit SHA**, not floating tags.
+- [`.github/dependabot.yml`](.github/dependabot.yml) opens weekly PRs to bump action pins.
+- [`.github/workflows/lint.yml`](.github/workflows/lint.yml) runs `actionlint` + `shellcheck` on every workflow and script.
+- Reusable workflows declare least-privilege `permissions:` at the job level.
 
-- **Pinned actions** — every `uses:` reference is pinned to a 40-char
-  commit SHA, with the human-readable version in a trailing comment.
-- **Least-privilege tokens** — `permissions: contents: read` at the
-  workflow level; jobs that need `contents: write` (only
-  `sync-balena-yml`) opt in explicitly.
-- **No credential persistence** — every checkout uses
-  `persist-credentials: false`, except the one job that needs to push a
-  commit back to the default branch.
-- **Injection-safe scripts** — every `${{ ... }}` interpolation that
-  feeds a shell is routed through an `env:` block; no template
-  expansion occurs inside `run:` bodies.
-- **Input validation** — image names, tags, slugs, and version strings
-  are regex-validated; secrets are checked for stray whitespace before
-  use.
-- **Concurrency safety** — publish jobs use `cancel-in-progress: false`
-  to avoid leaving partial releases behind.
-- **No `pull_request_target`** — workflows that handle PRs use the
-  `pull_request` trigger and never check out untrusted code with
-  elevated privileges.
+## Contact
+
+For non-security questions use [GitHub Issues](https://github.com/blackoutsecure/bos-automation-hub/issues) or [Blackout Secure](https://blackoutsecure.app).

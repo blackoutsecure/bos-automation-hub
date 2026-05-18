@@ -1,0 +1,155 @@
+name: Discover upstream release
+description: >-
+  Pluggable upstream-version discovery. Resolves the "latest" version of an
+  upstream project from one of several sources (GitHub Releases, GitHub
+  branch HEAD, GitHub tags, container registry, npm, PyPI, generic URL),
+  writes a byte-stable tracker JSON file, and reports whether the version
+  changed since the previous run. Used by `monitor-upstream-release.yml`.
+  All HTTP is stdlib-only — no extra dependencies needed on the runner.
+
+inputs:
+  source:
+    description: >-
+      Provider. One of:
+        github_release       — `repos/{repo}/releases/latest`
+        github_branch_file   — raw file from a branch HEAD
+        github_tags          — `repos/{repo}/tags`, pick highest SemVer
+        container_image      — Docker Hub tags, pick highest SemVer
+        npm                  — `registry.npmjs.org/{pkg}/latest`
+        pypi                 — `pypi.org/pypi/{pkg}/json`
+        generic_url          — fetch URL, apply `version_regex`
+      Legacy aliases (backward-compat): `latest_release` -> `github_release`,
+      `branch_head` -> `github_branch_file`.
+    required: true
+  upstream_repo:
+    description: >-
+      `owner/name` of the upstream GitHub repo. Required for `github_release`,
+      `github_branch_file`, and `github_tags`.
+    required: false
+    default: ''
+  upstream_branch:
+    description: >-
+      Branch name. Required for `github_branch_file`; optional for
+      `github_tags` (no effect — tags are repo-wide).
+    required: false
+    default: ''
+  version_file_path:
+    description: >-
+      Repo-relative path inside `upstream_branch` whose raw contents are the
+      version string. Used only for `github_branch_file`.
+    required: false
+    default: 'version'
+  image_ref:
+    description: >-
+      Container image reference (e.g. `docker.io/library/nginx`). Used only
+      for `container_image`. Only the `docker.io/` registry is supported in
+      this revision; non-Docker-Hub refs are rejected with a clear error.
+    required: false
+    default: ''
+  package_name:
+    description: >-
+      Package name. Required for `npm` and `pypi`. npm scoped names
+      (`@scope/name`) are supported.
+    required: false
+    default: ''
+  version_url:
+    description: 'URL to fetch. Required for `generic_url`.'
+    required: false
+    default: ''
+  version_regex:
+    description: >-
+      Python regex applied to the fetched body for `generic_url`. The first
+      capture group is the version. Required for `generic_url`.
+    required: false
+    default: ''
+  tag_pattern:
+    description: >-
+      Optional Python regex used to filter candidate tags/versions in
+      `github_tags` and `container_image` before SemVer ranking. Matches
+      against the raw tag string. Default `^v?\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$`.
+    required: false
+    default: ''
+  strip_v_prefix:
+    description: 'Strip a leading `v` from the resolved version.'
+    required: false
+    default: 'true'
+  tracker_path:
+    description: >-
+      Repo-relative path to the tracker JSON file. Created on first run;
+      rewritten when the upstream version changes. Empty disables the file.
+    required: false
+    default: '.github/upstream/tracked-release.json'
+  gh_token:
+    description: >-
+      Token used for authenticated GitHub API calls. Falls back to
+      `github.token`. Anonymous calls are rate-limited to 60/hr.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  changed:
+    description: '`true` when the upstream version differed from the tracker file.'
+    value: ${{ steps.discover.outputs.changed }}
+  version:
+    description: 'Resolved upstream version (with `v` stripped when `strip_v_prefix` is true).'
+    value: ${{ steps.discover.outputs.version }}
+  tag:
+    description: 'Raw upstream tag name (preserves any leading `v`).'
+    value: ${{ steps.discover.outputs.tag }}
+  commit:
+    description: 'Upstream commit SHA. Empty for sources that do not map to a commit (npm, pypi, container_image, generic_url).'
+    value: ${{ steps.discover.outputs.commit }}
+  source_url:
+    description: 'URL that was consulted, for traceability.'
+    value: ${{ steps.discover.outputs.source_url }}
+  tracker_path:
+    description: 'Repo-relative path of the tracker file (echoes the input).'
+    value: ${{ steps.discover.outputs.tracker_path }}
+
+runs:
+  using: composite
+  steps:
+    - id: discover
+      shell: bash
+      env:
+        SOURCE: ${{ inputs.source }}
+        UPSTREAM_REPO: ${{ inputs.upstream_repo }}
+        UPSTREAM_BRANCH: ${{ inputs.upstream_branch }}
+        VERSION_FILE_PATH: ${{ inputs.version_file_path }}
+        IMAGE_REF: ${{ inputs.image_ref }}
+        PACKAGE_NAME: ${{ inputs.package_name }}
+        VERSION_URL: ${{ inputs.version_url }}
+        VERSION_REGEX: ${{ inputs.version_regex }}
+        TAG_PATTERN: ${{ inputs.tag_pattern }}
+        STRIP_V_PREFIX: ${{ inputs.strip_v_prefix }}
+        TRACKER_PATH: ${{ inputs.tracker_path }}
+        GH_TOKEN: ${{ inputs.gh_token }}
+      run: |
+        set -euo pipefail
+
+        # Cross-source enum + bool validation. Per-source required-input
+        # checks happen in Python so error messages can name the exact
+        # missing field with the source it applies to.
+        case "${SOURCE}" in
+          github_release|latest_release| \
+          github_branch_file|branch_head| \
+          github_tags| \
+          container_image| \
+          npm| \
+          pypi| \
+          generic_url) ;;
+          *) echo "ERROR: input 'source' is not a recognized provider (got '${SOURCE}')" >&2; exit 1 ;;
+        esac
+
+        case "${STRIP_V_PREFIX}" in
+          true|false) ;;
+          *) echo "ERROR: input 'strip_v_prefix' must be 'true' or 'false' (got '${STRIP_V_PREFIX}')" >&2; exit 1 ;;
+        esac
+
+        if [ -n "${TRACKER_PATH}" ]; then
+          case "${TRACKER_PATH}" in
+            /*|*..*) echo "ERROR: input 'tracker_path' must be a repo-relative path: '${TRACKER_PATH}'" >&2; exit 1 ;;
+          esac
+        fi
+
+        python3 "${GITHUB_ACTION_PATH}/discover.py"

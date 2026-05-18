@@ -25,10 +25,23 @@ concurrency:
 jobs:
   actionlint:
     name: actionlint
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # Pinned to ubuntu-latest intentionally — do NOT route this through
+    # vars.DEFAULT_RUNNER. raven-actions/actionlint pulls in a stack of
+    # CI helpers at runtime (npm for @actions/tool-cache, pipx for
+    # shellcheck-py if shellcheck isn't already on PATH, etc.) that
+    # ubuntu-latest maintains as a baseline but the minimal
+    # docker-github-runner image does not. Lint is ~30 s of work with
+    # no specialized hardware / local-secret / latency needs, so it
+    # gains nothing from self-hosted; the gain is on the deploy /
+    # multi-arch build side, which IS routed through vars.DEFAULT_RUNNER.
+    # If you want lint on self-hosted later, add nodejs, npm, shellcheck,
+    # and pipx to docker-github-runner/Dockerfile (apt-get install) and
+    # replace this line with the vars.DEFAULT_RUNNER expression used by
+    # other jobs (see monitor-upstream-release.yml for the canonical form).
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 

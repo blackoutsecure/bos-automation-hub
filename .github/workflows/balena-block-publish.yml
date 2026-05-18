@@ -60,12 +60,133 @@ name: Balena Block Publish (reusable)
         description: >-
           When publishing on the default branch, rewrite the top-level
           `version:` in balena.yml and commit it back. Requires
-          `contents: write` on the caller.
+          `contents: write` on the caller. Ignored (no-op) when
+          `generate_balena_yml: true` — the manifest is rendered fresh
+          on each run, so commit-back is pointless.
         required: false
         type: boolean
         default: true
+      generate_balena_yml:
+        description: >-
+          Render `balena.yml` dynamically from the `block_*` inputs and
+          write it to `balena_yml_path` after checkout. Lets consumer
+          repos keep `balena.yml` out of their source tree entirely.
+          When `true`, the `sync-balena-yml` commit-back job is skipped
+          unconditionally.
+        required: false
+        type: boolean
+        default: false
+      block_type:
+        description: >-
+          Top-level `type:` written to the rendered `balena.yml`
+          (e.g. `sw.block`, `sw.application`). Used only when
+          `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: sw.block
+      block_description:
+        description: >-
+          Rendered `description:` field. Optional — omitted from the
+          generated `balena.yml` when empty. Used only when
+          `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: ''
+      block_post_provisioning:
+        description: >-
+          Rendered `post-provisioning:` Markdown. Multi-line; pass as a
+          YAML literal block (`|`). Optional — omitted when empty. Used
+          only when `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: ''
+      block_assets_repository_url:
+        description: >-
+          `assets.repository.data.url` for the rendered manifest. When
+          empty, defaults to `${github.server_url}/${github.repository}`
+          of the **caller** repo. Must be `https://` when set. Used only
+          when `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: ''
+      block_assets_logo_url:
+        description: >-
+          Optional `assets.logo.data.url` for the rendered manifest.
+          Must be `https://` when set; empty omits the logo entry. Used
+          only when `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: ''
+      block_default_device_type:
+        description: >-
+          `data.defaultDeviceType` slug for the rendered manifest.
+          Optional — when empty, the renderer uses the first entry of
+          the resolved `supportedDeviceTypes` list (see
+          `block_supported_device_types` / `block_architectures` /
+          `block_platforms` / `block_image_ref`). Validated to appear in
+          the resolved list either way. Used only when
+          `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: ''
+      block_supported_device_types:
+        description: >-
+          Explicit `data.supportedDeviceTypes` list. Accepts newline-
+          and/or comma-separated balena device-type slugs. Optional —
+          when empty, the renderer derives the list from (in waterfall
+          order) `block_image_ref` (live docker manifest sniff),
+          `block_architectures` (balena arch slugs), or `block_platforms`
+          (docker buildx `os/arch[/variant]` list). At least one of the
+          four must resolve. Used only when `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: ''
+      block_architectures:
+        description: >-
+          Newline- and/or comma-separated balena arch slugs (`aarch64`,
+          `amd64`, `armv7hf`, `rpi`, `i386`) expanded into a curated
+          per-arch device-type list when `block_supported_device_types`
+          is empty and `block_image_ref` did not resolve. Used only when
+          `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: ''
+      block_platforms:
+        description: >-
+          Comma-separated docker buildx platform list, e.g.
+          `linux/amd64,linux/arm64`. Each entry is mapped to a balena
+          arch and expanded via the curated device-type map. Used only
+          when `block_supported_device_types`, `block_image_ref`, and
+          `block_architectures` are all empty / unresolved. Used only
+          when `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: ''
+      block_image_ref:
+        description: >-
+          Optional fully-qualified docker image reference
+          (`[registry/]namespace/name:tag`). When set and
+          `block_supported_device_types` is empty, the renderer runs
+          `docker buildx imagetools inspect` against the ref and uses
+          the published platform list as the source of truth. Silent
+          fallthrough to `block_architectures` / `block_platforms` on
+          sniff failure. Used only when `generate_balena_yml: true`.
+        required: false
+        type: string
+        default: ''
       draft:
         description: 'Publish as a draft (sets `finalize: false`).'
+        required: false
+        type: boolean
+        default: false
+      force:
+        description: >-
+          Force a fresh release even when `deploy-to-balena-action`
+          finds an existing release matching the source revision.
+          Sets `cache: false` on the action; balena will rebuild from
+          cached layers (so `layer_cache` is intentionally left alone
+          — a force-republish of an unchanged tree should still be
+          fast) and create a brand-new release record.
         required: false
         type: boolean
         default: false
@@ -90,8 +211,10 @@ name: Balena Block Publish (reusable)
           default), resolves from the org-shared `vars.DEFAULT_RUNNER`
           (a JSON array of labels, e.g. `["self-hosted","Linux","ARM64"]`);
           falls back to the GitHub-hosted `ubuntu-latest` runner when the
-          var is unset. Pass a literal label or JSON-array string to force
-          a specific runner.
+          var is unset. Accepts either a bare label (e.g. `ubuntu-latest`)
+          or a JSON-array string of labels (e.g. `["self-hosted","Linux","ARM64"]`);
+          both shapes are parsed at runtime via `fromJSON` so GHA sees a
+          real label list rather than a single 35-character "label".
         required: false
         type: string
         default: ''
@@ -123,7 +246,9 @@ concurrency:
 jobs:
   setup:
     name: Setup
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 10
     outputs:
       publish: ${{ steps.resolve.outputs.publish }}
@@ -181,7 +306,7 @@ jobs:
 
       - name: Checkout caller repo
         if: inputs.auto_resolve_version
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
@@ -229,18 +354,24 @@ jobs:
   sync-balena-yml:
     name: Sync balena.yml
     needs: setup
+    # Skip when the manifest is rendered dynamically — there is no checked-in
+    # `balena.yml` to keep in sync, every run regenerates the file with the
+    # resolved version baked in.
     if: >-
       needs.setup.outputs.publish == 'true'
       && inputs.sync_balena_yml
+      && !inputs.generate_balena_yml
       && github.event_name == 'push'
       && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: ${{ vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 5
     permissions:
       contents: write
     steps:
       - name: Checkout default branch
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -294,28 +425,60 @@ jobs:
       && needs.setup.result == 'success'
       && needs.setup.outputs.publish == 'true'
       && (needs.sync-balena-yml.result == 'success' || needs.sync-balena-yml.result == 'skipped')
-    # Resolve runner: explicit `inputs.runs_on` override beats org-shared
-    # `vars.DEFAULT_RUNNER`; both fall through to the GitHub-hosted
-    # `ubuntu-latest` runner.
-    runs-on: ${{ inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # deploy-to-balena-action is amd64-only; never route this job to an
+    # arm64 runner via DEFAULT_RUNNER.  Callers that have a self-hosted
+    # amd64 runner can pass `inputs.runs_on` to override.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on, '[') && inputs.runs_on || format('"{0}"', inputs.runs_on || 'ubuntu-latest')) }}
     timeout-minutes: 60
     outputs:
       release_id: ${{ steps.deploy.outputs.release_id }}
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.sync-balena-yml.result == 'success' && github.event.repository.default_branch || github.sha }}
           persist-credentials: false
 
+      - name: Render balena.yml
+        if: inputs.generate_balena_yml
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/render-balena-yml@main
+        with:
+          out_path:               ${{ inputs.balena_yml_path }}
+          name:                   ${{ inputs.block_name }}
+          version:                ${{ needs.setup.outputs.version }}
+          block_type:             ${{ inputs.block_type }}
+          description:            ${{ inputs.block_description }}
+          post_provisioning:      ${{ inputs.block_post_provisioning }}
+          assets_repository_url:  ${{ inputs.block_assets_repository_url }}
+          assets_logo_url:        ${{ inputs.block_assets_logo_url }}
+          default_device_type:    ${{ inputs.block_default_device_type }}
+          supported_device_types: ${{ inputs.block_supported_device_types }}
+          architectures:          ${{ inputs.block_architectures }}
+          platforms:              ${{ inputs.block_platforms }}
+          image_ref:              ${{ inputs.block_image_ref }}
+
       - name: Publish to balenaCloud
         id: deploy
-        uses: balena-io/deploy-to-balena-action@60c9255a5329ffa07e0313b155491dc393a97fb9 # v2.1.0
+        uses: balena-io/deploy-to-balena-action@a1ad4ddddc982b50533e86d3fdc4731c5184f497 # v2.2.3
         with:
           balena_token: ${{ secrets.BALENA_API_TOKEN }}
           fleet: ${{ needs.setup.outputs.fleet }}
           source: ${{ inputs.source }}
-          cache: ${{ inputs.cache }}
+          # `force: true` overrides `cache: true` so the action
+          # always builds a fresh release even when a release already
+          # exists for this commit SHA. `layer_cache` is untouched so
+          # the rebuild still hits balena's layer cache and stays fast.
+          #
+          # NOTE: the obvious GHA ternary `inputs.force && false ||
+          # inputs.cache` LOOKS right but is broken -- the literal
+          # `false` in the true branch is itself falsy, so the `||`
+          # short-circuits past it and returns `inputs.cache` (default
+          # true) regardless of `inputs.force`. Use the inverted form
+          # `!inputs.force && inputs.cache` instead: when force is true
+          # it returns false; when force is false it returns whatever
+          # `inputs.cache` is set to. Both shapes are stringified by GHA
+          # to 'true'/'false' before being passed to the action.
+          cache: ${{ !inputs.force && inputs.cache }}
           layer_cache: ${{ inputs.layer_cache }}
           debug: ${{ inputs.debug }}
           finalize: ${{ inputs.draft && 'false' || 'true' }}

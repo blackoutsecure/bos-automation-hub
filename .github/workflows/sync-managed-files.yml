@@ -1,0 +1,191 @@
+name: Sync managed dotfiles
+
+# Reusable workflow that keeps standardized "managed" sections of
+# `.gitignore`, `.dockerignore`, `.editorconfig`, and `.gitattributes`
+# in sync with the canonical blocks defined in
+# `.github/actions/sync-managed-files/sync.py`.
+#
+# Modes:
+#   commit  (default) — write changes and push back to the calling
+#                       branch using the shared commit-and-push action.
+#   check             — exit non-zero if any managed section is drifted.
+#                       Use in PR CI to enforce that consumers commit
+#                       canonical blocks. Does NOT modify the workspace.
+#
+# Disabled services (any not listed in `services:`) are skipped
+# entirely; existing managed blocks for them are left untouched.
+
+on:
+  workflow_call:
+    inputs:
+      services:
+        description: >-
+          Newline or whitespace separated list of enabled services.
+          Known: `common`, `docker`, `balena`, `node`, `python`,
+          `lf_line_endings`.
+        required: true
+        type: string
+      mode:
+        description: '`commit` (write + push) or `check` (drift-check only).'
+        required: false
+        type: string
+        default: 'commit'
+      commit_message:
+        description: 'Commit message used when `mode: commit`.'
+        required: false
+        type: string
+        default: 'chore: sync managed dotfile sections'
+      git_user_name:
+        description: 'Git author name for the commit.'
+        required: false
+        type: string
+        default: 'github-actions[bot]'
+      git_user_email:
+        description: 'Git author email for the commit.'
+        required: false
+        type: string
+        default: '41898282+github-actions[bot]@users.noreply.github.com'
+      push_retries:
+        description: 'Retry attempts for the push (handles concurrent commits).'
+        required: false
+        type: number
+        default: 3
+      runs_on:
+        description: >-
+          Runner label for the job. Accepts a bare label (e.g. `ubuntu-latest`)
+          or a JSON-array string of labels (e.g. `["self-hosted","Linux","ARM64"]`).
+          Both shapes are parsed at runtime via `fromJSON` — a bare JSON-array
+          string substituted directly into `runs-on:` would otherwise be treated
+          by GHA's scheduler as a single literal label and the job would never
+          be picked up.
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      timeout_minutes:
+        description: 'Per-job timeout.'
+        required: false
+        type: number
+        default: 5
+    outputs:
+      changed:
+        description: '`true` when at least one file was modified (or would be modified in check mode).'
+        value: ${{ jobs.sync.outputs.changed }}
+      changed_files:
+        description: 'Newline-separated list of files modified (or that would be modified).'
+        value: ${{ jobs.sync.outputs.changed_files }}
+      commit_sha:
+        description: 'SHA of the new commit when one was created (empty otherwise).'
+        value: ${{ jobs.sync.outputs.commit_sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync managed dotfiles (${{ inputs.mode }})
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped inputs in `runs-on:`). The
+    # `inputs.runs_on` input accepts both bare labels and JSON-array
+    # strings; this expression parses whichever shape was passed.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on, '[') && inputs.runs_on || format('"{0}"', inputs.runs_on)) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    permissions:
+      contents: write   # required for `mode: commit`; harmless for `mode: check`
+    outputs:
+      changed: ${{ steps.sync.outputs.changed }}
+      changed_files: ${{ steps.sync.outputs.changed_files }}
+      commit_sha: ${{ steps.commit.outputs.commit_sha }}
+
+    steps:
+      - name: Preflight
+        env:
+          MODE: ${{ inputs.mode }}
+          PUSH_RETRIES: ${{ inputs.push_retries }}
+          COMMIT_MESSAGE: ${{ inputs.commit_message }}
+          GIT_USER_NAME: ${{ inputs.git_user_name }}
+          GIT_USER_EMAIL: ${{ inputs.git_user_email }}
+        run: |
+          set -euo pipefail
+          fail() { echo "ERROR: $*" >&2; exit 1; }
+
+          case "${MODE}" in
+            commit|check) ;;
+            *) fail "input 'mode' must be 'commit' or 'check' (got: '${MODE}')" ;;
+          esac
+
+          case "${PUSH_RETRIES}" in
+            ''|*[!0-9]*) fail "input 'push_retries' must be an integer 1-10 (got: '${PUSH_RETRIES}')" ;;
+          esac
+          if [ "${PUSH_RETRIES}" -lt 1 ] || [ "${PUSH_RETRIES}" -gt 10 ]; then
+            fail "input 'push_retries' must be in 1-10 (got: ${PUSH_RETRIES})"
+          fi
+
+          case "${COMMIT_MESSAGE}" in
+            '') fail "input 'commit_message' must be non-empty" ;;
+            *$'\n'*) fail "input 'commit_message' must be single-line" ;;
+          esac
+          case "${GIT_USER_NAME}" in
+            ''|*$'\n'*) fail "input 'git_user_name' is required and must be single-line" ;;
+          esac
+          case "${GIT_USER_EMAIL}" in
+            ''|*$'\n'*) fail "input 'git_user_email' is required and must be single-line" ;;
+          esac
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # `persist-credentials: true` so commit-and-push can use the
+          # default `GITHUB_TOKEN`. The workflow only needs `contents:
+          # write`, which the caller scopes via the `permissions:` block
+          # on its calling job.
+          persist-credentials: true
+          fetch-depth: 0   # full history so the rebase-retry in commit-and-push works
+
+      - name: Sync managed sections
+        id: sync
+        uses: blackoutsecure/bos-automation-hub/.github/actions/sync-managed-files@main
+        with:
+          services: ${{ inputs.services }}
+          fail_on_drift: ${{ inputs.mode == 'check' }}
+
+      - name: Commit and push
+        id: commit
+        if: inputs.mode == 'commit' && steps.sync.outputs.changed == 'true'
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/commit-and-push@main
+        with:
+          files: ${{ steps.sync.outputs.changed_files }}
+          message: ${{ inputs.commit_message }}
+          git_user_name: ${{ inputs.git_user_name }}
+          git_user_email: ${{ inputs.git_user_email }}
+          push_retries: ${{ inputs.push_retries }}
+
+      - name: Job summary
+        if: always()
+        env:
+          MODE: ${{ inputs.mode }}
+          CHANGED: ${{ steps.sync.outputs.changed }}
+          CHANGED_FILES: ${{ steps.sync.outputs.changed_files }}
+          COMMIT_SHA: ${{ steps.commit.outputs.commit_sha }}
+          SERVICES: ${{ inputs.services }}
+        run: |
+          {
+            echo "## Sync managed dotfiles"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Mode      | \`${MODE}\` |"
+            echo "| Services  | \`$(printf '%s' "${SERVICES}" | tr '\n' ' ' | sed 's/  */ /g')\` |"
+            echo "| Changed   | \`${CHANGED:-false}\` |"
+            if [ -n "${COMMIT_SHA:-}" ]; then
+              echo "| Commit    | \`${COMMIT_SHA}\` |"
+            fi
+            echo ""
+            if [ "${CHANGED:-false}" = "true" ]; then
+              echo "### Files"
+              echo ""
+              while IFS= read -r f || [ -n "${f}" ]; do
+                [ -z "${f}" ] && continue
+                echo "- \`${f}\`"
+              done <<< "${CHANGED_FILES}"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

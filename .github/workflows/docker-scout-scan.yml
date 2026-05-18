@@ -142,8 +142,11 @@ name: Docker Scout Scan (reusable)
       runs_on:
         description: >-
           Optional runner override. Empty resolves from the org-shared
-          `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Pass a
-          literal label or JSON-array string to force a runner.
+          `vars.RUNNER_X64` (fallback `ubuntu-latest`). Accepts either
+          a bare label (e.g. `ubuntu-latest`) or a JSON-array string of
+          labels (e.g. `["self-hosted","Linux","ARM64"]`); both shapes are
+          parsed at runtime via `fromJSON` so GHA sees a real label list
+          rather than a single 35-character "label".
         required: false
         type: string
         default: ''
@@ -180,7 +183,9 @@ concurrency:
 jobs:
   scout:
     name: Docker Scout
-    runs-on: ${{ inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
+    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
+    # rationale (JSON-array-shaped vars/inputs in `runs-on:`).
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.RUNNER_X64, '[') && (inputs.runs_on || vars.RUNNER_X64) || format('"{0}"', inputs.runs_on || vars.RUNNER_X64 || 'ubuntu-latest')) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     permissions:
       contents: read
@@ -192,7 +197,7 @@ jobs:
       sarif_file: ${{ steps.scout.outputs.sarif_file }}
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 

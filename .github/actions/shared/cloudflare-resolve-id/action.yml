@@ -1,0 +1,61 @@
+name: Validate Cloudflare 32-char hex ID
+description: >-
+  Shape validator for any Cloudflare 32-char lowercase hex identifier
+  (account ID, zone ID, ...). Prefers `value` over `fallback`, strips
+  whitespace, asserts `^[0-9a-f]{32}$`. Does NOT mask the value:
+  Cloudflare account/zone IDs are public identifiers, and masking
+  blocks downstream `GITHUB_OUTPUT` passthrough.
+
+inputs:
+  value:
+    description: >-
+      Preferred source of the ID, typically `vars.CLOUDFLARE_<KIND>_ID`.
+    required: false
+    default: ''
+  fallback:
+    description: >-
+      Back-compat source, typically `secrets.CLOUDFLARE_<KIND>_ID`.
+      Used only when `value` is empty. Secret values are auto-masked
+      by the runner, which prevents downstream `GITHUB_OUTPUT` reads.
+    required: false
+    default: ''
+  kind:
+    description: >-
+      Short label for diagnostics (e.g. `zone`, `account`). Lowercase
+      letters and hyphens only, up to 32 chars.
+    required: false
+    default: 'id'
+
+outputs:
+  value:
+    description: 'Validated 32-char lowercase hex ID.'
+    value: ${{ steps.resolve.outputs.value }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        INPUT_VALUE: ${{ inputs.value }}
+        FALLBACK_VALUE: ${{ inputs.fallback }}
+        KIND: ${{ inputs.kind }}
+      run: |
+        set -euo pipefail
+
+        if ! printf '%s' "${KIND}" | grep -Eq '^[a-z][a-z-]{0,31}$'; then
+          echo "ERROR: input 'kind' must be lowercase letters/hyphens, 1-32 chars (got '${KIND}')" >&2
+          exit 1
+        fi
+
+        ID="$(printf '%s' "${INPUT_VALUE:-${FALLBACK_VALUE}}" | tr -d '[:space:]')"
+        if [ -z "${ID}" ]; then
+          echo "ERROR: no Cloudflare ${KIND} ID supplied (set 'value' or 'fallback')" >&2
+          exit 1
+        fi
+        if ! printf '%s' "${ID}" | grep -Eq '^[0-9a-f]{32}$'; then
+          echo "ERROR: Cloudflare ${KIND} ID must be a 32-char lowercase hex string" >&2
+          exit 1
+        fi
+
+        echo "value=${ID}" >> "${GITHUB_OUTPUT}"

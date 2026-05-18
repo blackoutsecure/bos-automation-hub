@@ -1,0 +1,66 @@
+name: Sync managed dotfiles
+description: >-
+  Ensure standardized "managed" sections exist in well-known dotfiles
+  (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`) for
+  each enabled service. Content between the `>>> bos-automation-hub:<svc>
+  >>>` / `<<< bos-automation-hub:<svc> <<<` markers is kept in sync with
+  the canonical blocks defined in `sync.py`. Everything outside the
+  markers is left untouched. Disabled services are skipped entirely —
+  existing blocks for them are NOT removed.
+
+inputs:
+  services:
+    description: >-
+      Newline- or whitespace-separated list of enabled services. Known
+      values: `common`, `docker`, `balena`, `node`, `python`,
+      `lf_line_endings`. Unknown values fail the action.
+    required: true
+  dry_run:
+    description: >-
+      When `true`, prints the proposed diff but does not write files.
+      Useful for PR drift-check jobs.
+    required: false
+    default: 'false'
+  fail_on_drift:
+    description: >-
+      When `true`, exits non-zero if any file would change. Implies
+      `dry_run: true`. Use this in PR CI to enforce that consumers
+      commit the canonical blocks.
+    required: false
+    default: 'false'
+
+outputs:
+  changed:
+    description: '`true` when at least one file was modified (or would be modified, in dry-run/check mode).'
+    value: ${{ steps.sync.outputs.changed }}
+  changed_files:
+    description: 'Newline-separated list of files modified (or that would be modified).'
+    value: ${{ steps.sync.outputs.changed_files }}
+
+runs:
+  using: composite
+  steps:
+    - id: sync
+      shell: bash
+      env:
+        SERVICES: ${{ inputs.services }}
+        DRY_RUN: ${{ inputs.dry_run }}
+        FAIL_ON_DRIFT: ${{ inputs.fail_on_drift }}
+      run: |
+        set -euo pipefail
+        die() { echo "ERROR: $*" >&2; exit 1; }
+
+        case "${DRY_RUN}" in
+          true|false) ;;
+          *) die "input 'dry_run' must be 'true' or 'false' (got: '${DRY_RUN}')" ;;
+        esac
+        case "${FAIL_ON_DRIFT}" in
+          true|false) ;;
+          *) die "input 'fail_on_drift' must be 'true' or 'false' (got: '${FAIL_ON_DRIFT}')" ;;
+        esac
+
+        if [ -z "${SERVICES//[[:space:]]/}" ]; then
+          die "input 'services' is required and must list at least one service"
+        fi
+
+        python3 "${GITHUB_ACTION_PATH}/sync.py"

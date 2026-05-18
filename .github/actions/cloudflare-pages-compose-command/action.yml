@@ -1,8 +1,10 @@
 name: Compose wrangler pages deploy command
 description: >-
   Build the argv for `wrangler pages deploy` from validated inputs and emit
-  it as a single shell-quoted string for the `command:` input of
-  `cloudflare/wrangler-action`.
+  it as a single whitespace-separated string for the `command:` input of
+  `cloudflare/wrangler-action`. As of wrangler-action v4 the `command:`
+  input is tokenized on whitespace and passed as argv (it is NOT shell-
+  eval'd), so individual argument values MUST NOT contain whitespace.
 
 inputs:
   deploy_dir:
@@ -28,7 +30,7 @@ inputs:
 
 outputs:
   command:
-    description: 'Shell-quoted argv string starting with `pages deploy`.'
+    description: 'Whitespace-separated argv string starting with `pages deploy`.'
     value: ${{ steps.compose.outputs.command }}
 
 runs:
@@ -65,6 +67,17 @@ runs:
               exit 1 ;;
           esac
         fi
+        if [ -n "${COMMIT_MESSAGE}" ]; then
+          # wrangler-action v4 tokenizes `command:` on whitespace, so a
+          # commit message containing spaces would shred into multiple
+          # bogus argv tokens. Reject up front with a clear message.
+          case "${COMMIT_MESSAGE}" in
+            *$'\n'*|*$'\r'*|*$'\t'*|*' '*)
+              echo "ERROR: commit_message must not contain whitespace under wrangler-action v4 (got '${COMMIT_MESSAGE}')" >&2
+              echo "       Use hyphens or omit the override and let wrangler infer the commit message from git." >&2
+              exit 1 ;;
+          esac
+        fi
 
         set --
         set -- "$@" pages deploy "${DEPLOY_DIR}"
@@ -89,14 +102,24 @@ runs:
           done <<< "${EXTRA_ARGS}"
         fi
 
-        # Render argv as a single shell-quoted string (POSIX single-quote
-        # escape: ' -> '\''). wrangler-action passes this through
-        # `eval set --`, so quoting MUST round-trip cleanly.
-        CMD=""
+        # Defence-in-depth: refuse to emit an argv token that contains
+        # whitespace. wrangler-action v4 tokenizes `command:` on
+        # whitespace (no shell, no quoting), so any whitespace inside a
+        # token would silently corrupt the wrangler invocation.
         for a in "$@"; do
-          q=$(printf "%s" "$a" | sed "s/'/'\\\\''/g")
-          CMD="${CMD} '${q}'"
+          case "${a}" in
+            *$'\n'*|*$'\r'*|*$'\t'*|*' '*)
+              echo "ERROR: composed argv token contains whitespace, which wrangler-action v4 cannot pass through (token: '${a}')" >&2
+              exit 1 ;;
+          esac
         done
-        CMD="${CMD# }"
+
+        # Render argv as a single space-separated string. wrangler-action
+        # v4 does `getInput("command").split(/\s+/)` (or equivalent) and
+        # spawns wrangler with the resulting token array directly — NO
+        # shell, NO quote stripping. Quoting tokens here (as v3 required)
+        # would leave the quote characters embedded in the values and
+        # produce `Unknown arguments: 'pages', 'deploy', ...`.
+        CMD="$*"
         echo "command=${CMD}"
         echo "command=${CMD}" >> "${GITHUB_OUTPUT}"
