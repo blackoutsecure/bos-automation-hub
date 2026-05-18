@@ -27,6 +27,18 @@ name: Docker Build and Push (reusable)
         required: false
         type: string
         default: ''
+      force:
+        description: >-
+          Force a fresh build by passing `no-cache: true` to docker/build-push-action
+          on the matrix build step. All layer cache (GHA `type=gha`) is bypassed and
+          every layer is re-executed from scratch. Use when the source SHA is
+          unchanged but you need fresh layer outputs (e.g. to pick up newer base
+          image patches, or to guarantee a new layer-digest stack). Scout's
+          local-load scan steps still hit GHA cache for speed — only the published
+          matrix build is uncached.
+        required: false
+        type: boolean
+        default: false
       image_version:
         description: 'Explicit image version tag. Overrides auto-resolved version when set.'
         required: false
@@ -605,6 +617,10 @@ jobs:
           file: ${{ inputs.dockerfile }}
           platforms: ${{ steps.platform.outputs.value }}
           pull: true
+          # `force: true` => bypass all build cache (GHA layer cache + base image
+          # layer reuse) so every layer is re-executed from scratch. Guarantees
+          # a fresh layer-digest stack for the published manifest.
+          no-cache: ${{ inputs.force }}
           provenance: false
           sbom: false
           cache-from: type=gha,scope=${{ matrix.arch }}

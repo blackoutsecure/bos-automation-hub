@@ -197,6 +197,16 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: boolean
         default: true
+      docker_force:
+        description: >-
+          Force a fresh docker build by passing `no-cache: true` to
+          docker/build-push-action. Bypasses GHA layer cache so every layer
+          re-executes from scratch. Pair with `balena_force: true` when you
+          want a forced rebuild to actually reach devices (otherwise balena
+          will reuse the previous release for the same source SHA).
+        required: false
+        type: boolean
+        default: false
 
       # ----- Release pipeline: Docker Scout (forwarded to release.yml) -----
       docker_enable_scout:
@@ -806,6 +816,7 @@ jobs:
       docker_latest:                   ${{ inputs.docker_latest }}
       docker_multi_arch:               ${{ inputs.docker_multi_arch }}
       docker_update_description:       ${{ inputs.docker_update_description }}
+      docker_force:                    ${{ inputs.docker_force }}
       docker_enable_scout:             ${{ inputs.docker_enable_scout }}
       docker_scout_command:            ${{ inputs.docker_scout_command }}
       docker_scout_severities:         ${{ inputs.docker_scout_severities }}

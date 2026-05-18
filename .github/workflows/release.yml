@@ -85,6 +85,15 @@ name: Release pipeline (reusable meta-workflow)
         required: false
         type: boolean
         default: true
+      docker_force:
+        description: >-
+          Force a fresh docker build by passing `no-cache: true` to
+          docker/build-push-action. Bypasses GHA layer cache; every layer
+          re-executed from scratch. Use when the source SHA is unchanged but
+          you need fresh layers (e.g. to pick up newer base image patches).
+        required: false
+        type: boolean
+        default: false
 
       # ----- Docker Scout (forwarded to docker-build-push.yml) -------------
       docker_enable_scout:
@@ -411,6 +420,7 @@ jobs:
       dockerhub_namespace:       ${{ inputs.dockerhub_namespace }}
       image_version:             ${{ needs.resolve.outputs.version }}
       push:                      'true'
+      force:                     ${{ inputs.docker_force }}
       latest:                    ${{ inputs.docker_latest }}
       multi_arch:                ${{ inputs.docker_multi_arch }}
       extra_tags:                ${{ inputs.docker_extra_tags }}
