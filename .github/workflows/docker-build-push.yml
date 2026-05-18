@@ -12,6 +12,11 @@ name: Docker Build and Push (reusable)
         required: false
         type: string
         default: ./Dockerfile
+      build_target:
+        description: 'Optional Dockerfile stage target to build.'
+        required: false
+        type: string
+        default: ''
       build_context:
         description: 'Docker build context.'
         required: false
@@ -414,11 +419,20 @@ jobs:
         if: inputs.auto_resolve_version
         env:
           DOCKERFILE: ${{ inputs.dockerfile }}
+          BUILD_TARGET: ${{ inputs.build_target }}
           BUILD_CONTEXT: ${{ inputs.build_context }}
         run: |
           set -euo pipefail
           [ -d "${BUILD_CONTEXT}" ] || { echo "ERROR: build_context '${BUILD_CONTEXT}' does not exist" >&2; exit 1; }
           [ -f "${DOCKERFILE}" ]    || { echo "ERROR: dockerfile '${DOCKERFILE}' not found"           >&2; exit 1; }
+          if [ -n "${BUILD_TARGET}" ]; then
+            case "${BUILD_TARGET}" in
+              *[$'\n\r\t ']* )
+                echo "ERROR: build_target contains whitespace/newlines: '${BUILD_TARGET}'" >&2
+                exit 1
+                ;;
+            esac
+          fi
 
       - name: Resolve image tags
         id: tags
@@ -588,6 +602,7 @@ jobs:
         with:
           context: ${{ inputs.build_context }}
           file: ${{ inputs.dockerfile }}
+          target: ${{ inputs.build_target }}
           platforms: ${{ steps.platform.outputs.value }}
           pull: true
           provenance: false
@@ -770,6 +785,7 @@ jobs:
         with:
           context: ${{ inputs.build_context }}
           file: ${{ inputs.dockerfile }}
+          target: ${{ inputs.build_target }}
           # Scout indexes a single architecture per scan; the matrix
           # build covers arm64 on its own runner.
           platforms: linux/amd64
