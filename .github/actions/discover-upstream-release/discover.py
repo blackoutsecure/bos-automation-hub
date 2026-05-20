@@ -184,6 +184,25 @@ def _strip_v(version: str, strip: bool) -> str:
     return version[1:] if strip and version.startswith("v") else version
 
 
+# Accepts X, X.Y, or X.Y.Z (optionally with SemVer pre-release / build suffix)
+# and pads short forms to X.Y.Z so they pass the strict-SemVer gate enforced
+# by downstream release.yml (`^v?[0-9]+\.[0-9]+\.[0-9]+(-...)?$`). Common in
+# Debian-packaged upstreams that ship as `8.1` / `11.0` rather than `8.1.0`.
+_SHORT_SEMVER_RE = re.compile(
+    r"^(?P<base>\d+(?:\.\d+){0,2})(?P<suffix>[-+][0-9A-Za-z.-]+)?$"
+)
+
+
+def _normalize_semver(version: str) -> str:
+    m = _SHORT_SEMVER_RE.match(version)
+    if not m:
+        return version
+    parts = m["base"].split(".")
+    while len(parts) < 3:
+        parts.append("0")
+    return ".".join(parts) + (m["suffix"] or "")
+
+
 def provider_github_release(env: dict[str, str]) -> dict[str, Any]:
     repo = _require("UPSTREAM_REPO", env["UPSTREAM_REPO"])
     _validate_owner_repo(repo)
@@ -228,15 +247,37 @@ def provider_github_branch_file(env: dict[str, str]) -> dict[str, Any]:
     status, body = http_get(url)
     if status >= 400:
         die(f"could not read {url} (HTTP {status})")
-    version_raw = body.decode("utf-8", "replace").strip()
-    if not version_raw:
-        die(f"empty version string at {url}")
+    body_text = body.decode("utf-8", "replace")
 
-    # SemVer-validate here — the latest_release path doesn't, because upstream
-    # Release tags are operator-controlled. A non-SemVer string here would
-    # otherwise be rejected mid-pipeline by `release.yml` with a confusing error.
-    if not re.match(r"^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$", version_raw):
-        die(f"version {version_raw!r} at {url} is not SemVer")
+    # Optional regex extraction. When the upstream ships its version inside a
+    # structured file (e.g. Debian `debian/changelog` with `pkg (X.Y) stable`),
+    # the caller supplies VERSION_REGEX whose first capture group is the
+    # version. Otherwise the entire trimmed file body is treated as the
+    # version string (the original `version`-file convention).
+    regex_src = env["VERSION_REGEX"]
+    if regex_src:
+        try:
+            regex = re.compile(regex_src)
+        except re.error as exc:
+            die(f"input 'version_regex' is not a valid regex: {exc}")
+        if regex.groups < 1:
+            die("input 'version_regex' must have at least one capture group")
+        m = regex.search(body_text)
+        if not m:
+            die(f"regex {regex_src!r} did not match body of {url}")
+        version_raw = m.group(1).strip()
+        if not version_raw:
+            die(f"capture group from {url} is empty")
+    else:
+        version_raw = body_text.strip()
+        if not version_raw:
+            die(f"empty version string at {url}")
+
+    # Accept short SemVer forms (X, X.Y) too — they're padded below to X.Y.Z
+    # so downstream `release.yml`'s strict-SemVer gate accepts them. Common in
+    # Debian-packaged upstreams (flightaware/dump978 ships `(11.0)` etc.).
+    if not re.match(r"^[0-9]+(\.[0-9]+){0,2}([-+][0-9A-Za-z.-]+)?$", version_raw):
+        die(f"version {version_raw!r} at {url} is not SemVer-shaped (X[.Y[.Z]][-suffix])")
 
     # Resolve the branch HEAD commit via the GitHub API (avoids a shell-out
     # to `git ls-remote` and reuses GH_TOKEN auth).
@@ -245,7 +286,7 @@ def provider_github_branch_file(env: dict[str, str]) -> dict[str, Any]:
     if not commit:
         die(f"branch {branch!r} not found in {repo}")
 
-    version = _strip_v(version_raw, env["STRIP_V_PREFIX"] == "true")
+    version = _normalize_semver(_strip_v(version_raw, env["STRIP_V_PREFIX"] == "true"))
     # Byte-stable schema preserved from the legacy `branch_head` mode.
     tracker = {"repo": repo, "source": "branch_head",
                "branch": branch, "version": version, "commit": commit}
@@ -419,7 +460,7 @@ def provider_generic_url(env: dict[str, str]) -> dict[str, Any]:
     if not raw:
         die(f"capture group from {url} is empty")
 
-    version = _strip_v(raw, env["STRIP_V_PREFIX"] == "true")
+    version = _normalize_semver(_strip_v(raw, env["STRIP_V_PREFIX"] == "true"))
     tracker = {"url": url, "source": "generic_url", "version": version}
     return {
         "tag": version, "version": version, "commit": "",

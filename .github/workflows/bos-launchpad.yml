@@ -380,7 +380,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           empty, the renderer derives the list automatically from the
           published docker image (`needs.docker.outputs.image` +
           version) and falls back to the workflow-level `platforms`
-          input (which already defaults to `linux/amd64,linux/arm64`).
+          input (which already defaults to `linux/amd664,linux/arm64`).
           Set this only to force a specific list. Used only when
           `balena_generate_yml: true`.
         required: false

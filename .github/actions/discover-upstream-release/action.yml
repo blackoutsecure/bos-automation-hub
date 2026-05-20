@@ -36,7 +36,9 @@ inputs:
   version_file_path:
     description: >-
       Repo-relative path inside `upstream_branch` whose raw contents are the
-      version string. Used only for `github_branch_file`.
+      version string. Used only for `github_branch_file`. Pair with
+      `version_regex` to extract the version from a structured file (e.g.
+      Debian `debian/changelog`).
     required: false
     default: 'version'
   image_ref:
@@ -58,8 +60,10 @@ inputs:
     default: ''
   version_regex:
     description: >-
-      Python regex applied to the fetched body for `generic_url`. The first
-      capture group is the version. Required for `generic_url`.
+      Python regex applied to the fetched body. The first capture group is
+      the version. Required for `generic_url`; optional for
+      `github_branch_file` (when unset, the whole trimmed file body is the
+      version). Short SemVer (`X`, `X.Y`) is padded to `X.Y.Z`.
     required: false
     default: ''
   tag_pattern:
