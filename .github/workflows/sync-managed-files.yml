@@ -3,17 +3,21 @@ name: Sync managed dotfiles
 # Reusable workflow that keeps standardized "managed" sections of
 # `.gitignore`, `.dockerignore`, `.editorconfig`, and `.gitattributes`
 # in sync with the canonical blocks defined in
-# `.github/actions/sync-managed-files/sync.py`.
+# `.github/actions/sync-managed-files/sync.py`, AND delivers canonical
+# whole files (e.g. `root/usr/local/bin/log-functions.sh`) for
+# whole-file services such as `logger`.
 #
 # Modes:
 #   commit  (default) — write changes and push back to the calling
 #                       branch using the shared commit-and-push action.
-#   check             — exit non-zero if any managed section is drifted.
-#                       Use in PR CI to enforce that consumers commit
-#                       canonical blocks. Does NOT modify the workspace.
+#   check             — exit non-zero if any managed section or file
+#                       is drifted. Use in PR CI to enforce that
+#                       consumers commit canonical content. Does NOT
+#                       modify the workspace.
 #
 # Disabled services (any not listed in `services:`) are skipped
-# entirely; existing managed blocks for them are left untouched.
+# entirely; existing managed blocks AND existing whole-file targets
+# for them are left untouched.
 
 on:
   workflow_call:
@@ -22,7 +26,7 @@ on:
         description: >-
           Newline or whitespace separated list of enabled services.
           Known: `common`, `docker`, `balena`, `node`, `python`,
-          `lf_line_endings`.
+          `lf_line_endings`, `logger`.
         required: true
         type: string
       mode:

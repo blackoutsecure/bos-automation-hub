@@ -126,7 +126,8 @@ preflight on the source variable.
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
 | [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Launchpad). **Container mode:** composes `monitor-upstream-release.yml` → `release.yml` to detect a new upstream release and run the full Docker → Balena → GitHub Release pipeline against the new version. **Static-site mode:** runs `deploy-cloudflare-pages.yml` on every push for continuous Cloudflare Pages deploys. Both modes can run side-by-side in the same call. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
-| [.github/workflows/sync-managed-files.yml](.github/workflows/sync-managed-files.yml) | Reusable workflow | Keep standardized "managed" sections of `.gitignore`, `.dockerignore`, `.editorconfig`, and `.gitattributes` in sync with canonical blocks. Pluggable per-service: `common`, `docker`, `balena`, `node`, `python`, `lf_line_endings`. Two modes: `commit` (write + push) and `check` (PR drift-check). Disabled services are skipped entirely — their existing blocks are never removed. |
+| [.github/workflows/sync-managed-files.yml](.github/workflows/sync-managed-files.yml) | Reusable workflow | Keep standardized "managed" sections of `.gitignore`, `.dockerignore`, `.editorconfig`, and `.gitattributes` — AND canonical whole files like `root/usr/local/bin/log-functions.sh` — in sync with hub-owned content. Pluggable per-service: section services (`common`, `docker`, `balena`, `node`, `python`, `lf_line_endings`) and whole-file services (`logger`). Two modes: `commit` (write + push) and `check` (PR drift-check). Disabled services are skipped entirely — their existing blocks / files are never touched. |
+| [.github/workflows/nginx-config-validate.yml](.github/workflows/nginx-config-validate.yml) | Reusable workflow | PR / push CI gate for repos with an in-repo nginx config tree (e.g. `docker-tar1090`, `docker-graphs1090`, `docker-dump978`). Renders `*.conf.template` files via `envsubst` with caller-supplied placeholder values and runs `nginx -t -c /etc/nginx/nginx.conf` inside the official `nginx:alpine` image. Catches syntax errors, unresolved directives, and missing `include` targets at merge time instead of at container start. |
 | [.github/actions/shared/resolve-docker-image-tags/action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
 | [.github/actions/shared/resolve-release-context/action.yml](.github/actions/shared/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
 | [.github/actions/shared/resolve-upstream-version/action.yml](.github/actions/shared/resolve-upstream-version/action.yml) | Composite action | Shallow-clones an upstream git repo at a ref and resolves a version (file → `git describe` → short SHA), commit SHA, and commit date. |
@@ -137,7 +138,8 @@ preflight on the source variable.
 | [.github/actions/shared/render-balena-yml/action.yml](.github/actions/shared/render-balena-yml/action.yml) | Composite action | Renders `balena.yml` from scalar inputs (PyYAML `safe_dump`, path-traversal + HTTPS-URL + default-vs-supported-device-type validation, defensive re-parse). Shared by `balena-block-publish.yml` (default `type: sw.block`) and `balena-fleet-deploy.yml` (default `type: sw.application`, `emit_assets: false` for the legacy per-target omit-assets behavior). |
 | [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
 | [.github/actions/discover-upstream-release/action.yml](.github/actions/discover-upstream-release/action.yml) | Composite action | Pluggable upstream-version discovery (stdlib-only Python). Sources: `github_release`, `github_branch_file`, `github_tags`, `container_image`, `npm`, `pypi`, `generic_url`. Writes a byte-stable tracker JSON file and reports whether the version changed. Used by `monitor-upstream-release.yml`. |
-| [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks for each enabled service in `.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
+| [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`) AND writes canonical whole files (`root/usr/local/bin/log-functions.sh` via the `logger` service) for each enabled service. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
+| [.github/actions/nginx-config-validate/action.yml](.github/actions/nginx-config-validate/action.yml) | Composite action | Spins up the official `nginx` image, renders the consumer repo's `*.conf.template` files via `envsubst`, and runs `nginx -t -c /etc/nginx/nginx.conf`. Used by `nginx-config-validate.yml`. Positional-key envsubst (only listed keys are substituted) so nginx-native variables like `$remote_addr` pass through unchanged. |
 | [.github/actions/shared/commit-and-push/action.yml](.github/actions/shared/commit-and-push/action.yml) | Composite action | Stage files, commit, and push to the current branch with rebase-retry on concurrent commits. Single-line message + author validation. Exits cleanly with `committed=false` when nothing is staged. Used by `monitor-upstream-release.yml` and `sync-managed-files.yml`. |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
 | [.github/workflows/openwrt-readsb-wiedehopf-bump.yml](.github/workflows/openwrt-readsb-wiedehopf-bump.yml) | Scheduled automation | Tracks new `wiedehopf/readsb` releases and proposes them upstream as a cross-repo PR to `openwrt/packages` (bumps `PKG_VERSION`/`PKG_HASH`, resets `PKG_RELEASE`) via a bot-owned fork. |
@@ -1735,32 +1737,43 @@ appended after them and can override them or add additional keys.
 
 Keep the dotfiles every consumer repo cares about — `.gitignore`,
 `.dockerignore`, `.editorconfig`, optionally `.gitattributes` — in
-sync with canonical content defined once in the hub. Each file is
-managed by **section**, not whole-file: only the text between
+sync with canonical content defined once in the hub. Two delivery
+modes are supported, picked per-service in [`sync.py`](.github/actions/sync-managed-files/sync.py):
 
-```
-# >>> bos-automation-hub:<service> >>>
-…
-# <<< bos-automation-hub:<service> <<<
-```
+* **Section mode** (default for dotfiles) — only the text between
 
-is touched. Everything outside those markers is preserved verbatim,
-including any user-authored rules in the same file.
+  ```
+  # >>> bos-automation-hub:<service> >>>
+  …
+  # <<< bos-automation-hub:<service> <<<
+  ```
+
+  is touched. Everything outside those markers is preserved verbatim,
+  including any user-authored rules in the same file.
+
+* **Whole-file mode** (used by the `logger` service) — the target file
+  is overwritten outright with the canonical body, preceded by a
+  `# Managed by …` header comment so editors and `head` immediately
+  reveal the file is hub-owned. Use this when the entire file body is
+  authoritative (e.g. a shared shell library where there is no
+  meaningful per-consumer customization). A whole-file target may only
+  be claimed by one service, and may not also be a section target — a
+  conflict raises `RuntimeError` at sync time.
 
 ### Services
 
 Pass the services your repo uses; pass nothing for the rest. Skipped
-services are **not** removed from the file — they're simply ignored on
-this run.
+services are **not** removed — they're simply ignored on this run.
 
-| Service           | Files it contributes to                  | Block contents (summary) |
-|-------------------|------------------------------------------|--------------------------|
-| `common`          | `.gitignore`, `.editorconfig`            | OS / editor noise, `.env*` + private-key ignores, LF + 2-space defaults. |
-| `docker`          | `.dockerignore`                          | CI / git metadata, editor / OS noise, README / LICENSE / SECURITY.md, `.env*` and private keys. |
-| `balena`          | `.dockerignore`                          | `!balena.yml` re-include (the hub renders this file into the build context before `balena push`). |
-| `node`            | `.gitignore`, `.dockerignore`            | `node_modules/`, `npm-debug.log*`, etc. |
-| `python`          | `.gitignore`, `.dockerignore`            | `__pycache__/`, `.venv/`, `.pytest_cache/`, etc. |
-| `lf_line_endings` | `.gitattributes`                         | `* text=auto eol=lf` + binary-type marks. Opt-in (some repos legitimately need CRLF for Windows scripts). |
+| Service           | Mode        | Files it contributes to                        | Contents (summary) |
+|-------------------|-------------|------------------------------------------------|--------------------|
+| `common`          | section     | `.gitignore`, `.editorconfig`                  | OS / editor noise, `.env*` + private-key ignores, LF + 2-space defaults. |
+| `docker`          | section     | `.dockerignore`                                | CI / git metadata, editor / OS noise, README / LICENSE / SECURITY.md, `.env*` and private keys. |
+| `balena`          | section     | `.dockerignore`                                | `!balena.yml` re-include (the hub renders this file into the build context before `balena push`). |
+| `node`            | section     | `.gitignore`, `.dockerignore`                  | `node_modules/`, `npm-debug.log*`, etc. |
+| `python`          | section     | `.gitignore`, `.dockerignore`                  | `__pycache__/`, `.venv/`, `.pytest_cache/`, etc. |
+| `lf_line_endings` | section     | `.gitattributes`                               | `* text=auto eol=lf` + binary-type marks. Opt-in (some repos legitimately need CRLF for Windows scripts). |
+| `logger`          | whole-file  | `root/usr/local/bin/log-functions.sh`          | Canonical shared logging library for s6-overlay init / svc scripts. Emits `<RFC3339 UTC> <tag>[<level>]: <msg>`. Supports both `log_info "x"` (function-per-level, `SVC_NAME`) and `log info "x"` (generic dispatcher, `LOG_TAG`) APIs so existing consumers keep working unchanged. Includes `LOG_LEVEL` gating, `log_kv`, and `log_pipe_cmd`. |
 
 ### Modes
 
@@ -1824,13 +1837,23 @@ jobs:
       mode: check
 ```
 
-### Adding a new service block
+### Adding a new service
 
-Open
-[`sync.py`](.github/actions/sync-managed-files/sync.py), add the block
-constant, register it in `SERVICE_BLOCKS`, and add a row to the
-table above. The block must end with a newline so the close marker
-sits on its own line. Run the self-test in
+Open [`sync.py`](.github/actions/sync-managed-files/sync.py), then:
+
+* **Section service** — add the block constant, register it in
+  `SERVICE_BLOCKS`, and add a row to the table above. The block must
+  end with a newline so the close marker sits on its own line.
+
+* **Whole-file service** — add the canonical body as a Python
+  triple-quoted string (use a raw string `r"""…"""` if it contains
+  awk-style backslash escapes), register it in `SERVICE_FILES` under
+  the target repo-relative path, and add a row to the table above. A
+  whole-file path may only be claimed by one service — sync.py raises
+  `RuntimeError` at import time if a path is double-registered or
+  appears in both `SERVICE_BLOCKS` and `SERVICE_FILES`.
+
+In both cases run the action's self-test in
 [`.github/actions/sync-managed-files/`](.github/actions/sync-managed-files/)
 to confirm idempotency (a second run must produce zero drift).
 

@@ -1,0 +1,252 @@
+name: 'Validate nginx config'
+description: >-
+  Pre-merge `nginx -t` validation for an in-repo nginx config tree.
+
+  Mounts the repo's `nginx.conf` and `http.d/*.conf.template` files into
+  an official `nginx` container, renders each `*.conf.template` via
+  `envsubst` using the placeholder values supplied in `template_vars`,
+  and runs `nginx -t -c /etc/nginx/nginx.conf`. Catches syntax errors,
+  unresolved directives, and missing `include` targets at PR time
+  instead of at container start.
+
+  Why a container instead of installing nginx on the runner: the
+  repo's `nginx.conf` references package-managed paths
+  (`/etc/nginx/modules/*.conf`, `/etc/nginx/mime.types`) that exist
+  inside the official image and would otherwise need a host-side
+  `apt-get install nginx-light` + post-install fixup on every run.
+  Using the image is faster after the first pull (GHA caches layers)
+  and matches the runtime environment more closely.
+
+inputs:
+  config_path:
+    description: >-
+      Path to the repo's `nginx.conf` (relative to the workspace root,
+      no leading `./`). Mounted read-only into the validation container
+      at `/etc/nginx/nginx.conf`.
+    required: false
+    default: 'root/etc/nginx/nginx.conf'
+  templates_path:
+    description: >-
+      Path to a directory containing `*.conf.template` files (relative
+      to the workspace root, no leading `./`). Each `<name>.conf.template`
+      is rendered via `envsubst` into `<templates_target_dir>/<name>.conf`
+      inside the validation container. Empty or missing directory is
+      tolerated — only `nginx.conf` is validated in that case.
+    required: false
+    default: 'root/etc/nginx/http.d'
+  template_vars:
+    description: >-
+      Newline-separated `KEY=VALUE` pairs forwarded to `envsubst` when
+      rendering templates. Only the listed keys are substituted (we pass
+      a positional `${KEY}` list to `envsubst`), so unrelated `${...}`
+      strings in the template — e.g. nginx variables like `${remote_addr}`
+      — are left untouched. Values may not contain newlines or the `=` /
+      `$` characters (validated below).
+    required: false
+    default: ''
+  templates_target_dir:
+    description: >-
+      Directory inside the validation container where rendered templates
+      are written. Must match the `include` directive in `nginx.conf`.
+      Default matches the `/run/nginx/http.d/*.conf` convention used by
+      the BOS nginx images.
+    required: false
+    default: '/run/nginx/http.d'
+  nginx_image:
+    description: >-
+      Container image used for validation. Pin to a major + flavor
+      (e.g. `1.27-alpine`) to track the upstream image's `nginx -t`
+      semantics. Dependabot's `docker` ecosystem picks up bumps when
+      this action.yml is listed in the consumer's `dependabot.yml`
+      (the image ref is parsed by Dependabot's GitHub Actions ecosystem
+      scanner since v2.41+).
+    required: false
+    default: 'docker.io/library/nginx:1.27-alpine'
+
+outputs:
+  validated:
+    description: '`true` when `nginx -t` exits 0.'
+    value: ${{ steps.validate.outputs.validated }}
+
+runs:
+  using: composite
+  steps:
+    - id: validate
+      shell: bash
+      env:
+        CONFIG_PATH: ${{ inputs.config_path }}
+        TEMPLATES_PATH: ${{ inputs.templates_path }}
+        TEMPLATE_VARS: ${{ inputs.template_vars }}
+        TEMPLATES_TARGET_DIR: ${{ inputs.templates_target_dir }}
+        NGINX_IMAGE: ${{ inputs.nginx_image }}
+      run: |
+        set -euo pipefail
+        die() { echo "::error::nginx-config-validate: $*" >&2; exit 1; }
+
+        # ── Input shape validation ─────────────────────────────────────
+        case "${CONFIG_PATH}" in
+          '')        die "input 'config_path' must be non-empty" ;;
+          /*)        die "input 'config_path' must be repo-relative (got absolute: '${CONFIG_PATH}')" ;;
+          *..*)      die "input 'config_path' must not contain '..' (got: '${CONFIG_PATH}')" ;;
+        esac
+        case "${TEMPLATES_PATH}" in
+          /*)        die "input 'templates_path' must be repo-relative (got absolute: '${TEMPLATES_PATH}')" ;;
+          *..*)      die "input 'templates_path' must not contain '..' (got: '${TEMPLATES_PATH}')" ;;
+        esac
+        case "${TEMPLATES_TARGET_DIR}" in
+          /*)        ;;  # absolute is required for the in-container target
+          *)         die "input 'templates_target_dir' must be absolute (got: '${TEMPLATES_TARGET_DIR}')" ;;
+        esac
+        case "${NGINX_IMAGE}" in
+          ''|*$'\n'*) die "input 'nginx_image' must be a single-line non-empty image ref" ;;
+        esac
+
+        if [ ! -f "${CONFIG_PATH}" ]; then
+          die "config_path '${CONFIG_PATH}' does not exist or is not a file"
+        fi
+
+        # ── Parse template_vars into KEY list + KEY=VALUE -e args ─────
+        # envsubst with a positional list of names (`'${A} ${B}'`) only
+        # substitutes those names; everything else passes through. This
+        # avoids accidentally clobbering nginx's own `$remote_addr` etc.
+        var_names=()
+        docker_env_args=()
+        while IFS= read -r line; do
+          # Trim leading/trailing whitespace
+          line="${line#"${line%%[![:space:]]*}"}"
+          line="${line%"${line##*[![:space:]]}"}"
+          [ -z "${line}" ] && continue
+          case "${line}" in
+            '#'*) continue ;;  # allow shell-style comments
+          esac
+          case "${line}" in
+            *=*) ;;
+            *)   die "template_vars entry must be KEY=VALUE (got: '${line}')" ;;
+          esac
+          k="${line%%=*}"
+          v="${line#*=}"
+          case "${k}" in
+            ''|*[!A-Za-z0-9_]*)
+              die "template_vars KEY must match [A-Za-z0-9_]+ (got: '${k}')" ;;
+          esac
+          case "${k}" in
+            [0-9]*) die "template_vars KEY must not start with a digit (got: '${k}')" ;;
+          esac
+          # Reject newlines in values (would split envsubst's input across lines).
+          # Note: $'\n' is a literal newline; the value was read by a line-based
+          # `read` loop above, so any embedded newline already broke this entry —
+          # the check is here for defense-in-depth against future refactors.
+          case "${v}" in
+            *$'\n'*) die "template_vars value for '${k}' must not contain newlines" ;;
+          esac
+          var_names+=("\${${k}}")
+          docker_env_args+=(-e "${k}=${v}")
+        done <<< "${TEMPLATE_VARS}"
+
+        # Space-separated list of `${KEY}` tokens for `envsubst`.
+        envsubst_keys=""
+        if [ "${#var_names[@]}" -gt 0 ]; then
+          envsubst_keys="${var_names[*]}"
+        fi
+
+        echo "::group::nginx-config-validate: inputs"
+        echo "  config_path:          ${CONFIG_PATH}"
+        echo "  templates_path:       ${TEMPLATES_PATH}"
+        echo "  templates_target_dir: ${TEMPLATES_TARGET_DIR}"
+        echo "  nginx_image:          ${NGINX_IMAGE}"
+        if [ "${#var_names[@]}" -gt 0 ]; then
+          echo "  template_vars (keys): ${envsubst_keys}"
+        else
+          echo "  template_vars:        (none — templates rendered with empty substitutions)"
+        fi
+        echo "::endgroup::"
+
+        # ── Build docker run argv ──────────────────────────────────────
+        config_abs="$(cd "$(dirname "${CONFIG_PATH}")" && pwd)/$(basename "${CONFIG_PATH}")"
+        mount_args=(
+          -v "${config_abs}:/etc/nginx/nginx.conf:ro"
+        )
+
+        templates_mount=""
+        if [ -n "${TEMPLATES_PATH}" ] && [ -d "${TEMPLATES_PATH}" ]; then
+          templates_abs="$(cd "${TEMPLATES_PATH}" && pwd)"
+          # Count template files; if zero, skip the mount entirely.
+          # `find -maxdepth 1` to keep this non-recursive (matches runtime).
+          tmpl_count="$(find "${templates_abs}" -maxdepth 1 -type f -name '*.conf.template' | wc -l | tr -d '[:space:]')"
+          if [ "${tmpl_count}" -gt 0 ]; then
+            mount_args+=(-v "${templates_abs}:/templates:ro")
+            templates_mount="yes"
+            echo "nginx-config-validate: found ${tmpl_count} template(s) to render"
+          else
+            echo "nginx-config-validate: no *.conf.template files in '${TEMPLATES_PATH}' — skipping template render"
+          fi
+        else
+          echo "nginx-config-validate: templates_path '${TEMPLATES_PATH}' missing or empty — skipping template render"
+        fi
+
+        # ── Validation script run inside the container ─────────────────
+        # `envsubst` is shipped in the official nginx Debian/Alpine images
+        # as part of the `gettext-base` / `gettext` package and is already
+        # used at runtime by nginx's own /docker-entrypoint.d scripts.
+        in_container_script='
+        set -eu
+
+        # nginx.conf references these temp paths — create them so any
+        # post-`nginx -t` warnings about unwritable paths are suppressed.
+        mkdir -p /run/nginx /tmp/nginx-client-body /tmp/nginx-proxy-temp \
+                 /tmp/nginx-fastcgi-temp /tmp/nginx-uwsgi-temp /tmp/nginx-scgi-temp
+
+        if [ -n "${TEMPLATES_TARGET_DIR_IN:-}" ]; then
+          mkdir -p "${TEMPLATES_TARGET_DIR_IN}"
+        fi
+
+        if [ -d /templates ]; then
+          if ! command -v envsubst >/dev/null 2>&1; then
+            echo "::error::nginx-config-validate: envsubst missing from image ${NGINX_IMAGE_IN}" >&2
+            exit 2
+          fi
+          for tmpl in /templates/*.conf.template; do
+            [ -e "${tmpl}" ] || continue
+            out="${TEMPLATES_TARGET_DIR_IN}/$(basename "${tmpl%.template}")"
+            # Positional key list: only ${KEY} tokens listed in $ENVSUBST_KEYS_IN
+            # are substituted; everything else (e.g. nginx vars) passes through.
+            if [ -n "${ENVSUBST_KEYS_IN}" ]; then
+              # shellcheck disable=SC2016
+              envsubst "${ENVSUBST_KEYS_IN}" < "${tmpl}" > "${out}"
+            else
+              # No keys provided: copy unchanged so any unresolved ${VAR}
+              # surfaces clearly via the subsequent `nginx -t`.
+              cp "${tmpl}" "${out}"
+            fi
+            echo "rendered: ${tmpl} -> ${out}"
+          done
+        fi
+
+        echo "--- nginx -t ---"
+        nginx -t -c /etc/nginx/nginx.conf
+        '
+
+        docker_env_args+=(
+          -e "TEMPLATES_TARGET_DIR_IN=${TEMPLATES_TARGET_DIR}"
+          -e "ENVSUBST_KEYS_IN=${envsubst_keys}"
+          -e "NGINX_IMAGE_IN=${NGINX_IMAGE}"
+        )
+
+        # `--entrypoint sh` overrides the official image's
+        # docker-entrypoint.sh (which spawns nginx in the foreground).
+        echo "::group::nginx -t output"
+        if docker run --rm \
+            --entrypoint sh \
+            "${mount_args[@]}" \
+            "${docker_env_args[@]}" \
+            "${NGINX_IMAGE}" \
+            -c "${in_container_script}"; then
+          echo "::endgroup::"
+          echo "validated=true" >> "${GITHUB_OUTPUT}"
+          echo "nginx-config-validate: ✓ nginx -t passed"
+        else
+          rc=$?
+          echo "::endgroup::"
+          echo "validated=false" >> "${GITHUB_OUTPUT}"
+          die "nginx -t failed (exit ${rc}). See grouped output above. templates_mount=${templates_mount:-no}"
+        fi

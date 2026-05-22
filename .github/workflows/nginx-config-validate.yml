@@ -1,0 +1,104 @@
+# Reusable wrapper around `.github/actions/nginx-config-validate`. Each
+# consumer with an in-repo nginx config tree (e.g. docker-tar1090,
+# docker-graphs1090, docker-dump978) calls this in PR / push CI to catch
+# nginx syntax errors at merge time instead of at container start.
+#
+# Validates a single (config_path, templates_path) pair per call. For
+# repos with multiple nginx config trees, call this workflow N times
+# from one caller workflow (each call is one job).
+name: Validate nginx config
+
+on:
+  workflow_call:
+    inputs:
+      config_path:
+        description: >-
+          Repo-relative path to `nginx.conf`. Defaults to the BOS image
+          convention (`root/etc/nginx/nginx.conf`).
+        required: false
+        type: string
+        default: 'root/etc/nginx/nginx.conf'
+      templates_path:
+        description: >-
+          Repo-relative path to a directory of `*.conf.template` files.
+          Defaults to the BOS image convention (`root/etc/nginx/http.d`).
+          Set to an empty string to disable template rendering.
+        required: false
+        type: string
+        default: 'root/etc/nginx/http.d'
+      template_vars:
+        description: >-
+          Newline-separated `KEY=VALUE` pairs passed to `envsubst` when
+          rendering templates. Only the listed keys are substituted —
+          nginx's own `$remote_addr`, `$status`, etc. pass through
+          unchanged.
+        required: false
+        type: string
+        default: ''
+      templates_target_dir:
+        description: >-
+          Absolute path inside the validation container where rendered
+          templates land. Must match the `include` directive in
+          `nginx.conf`.
+        required: false
+        type: string
+        default: '/run/nginx/http.d'
+      nginx_image:
+        description: >-
+          Container image used for validation. Pin to a major +
+          distribution flavor (e.g. `1.27-alpine`) so Dependabot's
+          docker ecosystem can bump it.
+        required: false
+        type: string
+        default: 'docker.io/library/nginx:1.27-alpine'
+      runs_on:
+        description: >-
+          Runner label for the job. Accepts a bare label (e.g.
+          `ubuntu-latest`) or a JSON-array string of labels (e.g.
+          `["self-hosted","Linux","X64"]`). Both shapes are parsed at
+          runtime via `fromJSON`. Default is `ubuntu-latest` — this
+          workload is a single `docker run`; it gains nothing from
+          self-hosted unless the consumer has no internet egress on
+          GitHub-hosted runners.
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      timeout_minutes:
+        description: 'Per-job timeout.'
+        required: false
+        type: number
+        default: 5
+
+    outputs:
+      validated:
+        description: '`true` when `nginx -t` exited 0.'
+        value: ${{ jobs.validate.outputs.validated }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: nginx -t
+    # See sync-managed-files.yml / monitor-upstream-release.yml for the
+    # `fromJSON` + `startsWith` rationale.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on, '[') && inputs.runs_on || format('"{0}"', inputs.runs_on)) }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    outputs:
+      validated: ${{ steps.validate.outputs.validated }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate
+        id: validate
+        uses: blackoutsecure/bos-automation-hub/.github/actions/nginx-config-validate@main
+        with:
+          config_path:          ${{ inputs.config_path }}
+          templates_path:       ${{ inputs.templates_path }}
+          template_vars:        ${{ inputs.template_vars }}
+          templates_target_dir: ${{ inputs.templates_target_dir }}
+          nginx_image:          ${{ inputs.nginx_image }}

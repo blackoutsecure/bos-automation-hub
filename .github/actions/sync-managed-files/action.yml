@@ -2,18 +2,22 @@ name: Sync managed dotfiles
 description: >-
   Ensure standardized "managed" sections exist in well-known dotfiles
   (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`) for
-  each enabled service. Content between the `>>> bos-automation-hub:<svc>
+  each enabled service, AND deliver canonical whole files (e.g.
+  `root/usr/local/bin/log-functions.sh`) for whole-file services. For
+  section services, content between the `>>> bos-automation-hub:<svc>
   >>>` / `<<< bos-automation-hub:<svc> <<<` markers is kept in sync with
-  the canonical blocks defined in `sync.py`. Everything outside the
-  markers is left untouched. Disabled services are skipped entirely —
-  existing blocks for them are NOT removed.
+  the canonical blocks defined in `sync.py`; everything outside the
+  markers is left untouched. For whole-file services, the target file
+  is overwritten outright with the canonical body (preceded by a
+  hub-managed header comment). Disabled services are skipped entirely
+  — existing blocks / files for them are NOT touched.
 
 inputs:
   services:
     description: >-
       Newline- or whitespace-separated list of enabled services. Known
       values: `common`, `docker`, `balena`, `node`, `python`,
-      `lf_line_endings`. Unknown values fail the action.
+      `lf_line_endings`, `logger`. Unknown values fail the action.
     required: true
   dry_run:
     description: >-

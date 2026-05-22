@@ -1,20 +1,39 @@
 #!/usr/bin/env python3
 """
-Sync standardized "managed" sections into well-known dotfiles.
+Sync standardized "managed" sections — and whole files — into
+consumer repositories.
 
-Each enabled service contributes one or more blocks. A block is text
-fenced by `>>> bos-automation-hub:<service> >>>` /
-`<<< bos-automation-hub:<service> <<<` marker lines using the comment
-syntax of the target file (all four supported file types use `#`).
+Two registries are supported:
+
+* ``SERVICE_BLOCKS`` (section mode) — each enabled service contributes
+  one or more blocks fenced by
+  ``>>> bos-automation-hub:<service> >>>`` /
+  ``<<< bos-automation-hub:<service> <<<`` marker lines using the
+  comment syntax of the target file. Used for multi-tenant dotfiles
+  (``.gitignore``, ``.dockerignore``, ``.editorconfig``,
+  ``.gitattributes``) where multiple services contribute distinct
+  blocks to the same file and hand-authored content must coexist
+  outside the markers.
+
+* ``SERVICE_FILES`` (whole-file mode) — each enabled service may own
+  one or more files outright. The hub overwrites the file with the
+  canonical content (prefixed by a single-line ``Managed by…`` header
+  comment) on every run. Used for shared scripts where the entire file
+  body is authoritative (e.g. ``log-functions.sh``). No markers; no
+  merging — a file may only be claimed by exactly one whole-file
+  service.
 
 Rules
 -----
-* If a service is in `SERVICES`, ensure its block exists and matches the
-  canonical content in every target file it owns. Create the file if
+* If a service is in ``SERVICES``, ensure its blocks / files exist and
+  match the canonical content. Create files (and parent dirs) if
   missing.
-* If a service is NOT in `SERVICES`, do nothing for it — existing
-  blocks are left untouched.
-* Nothing outside the marker pair is ever read or written.
+* If a service is NOT in ``SERVICES``, do nothing for it — existing
+  blocks AND existing whole-file targets are left untouched.
+* For section mode, nothing outside the marker pair is ever read or
+  written.
+* A single file path may not be registered under both modes, nor
+  claimed by more than one whole-file service.
 
 Env (set by `action.yml`)
 -------------------------
@@ -204,17 +223,161 @@ _GITATTRIBUTES_LF = """\
 *.pdf  binary
 """
 
+# --------------------------------------------------------------------------- #
+# Whole-file canonical content                                                #
+# --------------------------------------------------------------------------- #
+#
+# These entries are written VERBATIM (preceded by a "managed by" header
+# comment, prepended by `_make_whole_file`) to their target paths. The
+# entire file body is owned by the hub — no markers, no merging.
+
+# Note: this is a Python raw-string. The `\` escapes inside `log_pipe_cmd`'s
+# awk template are intended to reach bash unmodified — keep them as-is.
+_LOG_FUNCTIONS_SH = r"""#!/usr/bin/env bash
+# shellcheck shell=bash
+#
+# Canonical shared logging library for s6-overlay init and svc scripts
+# across the blackoutsecure container fleet.
+#
+# Sourced (not executed). Provides one consistent log line format:
+#
+#     <RFC3339 UTC> <tag>[<level>]: <message>
+#
+# Two API styles are supported (mix freely; pick whichever reads best
+# at the call site):
+#
+#   1. Function-per-level:
+#          SVC_NAME="svc-readsb"      # OR: LOG_TAG="svc-readsb"
+#          . /usr/local/bin/log-functions.sh
+#          log_info  "starting up"
+#          log_warn  "degraded"
+#          log_error "connection refused"
+#          log_fatal "cannot continue"
+#          log_debug "fyi"            # gated by LOG_LEVEL
+#      warn/error/fatal route to stderr; debug/info to stdout.
+#
+#   2. Generic dispatcher:
+#          LOG_TAG="svc-gh-runner"    # OR: SVC_NAME="svc-gh-runner"
+#          . /usr/local/bin/log-functions.sh
+#          log info  "starting up"
+#          log warn  "degraded"
+#          log error "connection refused"
+#          log fatal "cannot continue"
+#      All levels route to stdout (legacy docker-github-runner shape).
+#      Callers that want stderr add `>&2` at the call site.
+#
+# Severity ordering (case-insensitive):
+#     debug < info < warn < error < fatal
+# Lines below ${LOG_LEVEL:-info} are dropped; `fatal` is always emitted.
+#
+# Tag resolution: SVC_NAME wins, then LOG_TAG, then "unknown" (with a
+# one-shot warning on stderr) so a misconfigured caller is noisy but not
+# fatal.
+#
+# Extras (readsb provenance):
+#   log_kv KEY value             # pretty key/value (gated at info)
+#   log_pipe_cmd [priority]      # awk pipe that prefixes each stdin
+#                                # line with the syslog format. Usage:
+#                                #   exec mybinary 2>&1 \
+#                                #     | eval "$(log_pipe_cmd decoder)"
+
+if [[ -z "${SVC_NAME:-}" && -z "${LOG_TAG:-}" ]]; then
+    printf '%s log-functions.sh[warn]: neither SVC_NAME nor LOG_TAG set; using "unknown"\n' \
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >&2
+fi
+
+_log_tag() {
+    printf '%s' "${SVC_NAME:-${LOG_TAG:-unknown}}"
+}
+
+_log_severity() {
+    case "${1,,}" in
+        debug) printf '10' ;;
+        info)  printf '20' ;;
+        warn)  printf '30' ;;
+        error) printf '40' ;;
+        fatal) printf '50' ;;
+        *)     printf '20' ;;
+    esac
+}
+
+_log_should_emit() {
+    # _log_should_emit <level> -> 0 if yes, 1 if no
+    local level="${1,,}" cur min
+    [[ "${level}" == "fatal" ]] && return 0
+    cur=$(_log_severity "${level}")
+    min=$(_log_severity "${LOG_LEVEL:-info}")
+    [[ "${cur}" -ge "${min}" ]]
+}
+
+_log_emit() {
+    # _log_emit <level> <fd> <msg ...>
+    local level="$1" fd="$2"; shift 2
+    printf '%s %s[%s]: %s\n' \
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        "$(_log_tag)" \
+        "${level}" \
+        "$*" >&"${fd}"
+}
+
+# Generic dispatcher (docker-github-runner API). All levels to stdout to
+# preserve legacy behavior; callers add `>&2` when they want stderr.
+log() {
+    local level="$1"; shift
+    _log_should_emit "${level}" || return 0
+    _log_emit "${level}" 1 "$*"
+}
+
+# Function-per-level (readsb / mlat-hub API). warn/error/fatal -> stderr.
+log_debug() { _log_should_emit debug && _log_emit debug 1 "$@"; return 0; }
+log_info()  { _log_should_emit info  && _log_emit info  1 "$@"; return 0; }
+log_warn()  { _log_should_emit warn  && _log_emit warn  2 "$@"; return 0; }
+log_error() { _log_should_emit error && _log_emit error 2 "$@"; return 0; }
+log_fatal() { _log_emit fatal 2 "$@"; }
+
+# Pretty key/value (readsb provenance). Gated at info.
+log_kv() {
+    _log_should_emit info || return 0
+    local key="$1" value="$2"
+    printf '%s %s[%s]: %-15s %s\n' \
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        "$(_log_tag)" \
+        "info" \
+        "${key}:" \
+        "${value}"
+}
+
+# Returns an awk pipeline string for prefixing each stdin line with the
+# syslog format. fflush() avoids buffering so log lines surface in real
+# time. Usage:
+#     exec some-binary 2>&1 | eval "$(log_pipe_cmd decoder)"
+log_pipe_cmd() {
+    local priority="${1:-stdout}"
+    local tag
+    tag="$(_log_tag)"
+    printf "awk '{ printf \"%%s %s[%s]: %%s\\\\n\", strftime(\"%%Y-%%m-%%dT%%H:%%M:%%SZ\", systime(), 1), \$0; fflush() }'" \
+        "${tag}" "${priority}"
+}
+"""
+
 
 # --------------------------------------------------------------------------- #
 # Service registry                                                            #
 # --------------------------------------------------------------------------- #
 #
-# Per-service: ordered dict of {file_path: block_content}.  When a service
-# contributes to multiple files, each file is processed independently.
+# Two registries — see module docstring for the section vs whole-file
+# distinction.
 #
-# Priority dictates the order blocks appear in a FRESH file (created
-# during this run).  Existing blocks are left in place — priority only
-# affects newly-appended blocks for a given file.
+# `SERVICE_BLOCKS` — per-service: ordered dict of {file_path: block_body}.
+# When a service contributes to multiple files, each file is processed
+# independently. Priority dictates the order blocks appear in a FRESH
+# file (created during this run). Existing blocks are left in place —
+# priority only affects newly-appended blocks for a given file.
+#
+# `SERVICE_FILES`  — per-service: ordered dict of {file_path: full_body}.
+# The hub overwrites the file outright on every run. A file path may
+# appear in at most one whole-file service AND must not also appear in
+# any section service.
 
 SERVICE_BLOCKS: Dict[str, Dict[str, str]] = {
     "common": {
@@ -240,7 +403,38 @@ SERVICE_BLOCKS: Dict[str, Dict[str, str]] = {
     },
 }
 
-KNOWN_SERVICES = list(SERVICE_BLOCKS.keys())
+SERVICE_FILES: Dict[str, Dict[str, str]] = {
+    "logger": {
+        "root/usr/local/bin/log-functions.sh": _LOG_FUNCTIONS_SH,
+    },
+}
+
+KNOWN_SERVICES = list(SERVICE_BLOCKS.keys()) + list(SERVICE_FILES.keys())
+
+# Cross-mode sanity: a path may appear in only ONE registry, and within
+# SERVICE_FILES only ONE service may claim a given path. Detected at
+# import so a registry typo fails CI immediately rather than at runtime.
+_seen_whole_file_paths: Dict[str, str] = {}
+for _svc, _files in SERVICE_FILES.items():
+    for _path in _files:
+        if _path in _seen_whole_file_paths:
+            raise RuntimeError(
+                f"sync.py registry conflict: file '{_path}' is claimed by "
+                f"both SERVICE_FILES['{_seen_whole_file_paths[_path]}'] and "
+                f"SERVICE_FILES['{_svc}'] — a whole-file path may only "
+                f"have one owner."
+            )
+        _seen_whole_file_paths[_path] = _svc
+for _svc, _blocks in SERVICE_BLOCKS.items():
+    for _path in _blocks:
+        if _path in _seen_whole_file_paths:
+            raise RuntimeError(
+                f"sync.py registry conflict: file '{_path}' is registered "
+                f"as both a section target (SERVICE_BLOCKS['{_svc}']) and a "
+                f"whole-file target (SERVICE_FILES['{_seen_whole_file_paths[_path]}']) "
+                f"— these modes are mutually exclusive per path."
+            )
+del _seen_whole_file_paths, _svc, _files, _blocks, _path  # tidy module scope
 
 
 # --------------------------------------------------------------------------- #
@@ -287,6 +481,33 @@ def make_block(service: str, body: str) -> str:
     open_marker = f"# >>> {MARKER_NAMESPACE}:{service} >>>"
     close_marker = f"# <<< {MARKER_NAMESPACE}:{service} <<<"
     return f"{open_marker}\n# {MARKER_NOTE}\n{body}{close_marker}\n"
+
+
+# Header injected at the top of every whole-file managed asset. Uses
+# `#` comments which is correct for all current whole-file targets
+# (shell scripts). If we add a non-`#`-comment target in the future
+# (e.g. an XML or JSON file), upgrade this to a per-file-extension
+# comment style table rather than hard-coding `#` here.
+_WHOLE_FILE_HEADER_TEMPLATE = (
+    "# Managed by https://github.com/blackoutsecure/bos-automation-hub —\n"
+    "# do not edit. To modify, update the `{service}` service in\n"
+    "# .github/actions/sync-managed-files/sync.py.\n"
+    "#\n"
+)
+
+
+def _make_whole_file(service: str, body: str) -> str:
+    """Return ``body`` with a 'Managed by …' header injected after the
+    shebang (if present, line 1) so editors and `head` immediately
+    reveal the file is hub-managed. Ensures the result ends with
+    exactly one trailing newline."""
+    if not body.endswith("\n"):
+        body = body + "\n"
+    header = _WHOLE_FILE_HEADER_TEMPLATE.format(service=service)
+    lines = body.splitlines(keepends=True)
+    if lines and lines[0].startswith("#!"):
+        return lines[0] + header + "".join(lines[1:])
+    return header + body
 
 
 def block_pattern(service: str) -> "re.Pattern[str]":
@@ -362,12 +583,22 @@ class FileChange:
 def sync_files(
     services: List[str], root: str
 ) -> Tuple[List[FileChange], List[FileChange]]:
-    """Compute proposed changes. Returns (all_changes, drift_only)."""
+    """Compute proposed changes. Returns (all_changes, drift_only).
+
+    Handles BOTH section-mode services (SERVICE_BLOCKS) and whole-file
+    services (SERVICE_FILES). Section files are computed first so the
+    diff output groups deterministically (sections before whole-files);
+    the registry-level cross-mode conflict check at import time ensures
+    no path can appear in both buckets here.
+    """
+    # ------- Section mode -------
     # Group by file so we apply all enabled services for a file in one pass
     # and write only once. Preserve service input order so the order of
     # newly-appended blocks is predictable.
     file_to_services: Dict[str, List[str]] = {}
     for svc in services:
+        if svc not in SERVICE_BLOCKS:
+            continue
         for path in SERVICE_BLOCKS[svc].keys():
             file_to_services.setdefault(path, []).append(svc)
 
@@ -384,6 +615,22 @@ def sync_files(
             body = SERVICE_BLOCKS[svc][rel_path]
             after = apply_block(after, svc, body)
         all_changes.append(FileChange(path=rel_path, before=before, after=after))
+
+    # ------- Whole-file mode -------
+    for svc in services:
+        if svc not in SERVICE_FILES:
+            continue
+        for rel_path, body in SERVICE_FILES[svc].items():
+            abs_path = os.path.join(root, rel_path)
+            if os.path.exists(abs_path):
+                with open(abs_path, "r", encoding="utf-8") as fh:
+                    before = fh.read()
+            else:
+                before = ""
+            after = _make_whole_file(svc, body)
+            all_changes.append(
+                FileChange(path=rel_path, before=before, after=after)
+            )
 
     drift = [c for c in all_changes if c.changed]
     return all_changes, drift
@@ -437,7 +684,7 @@ def main() -> int:
     print(f"Root: {root}")
 
     if not drift:
-        print("All managed sections are up to date.")
+        print("All managed sections and files are up to date.")
         write_outputs([("changed", "false"), ("changed_files", "")])
         return 0
 
@@ -463,7 +710,7 @@ def main() -> int:
     if fail_on_drift:
         print(
             "\nfail_on_drift=true: exiting non-zero because the managed "
-            "sections drifted from the canonical content.",
+            "content drifted from the canonical sections / files.",
             file=sys.stderr,
         )
         return 1
