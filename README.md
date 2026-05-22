@@ -32,32 +32,84 @@ The Docker Hub namespace is **public information** (it appears in every
 ### Runner resolution
 
 Every `runs-on:` in this repo is resolved from one of three
-org-shared variables, with a hard-coded fallback to the matching
-GitHub-hosted runner. Set the vars at the **organisation** level
+org-shared variables. Set the vars at the **organisation** level
 (Settings → Variables → Actions) and every reusable workflow
 automatically picks them up — no caller changes needed.
 
-| Variable | Used for | Fallback |
-|----------|----------|----------|
-| `vars.DEFAULT_RUNNER` | Lightweight orchestration jobs (lint, setup, plan, manifest, release publish, etc.) | `ubuntu-latest` |
-| `vars.RUNNER_X64` | The amd64 leg of the multi-arch Docker build matrix in `docker-build-push.yml` | `ubuntu-latest` |
-| `vars.RUNNER_ARM64` | The arm64 leg of the multi-arch Docker build matrix in `docker-build-push.yml` | `ubuntu-latest-arm64` |
+| Variable | Used for |
+|----------|----------|
+| `vars.DEFAULT_RUNNER` | Lightweight orchestration jobs (setup, plan, manifest, release publish, etc.). |
+| `vars.RUNNER_X64` | The amd64 leg of the multi-arch Docker build matrix in `docker-build-push.yml`, all Docker Scout jobs, and the amd64-pinned balena `publish` / `deploy` jobs (`deploy-to-balena-action` is amd64-only). |
+| `vars.RUNNER_ARM64` | The arm64 leg of the multi-arch Docker build matrix in `docker-build-push.yml`. |
 
 Values may be either a single bare label (e.g. `ubuntu-latest`) or a
-JSON array of labels for self-hosted runner targeting:
+JSON-array string of labels for self-hosted runner targeting:
 
 ```text
 ["self-hosted","Linux","ARM64"]
 ```
 
-GitHub Actions parses array-shaped strings in `runs-on:` automatically,
-so no `fromJSON()` is needed in caller workflows.
+The resolver expression in each workflow accepts both shapes
+(`fromJSON` + `startsWith` dance — see the inline comment above any
+`runs-on:` in this repo).
+
+**Arch-agnostic targeting.** For lightweight orchestration jobs where
+arch doesn't matter (most `DEFAULT_RUNNER` work — shell, `actions/*`,
+balena CLI, etc.), set:
+
+```text
+DEFAULT_RUNNER=["self-hosted","Linux"]
+```
+
+GitHub will dispatch each job to whichever self-hosted Linux runner is
+idle first, regardless of `x64` vs `arm64`. Reserve the arch-pinned
+forms (`["self-hosted","Linux","ARM64"]` etc.) for `RUNNER_X64` /
+`RUNNER_ARM64` and anywhere a job has a native binary dependency.
+
+#### Preflight gate — no silent fallbacks anywhere
+
+Every workflow that consumes a runner variable starts with a
+`preflight-runner-config` job that runs the shared composite action at
+[`.github/actions/shared/preflight-runner-config`](.github/actions/shared/preflight-runner-config).
+That job runs on `ubuntu-latest` (the validator needs a runner that is
+always present), checks each variable required by the workflow, and
+fails fast with a clear `::error::` annotation when something is
+missing or malformed. All downstream jobs in the workflow declare
+`needs: preflight-runner-config`, so a misconfigured variable surfaces
+in seconds instead of leaving real jobs queued indefinitely against an
+unmatched label.
+
+The validator enforces, for each required variable:
+
+* **non-empty** (or a clear annotation explaining which variable to set);
+* **well-formed shape** — either a bare label matching
+  `^[A-Za-z0-9][A-Za-z0-9._-]*$`, or a JSON-array string containing
+  one or more non-empty label strings (validated with `jq`).
+
+Per-workflow requirements:
+
+| Workflow | Required variables |
+|----------|--------------------|
+| `release.yml`, `github-release.yml`, `openwrt-readsb-wiedehopf-bump.yml`, `deploy-cloudflare-pages.yml` | `DEFAULT_RUNNER` |
+| `balena-block-publish.yml`, `balena-fleet-deploy.yml` | `DEFAULT_RUNNER` + `RUNNER_X64` |
+| `docker-build-push.yml` | `DEFAULT_RUNNER` + `RUNNER_X64` + `RUNNER_ARM64` |
+| `docker-scout-scan.yml` | `RUNNER_X64` |
+| `lint.yml`, `monitor-upstream-release.yml` | _(pinned to `ubuntu-latest` by design)_ |
+| `sync-managed-files.yml` | _(uses caller-supplied `inputs.runs_on` directly)_ |
+| `bos-launchpad.yml` | _(pure delegator; each downstream workflow runs its own preflight)_ |
+
+Because preflight guarantees the variable is set and well-formed, the
+per-job `runs-on:` expressions no longer carry a `'ubuntu-latest'`
+fallback or a `vars-…-not-set` sentinel — a job that reaches the
+`runs-on` stage is guaranteed to evaluate against a valid label set.
 
 **Per-call overrides:** workflows that ship a deploy-style step expose
 a `runs_on` input (currently `deploy-cloudflare-pages.yml`,
-`balena-block-publish.yml`, `balena-fleet-deploy.yml`). Pass a literal
-label or JSON-array string to override `vars.DEFAULT_RUNNER` for that
-one job; leave it empty to inherit.
+`balena-block-publish.yml`, `balena-fleet-deploy.yml`,
+`docker-scout-scan.yml`). Pass a literal label or JSON-array string to
+override the resolved variable for that one job; leave it empty to
+inherit. The shape rule is identical and is also validated by
+preflight on the source variable.
 
 ---
 
@@ -696,12 +748,18 @@ jobs:
 See [Runner resolution](#runner-resolution) for the global model. In this
 workflow specifically:
 
-- **setup**, **manifest**, **update-description**, **scout-published** →
-  `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`).
-- Per-arch **build** matrix and **scout-pr** → `vars.RUNNER_X64` /
-  `vars.RUNNER_ARM64` (fallbacks `ubuntu-latest` / `ubuntu-latest-arm64`).
-  `scout-pr` always runs on x64 — Scout indexes one architecture per
-  scan, and the matrix already covers arm64 on its own runner.
+- **setup**, **manifest**, **update-description** → `vars.DEFAULT_RUNNER`.
+- Per-arch **build** matrix → `vars.RUNNER_X64` (amd64 leg) and
+  `vars.RUNNER_ARM64` (arm64 leg).
+- **scout-pr**, **scout-published**, **scout-enable-repo** →
+  `vars.RUNNER_X64`. Scout indexes one architecture per scan, and the
+  matrix already covers arm64 on its own runner; pinning Scout to x64
+  also avoids arm64 self-hosted instability during the CPU/RAM-heavy
+  index step.
+
+All three variables (`DEFAULT_RUNNER`, `RUNNER_X64`, `RUNNER_ARM64`)
+are validated by the `preflight-runner-config` job at the top of the
+workflow — see [Runner resolution](#runner-resolution).
 
 ### Docker Scout
 
@@ -1190,7 +1248,7 @@ jobs:
 | `layer_cache` | boolean | `true` | Forwarded to `deploy-to-balena-action`. |
 | `debug` | boolean | `false` | Forwarded to `deploy-to-balena-action`. |
 | `draft` | boolean | `false` | Publish as a draft (sets `finalize: false`). |
-| `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","ARM64"]`) to override. See [Runner resolution](#runner-resolution). |
+| `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.RUNNER_X64` (the deploy job is amd64-pinned because `deploy-to-balena-action` is amd64-only). Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","X64"]`) to override. No silent fallback — `vars.RUNNER_X64` is validated by `preflight-runner-config`. See [Runner resolution](#runner-resolution). |
 | `timeout_minutes` | number | `60` | Per-deploy job timeout. |
 
 ### Target object schema
@@ -1905,7 +1963,7 @@ the auto-resolve round trip on every run.
 | `wrangler_version` | string | `''` | Pin wrangler (e.g. `4`, `^4.0.0`, `latest`). |
 | `extra_wrangler_args` | string | `''` | Extra args appended to `wrangler pages deploy` (newlines = spaces). |
 | `deploy` | string | `''` | `'true'`/`'false'` to force; empty deploys only on default-branch pushes. |
-| `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.DEFAULT_RUNNER` (fallback `ubuntu-latest`). Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","ARM64"]`) to override. See [Runner resolution](#runner-resolution). |
+| `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.DEFAULT_RUNNER`. Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","ARM64"]`) to override. No silent fallback — `vars.DEFAULT_RUNNER` is validated by `preflight-runner-config`. See [Runner resolution](#runner-resolution). |
 | `checkout_fetch_depth` | number | `0` | `fetch-depth` for `actions/checkout`. |
 | `purge_cache` | boolean | `true` | Purge the entire Cloudflare edge cache after a successful deploy. Zone is taken from `vars.CLOUDFLARE_ZONE_ID` when set, otherwise `secrets.CLOUDFLARE_ZONE_ID` (back-compat), otherwise auto-resolved from `site_url` via the Cloudflare API (token needs `Zone:Read`). Skips with a `::notice::` when none are available. Set to `false` to disable. |
 | `generate_sitemap` | boolean | `false` | Run `bos-sitemap-generator`. |

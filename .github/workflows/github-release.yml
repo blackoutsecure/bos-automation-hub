@@ -98,11 +98,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate `vars.DEFAULT_RUNNER` once before any downstream job
+  # evaluates its `runs-on:` expression. See release.yml for full rationale.
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+        with:
+          default_runner: ${{ vars.DEFAULT_RUNNER }}
+
   publish:
     name: Publish GitHub Release
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    needs: preflight-runner-config
+    # Resolves `vars.DEFAULT_RUNNER` (bare label or JSON-array string).
+    # Both presence and shape are enforced by `preflight-runner-config`,
+    # so this expression has no fallback — see README.md ("Runner
+    # configuration") for the full rationale.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 10
     permissions:
       contents: write

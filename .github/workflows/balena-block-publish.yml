@@ -208,13 +208,16 @@ name: Balena Block Publish (reusable)
       runs_on:
         description: >-
           Optional runner override for the publish job. When empty (the
-          default), resolves from the org-shared `vars.DEFAULT_RUNNER`
-          (a JSON array of labels, e.g. `["self-hosted","Linux","ARM64"]`);
-          falls back to the GitHub-hosted `ubuntu-latest` runner when the
-          var is unset. Accepts either a bare label (e.g. `ubuntu-latest`)
-          or a JSON-array string of labels (e.g. `["self-hosted","Linux","ARM64"]`);
-          both shapes are parsed at runtime via `fromJSON` so GHA sees a
-          real label list rather than a single 35-character "label".
+          default), resolves from the org-shared `vars.RUNNER_X64` (the
+          publish job is amd64-pinned because `deploy-to-balena-action`
+          is amd64-only). Accepts either a bare label (e.g. `ubuntu-latest`)
+          or a JSON-array string of labels (e.g. `["self-hosted","Linux","X64"]`);
+          both shapes are parsed at runtime via `fromJSON` so GHA sees
+          a real label list rather than a single literal string. No silent
+          fallback: `vars.RUNNER_X64` is validated by the
+          `preflight-runner-config` job (see README.md "Runner
+          configuration") so a job that reaches this stage is
+          guaranteed to evaluate against a valid label set.
         required: false
         type: string
         default: ''
@@ -244,11 +247,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate `vars.DEFAULT_RUNNER` (setup, sync-balena-yml) AND
+  # `vars.RUNNER_X64` (publish job; `deploy-to-balena-action` is amd64-only).
+  # See release.yml for full rationale.
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+        with:
+          default_runner: ${{ vars.DEFAULT_RUNNER }}
+          runner_x64: ${{ vars.RUNNER_X64 }}
+          require_runner_x64: 'true'
+
   setup:
     name: Setup
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    needs: preflight-runner-config
+    # Resolves `vars.DEFAULT_RUNNER` (bare label or JSON-array string).
+    # Both presence and shape are enforced by `preflight-runner-config`,
+    # so this expression has no fallback — see README.md ("Runner
+    # configuration") for the full rationale.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 10
     outputs:
       publish: ${{ steps.resolve.outputs.publish }}
@@ -353,7 +375,7 @@ jobs:
 
   sync-balena-yml:
     name: Sync balena.yml
-    needs: setup
+    needs: [preflight-runner-config, setup]
     # Skip when the manifest is rendered dynamically — there is no checked-in
     # `balena.yml` to keep in sync, every run regenerates the file with the
     # resolved version baked in.
@@ -363,9 +385,9 @@ jobs:
       && !inputs.generate_balena_yml
       && github.event_name == 'push'
       && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    # Resolves `vars.DEFAULT_RUNNER` (bare label or JSON-array string).
+    # Presence and shape are enforced by `preflight-runner-config`.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 5
     permissions:
       contents: write
@@ -419,7 +441,7 @@ jobs:
 
   publish:
     name: Publish block
-    needs: [setup, sync-balena-yml]
+    needs: [preflight-runner-config, setup, sync-balena-yml]
     # `!cancelled()` keeps web-UI / API cancels from punching through this
     # gate: `always()` on its own returns true even after cancellation
     # (per GitHub docs), so without the explicit cancel check a click on
@@ -431,10 +453,11 @@ jobs:
       && needs.setup.result == 'success'
       && needs.setup.outputs.publish == 'true'
       && (needs.sync-balena-yml.result == 'success' || needs.sync-balena-yml.result == 'skipped')
-    # deploy-to-balena-action is amd64-only; never route this job to an
-    # arm64 runner via DEFAULT_RUNNER.  Callers that have a self-hosted
-    # amd64 runner can pass `inputs.runs_on` to override.
-    runs-on: ${{ fromJSON(startsWith(inputs.runs_on, '[') && inputs.runs_on || format('"{0}"', inputs.runs_on || 'ubuntu-latest')) }}
+    # `deploy-to-balena-action` is amd64-only; this job is pinned to
+    # `vars.RUNNER_X64` (validated by `preflight-runner-config`) rather
+    # than `vars.DEFAULT_RUNNER` so an arm64 default never wins. Callers
+    # can still pass `inputs.runs_on` for a per-call override.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.RUNNER_X64, '[') && (inputs.runs_on || vars.RUNNER_X64) || format('"{0}"', inputs.runs_on || vars.RUNNER_X64)) }}
     timeout-minutes: 60
     outputs:
       release_id: ${{ steps.deploy.outputs.release_id }}

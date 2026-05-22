@@ -312,11 +312,37 @@ env:
   DIGEST_ARTIFACT_PREFIX: digests
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate all three runner variables in one place. Required
+  # set:
+  #   * `vars.DEFAULT_RUNNER` — used by setup, manifest, update-description.
+  #   * `vars.RUNNER_X64`     — used by the amd64 matrix leg and the three
+  #                             Scout jobs.
+  #   * `vars.RUNNER_ARM64`   — used by the arm64 matrix leg.
+  # Failing here surfaces misconfiguration in seconds instead of leaving
+  # jobs queued indefinitely against an unmatched label.
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+        with:
+          default_runner: ${{ vars.DEFAULT_RUNNER }}
+          runner_x64: ${{ vars.RUNNER_X64 }}
+          runner_arm64: ${{ vars.RUNNER_ARM64 }}
+          require_runner_x64: 'true'
+          require_runner_arm64: 'true'
+
   setup:
     name: Setup
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    needs: preflight-runner-config
+    # Resolves `vars.DEFAULT_RUNNER` (bare label or JSON-array string).
+    # Both presence and shape are enforced by `preflight-runner-config`,
+    # so this expression has no fallback — see README.md ("Runner
+    # configuration") for the full rationale.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     outputs:
       matrix: ${{ steps.resolve.outputs.matrix }}
       push: ${{ steps.resolve.outputs.push }}
@@ -494,10 +520,11 @@ jobs:
           INPUT_MULTI_ARCH: ${{ inputs.multi_arch }}
           AUTO_RESOLVE: ${{ inputs.auto_resolve_version }}
           RESOLVED_EXTRA_TAGS: ${{ steps.tags.outputs.extra_tags }}
-          # Per-arch runner resolution. Org-shared vars take precedence;
-          # empty strings trigger the GitHub-hosted fallback. A var may
-          # be either a JSON array of labels (e.g.
-          # `["self-hosted","Linux","X64"]`) or a single bare label.
+          # Per-arch runner resolution. `vars.RUNNER_X64` and
+          # `vars.RUNNER_ARM64` are guaranteed set + well-formed by the
+          # `preflight-runner-config` job. A var may be either a JSON array
+          # of labels (e.g. `["self-hosted","Linux","X64"]`) or a single
+          # bare label — both shapes are accepted by `to_json_runner` below.
           VARS_RUNNER_X64: ${{ vars.RUNNER_X64 }}
           VARS_RUNNER_ARM64: ${{ vars.RUNNER_ARM64 }}
         run: |
@@ -511,11 +538,16 @@ jobs:
 
           # Embed a runner spec into the matrix JSON. JSON-array values
           # are passed through verbatim after a shape check; bare labels
-          # are JSON-quoted. Malformed values fail fast here rather than
-          # producing a downstream "no runner matching label" error.
+          # are JSON-quoted. Defense-in-depth: `preflight-runner-config`
+          # has already validated these vars, so the validation here
+          # cannot fire in a well-configured workflow — but keep it as
+          # a backstop in case a future caller bypasses preflight.
           to_json_runner() {
-            local raw="$1" name="$2" fallback="$3" val
-            val="${raw:-${fallback}}"
+            local val="$1" name="$2"
+            if [ -z "${val}" ]; then
+              echo "ERROR: ${name} is empty (preflight should have caught this)" >&2
+              exit 1
+            fi
             case "${val}" in
               \[*)
                 printf '%s' "${val}" | python3 -c 'import json,sys; v=json.loads(sys.stdin.read()); sys.exit(0 if isinstance(v,list) and v and all(isinstance(x,str) and x for x in v) else 1)' \
@@ -530,8 +562,8 @@ jobs:
             esac
           }
 
-          AMD64_RUNNER="$(to_json_runner "${VARS_RUNNER_X64}"   "vars.RUNNER_X64"   "ubuntu-latest")"
-          ARM64_RUNNER="$(to_json_runner "${VARS_RUNNER_ARM64}" "vars.RUNNER_ARM64" "ubuntu-latest-arm64")"
+          AMD64_RUNNER="$(to_json_runner "${VARS_RUNNER_X64}"   "vars.RUNNER_X64")"
+          ARM64_RUNNER="$(to_json_runner "${VARS_RUNNER_ARM64}" "vars.RUNNER_ARM64")"
 
           AMD64="{\"arch\":\"amd64\",\"runner\":${AMD64_RUNNER},\"platform\":\"linux/amd64\"}"
           ARM64="{\"arch\":\"arm64\",\"runner\":${ARM64_RUNNER},\"platform\":\"linux/arm64\"}"
@@ -667,11 +699,11 @@ jobs:
 
   manifest:
     name: Publish manifest
-    needs: [setup, build]
+    needs: [preflight-runner-config, setup, build]
     if: needs.setup.outputs.push == 'true' && needs.build.result == 'success'
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    # Resolves `vars.DEFAULT_RUNNER` — presence and shape are enforced
+    # by `preflight-runner-config`. See setup job above for rationale.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 30
     env:
       IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
@@ -751,11 +783,11 @@ jobs:
 
   update-description:
     name: Sync Docker Hub description
-    needs: [setup, manifest]
+    needs: [preflight-runner-config, setup, manifest]
     if: needs.setup.outputs.push == 'true' && inputs.update_description
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    # Resolves `vars.DEFAULT_RUNNER` — presence and shape are enforced
+    # by `preflight-runner-config`. See setup job above for rationale.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 5
     steps:
       - name: Checkout caller repo
@@ -787,13 +819,11 @@ jobs:
   # ---------------------------------------------------------------------------
   scout-pr:
     name: Docker Scout (PR)
-    needs: setup
+    needs: [preflight-runner-config, setup]
     if: needs.setup.outputs.push != 'true' && inputs.enable_scout
-    # The amd64 leg always runs on x64 hardware — Scout doesn't need
-    # the arm64 leg, so we hard-pin x64 here regardless of the matrix.
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64, '[') && vars.RUNNER_X64 || format('"{0}"', vars.RUNNER_X64 || 'ubuntu-latest')) }}
+    # Scout requires amd64 — hard-pinned to `vars.RUNNER_X64` regardless of
+    # the matrix. Presence and shape are enforced by `preflight-runner-config`.
+    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64, '[') && vars.RUNNER_X64 || format('"{0}"', vars.RUNNER_X64)) }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -909,13 +939,12 @@ jobs:
   # ---------------------------------------------------------------------------
   scout-published:
     name: Docker Scout (published)
-    needs: [setup, manifest]
+    needs: [preflight-runner-config, setup, manifest]
     if: needs.setup.outputs.push == 'true' && inputs.enable_scout && needs.manifest.result == 'success'
-    # Scout indexing is CPU/RAM heavy; default to x64 runner to avoid
-    # arm64 self-hosted instability during scan/index steps.
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64, '[') && vars.RUNNER_X64 || format('"{0}"', vars.RUNNER_X64 || 'ubuntu-latest')) }}
+    # Scout indexing is CPU/RAM heavy; pinned to `vars.RUNNER_X64` to avoid
+    # arm64 self-hosted instability. Presence and shape are enforced by
+    # `preflight-runner-config`.
+    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64, '[') && vars.RUNNER_X64 || format('"{0}"', vars.RUNNER_X64)) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -1007,13 +1036,11 @@ jobs:
   # ---------------------------------------------------------------------------
   scout-enable-repo:
     name: Enroll repo in Docker Scout
-    needs: [setup, manifest]
+    needs: [preflight-runner-config, setup, manifest]
     if: needs.setup.outputs.push == 'true' && inputs.scout_enable_repo && needs.manifest.result == 'success'
-    # Keep Scout-side enrollment on x64 too for consistency with the
-    # main Scout scan path.
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64, '[') && vars.RUNNER_X64 || format('"{0}"', vars.RUNNER_X64 || 'ubuntu-latest')) }}
+    # Pinned to `vars.RUNNER_X64` for consistency with the main Scout
+    # scan path. Presence and shape are enforced by `preflight-runner-config`.
+    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64, '[') && vars.RUNNER_X64 || format('"{0}"', vars.RUNNER_X64)) }}
     timeout-minutes: 5
     steps:
       - name: Enroll repository in Docker Scout

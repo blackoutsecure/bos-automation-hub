@@ -142,11 +142,15 @@ name: Docker Scout Scan (reusable)
       runs_on:
         description: >-
           Optional runner override. Empty resolves from the org-shared
-          `vars.RUNNER_X64` (fallback `ubuntu-latest`). Accepts either
-          a bare label (e.g. `ubuntu-latest`) or a JSON-array string of
-          labels (e.g. `["self-hosted","Linux","ARM64"]`); both shapes are
+          `vars.RUNNER_X64` (Scout requires amd64). Accepts either a
+          bare label (e.g. `ubuntu-latest`) or a JSON-array string of
+          labels (e.g. `["self-hosted","Linux","X64"]`); both shapes are
           parsed at runtime via `fromJSON` so GHA sees a real label list
-          rather than a single 35-character "label".
+          rather than a single literal string. No silent fallback:
+          `vars.RUNNER_X64` is validated by the `preflight-runner-config`
+          job (see README.md "Runner configuration") so a job that
+          reaches this stage is guaranteed to evaluate against a valid
+          label set.
         required: false
         type: string
         default: ''
@@ -181,11 +185,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate `vars.RUNNER_X64` once before the scout job evaluates
+  # its `runs-on:` expression. Docker Scout requires amd64. See release.yml
+  # for full rationale.
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+        with:
+          runner_x64: ${{ vars.RUNNER_X64 }}
+          require_default_runner: 'false'
+          require_runner_x64: 'true'
+
   scout:
     name: Docker Scout
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped vars/inputs in `runs-on:`).
-    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.RUNNER_X64, '[') && (inputs.runs_on || vars.RUNNER_X64) || format('"{0}"', inputs.runs_on || vars.RUNNER_X64 || 'ubuntu-latest')) }}
+    needs: preflight-runner-config
+    # Resolve runner: explicit `inputs.runs_on` override beats org-shared
+    # `vars.RUNNER_X64`. Presence and shape of `vars.RUNNER_X64` are
+    # enforced by `preflight-runner-config` — see README.md ("Runner
+    # configuration") for the full rationale.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.RUNNER_X64, '[') && (inputs.runs_on || vars.RUNNER_X64) || format('"{0}"', inputs.runs_on || vars.RUNNER_X64)) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     permissions:
       contents: read

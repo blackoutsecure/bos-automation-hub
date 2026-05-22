@@ -1,0 +1,124 @@
+name: 'Preflight: validate runner config'
+description: >-
+  Validate org/repo-level runner variables (`vars.DEFAULT_RUNNER`,
+  `vars.RUNNER_X64`, `vars.RUNNER_ARM64`) before downstream jobs evaluate
+  their `runs-on:` expressions. Fails fast with a clear `::error::`
+  annotation so operators see misconfiguration in seconds instead of jobs
+  queuing indefinitely against an unmatched label.
+
+  The caller passes the variable values explicitly (composite actions
+  cannot read `vars.*` directly; only the calling workflow can). For each
+  required variable, this action enforces:
+
+    * non-empty
+    * shape: bare label matching `^[A-Za-z0-9][A-Za-z0-9._-]*$`, OR a
+      JSON-array string containing one or more non-empty label strings
+      (e.g. `["self-hosted","Linux"]`).
+
+  Both shapes are accepted because the resolver expressions in the
+  workflows here support both (see `docker-build-push.yml` and
+  `release.yml` for the canonical pattern). Locking the shape at the
+  preflight stage means the per-job `runs-on:` expression no longer
+  needs `'ubuntu-latest'` fallbacks or sentinel labels — a downstream
+  job that reaches the runs-on stage is guaranteed to have a well-formed
+  variable.
+
+inputs:
+  default_runner:
+    description: >-
+      Value of `vars.DEFAULT_RUNNER` from the calling workflow
+      (`${{ vars.DEFAULT_RUNNER }}`). Required when
+      `require_default_runner: 'true'` (the default).
+    required: false
+    default: ''
+  runner_x64:
+    description: >-
+      Value of `vars.RUNNER_X64` from the calling workflow
+      (`${{ vars.RUNNER_X64 }}`). Required when
+      `require_runner_x64: 'true'`.
+    required: false
+    default: ''
+  runner_arm64:
+    description: >-
+      Value of `vars.RUNNER_ARM64` from the calling workflow
+      (`${{ vars.RUNNER_ARM64 }}`). Required when
+      `require_runner_arm64: 'true'`.
+    required: false
+    default: ''
+  require_default_runner:
+    description: '`true` to enforce DEFAULT_RUNNER is set + well-formed.'
+    required: false
+    default: 'true'
+  require_runner_x64:
+    description: '`true` to enforce RUNNER_X64 is set + well-formed.'
+    required: false
+    default: 'false'
+  require_runner_arm64:
+    description: '`true` to enforce RUNNER_ARM64 is set + well-formed.'
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Validate runner-config variables
+      shell: bash
+      env:
+        DEFAULT_RUNNER:         ${{ inputs.default_runner }}
+        RUNNER_X64:             ${{ inputs.runner_x64 }}
+        RUNNER_ARM64:           ${{ inputs.runner_arm64 }}
+        REQUIRE_DEFAULT_RUNNER: ${{ inputs.require_default_runner }}
+        REQUIRE_RUNNER_X64:     ${{ inputs.require_runner_x64 }}
+        REQUIRE_RUNNER_ARM64:   ${{ inputs.require_runner_arm64 }}
+      run: |
+        set -euo pipefail
+        ERR=0
+
+        # validate <var-name> <value> <required>
+        #   * Empty + required        -> error
+        #   * Empty + optional        -> skip (silent OK)
+        #   * Starts with '['          -> must parse as non-empty JSON array
+        #                                of non-empty strings (via `jq`)
+        #   * Otherwise (bare label)   -> must match runner label regex
+        validate() {
+          local name="$1" value="$2" required="$3"
+
+          if [[ -z "${value}" ]]; then
+            if [[ "${required}" == "true" ]]; then
+              echo "::error title=Runner config preflight::Required variable vars.${name} is not set. Set it in Settings -> Variables -> Actions to a bare runner label (e.g. 'ubuntu-latest') or to a JSON-array string of labels (e.g. '[\"self-hosted\",\"Linux\"]')."
+              ERR=1
+            else
+              echo "vars.${name}: empty (not required) - ok"
+            fi
+            return
+          fi
+
+          if [[ "${value}" == "["* ]]; then
+            if ! printf '%s' "${value}" \
+                 | jq -e 'type == "array" and length > 0 and all(type == "string" and length > 0)' \
+                 >/dev/null 2>&1; then
+              echo "::error title=Runner config preflight::vars.${name} starts with '[' but is not a valid non-empty JSON array of non-empty label strings. Got: ${value}"
+              ERR=1
+              return
+            fi
+            echo "vars.${name}: JSON-array form - ok (${value})"
+            return
+          fi
+
+          if ! [[ "${value}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "::error title=Runner config preflight::vars.${name}='${value}' is not a valid runner label. Use a bare label matching [A-Za-z0-9][A-Za-z0-9._-]* (e.g. 'ubuntu-latest'), or a JSON-array string of such labels (e.g. '[\"self-hosted\",\"Linux\"]')."
+            ERR=1
+            return
+          fi
+          echo "vars.${name}: bare-label form - ok (${value})"
+        }
+
+        validate DEFAULT_RUNNER "${DEFAULT_RUNNER}" "${REQUIRE_DEFAULT_RUNNER}"
+        validate RUNNER_X64     "${RUNNER_X64}"     "${REQUIRE_RUNNER_X64}"
+        validate RUNNER_ARM64   "${RUNNER_ARM64}"   "${REQUIRE_RUNNER_ARM64}"
+
+        if [[ "${ERR}" -ne 0 ]]; then
+          echo "::error title=Runner config preflight::Validation failed. Fix the variables flagged above (Settings -> Variables -> Actions, org or repo scope) and re-run." >&2
+          exit 1
+        fi
+        echo "Runner config preflight OK."
