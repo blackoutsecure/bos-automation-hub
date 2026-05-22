@@ -50,6 +50,10 @@
 # Modes:
 #   apply (default) - install / reconcile helper + LaunchAgent
 #   --check         - read-only audit. Exit 0 = all PASS, 2 = drift
+#   --uninstall     - bootout the LaunchAgent for the active console
+#                     user, then remove the helper + plist. Idempotent
+#                     (succeeds even if nothing is installed). Runtime
+#                     and install logs are retained for diagnostics.
 #
 # Idempotency:
 #   Re-running with the same configuration is a no-op: the helper
@@ -200,16 +204,22 @@ fi
 
 # Argument parsing (hoisted above mode resolution so --help works even
 # when no VMs have been configured).
-mode="apply"   # apply | check
+mode="apply"   # apply | check | uninstall
 for arg in "$@"; do
     case "$arg" in
         --check|--status) mode="check" ;;
+        --uninstall|--remove) mode="uninstall" ;;
         -h|--help)
-            printf '%s\n' "Usage: $0 [--check]
-  (no args)   Apply: install helper + LaunchAgent, reconcile state
-  --check     Read-only audit: report whether prerequisites and the
-              helper + LaunchAgent are present and current.
-              Exit 0 if compliant, 2 on drift.
+            printf '%s\n' "Usage: $0 [--check|--uninstall]
+  (no args)    Apply: install helper + LaunchAgent, reconcile state
+  --check      Read-only audit: report whether prerequisites and the
+               helper + LaunchAgent are present and current.
+               Exit 0 if compliant, 2 on drift.
+  --uninstall  Remove the installed helper script and LaunchAgent and
+               unload any running instance from the active console
+               user's GUI domain. Idempotent: succeeds even when
+               nothing is installed. Runtime + install logs are left
+               in place as a diagnostic audit trail.
 
 Environment variables (apply + check) - set ONE of:
   UTM_AUTOSTART_VMS             explicit list (newline- or comma-separated)
@@ -253,17 +263,29 @@ elif [[ -n "$defaultvms" ]]; then
     autostart_mode="explicit"
     vmsraw="$defaultvms"
 else
-    printf '%s\n' >&2 "ERROR: no VMs configured.
+    # No VM selection was provided. Install everything anyway so the
+    # helper + LaunchAgent are in place, but warn loudly: the helper
+    # will be a no-op at every login until the operator re-runs the
+    # installer with UTM_AUTOSTART_VMS / UTM_AUTOSTART_MATCH set (or
+    # edits 'defaultvms' above). Suppressed for --uninstall since the
+    # VM selection is irrelevant when tearing things down.
+    autostart_mode="explicit"
+    vmsraw=""
+    if [[ "$mode" != "uninstall" ]]; then
+        printf '%s\n' >&2 "WARNING: no VMs configured.
 
-Set one of the following at install time, or edit the 'defaultvms'
-variable at the top of this script to bake in a deployment-specific
-fallback list:
+Proceeding with install so the helper and LaunchAgent are in place,
+but no VMs will be started at login until selection is provided.
+
+To enable autostart, re-run this installer with one of:
 
   UTM_AUTOSTART_VMS='vm-one,vm-two'    (explicit list; comma- or newline-separated)
   UTM_AUTOSTART_MATCH='^prod-'         (POSIX ERE matched against 'utmctl list' at login)
 
-Try --help for the full list of supported environment variables."
-    exit 1
+Or edit the 'defaultvms' variable at the top of this script to bake in
+a deployment-specific fallback list. Try --help for the full list of
+supported environment variables."
+    fi
 fi
 
 # Normalise the explicit list (only consulted when autostart_mode == "explicit").
@@ -304,15 +326,17 @@ log_warn()  { [[ $_ll_cur -le 3 ]] && echo "WARN: $*"  || true; }
 
 # Begin Script Body
 
+banner_verb="install"
+[[ "$mode" == "uninstall" ]] && banner_verb="uninstall"
+
 echo ""
 echo "##############################################################"
-echo "# $(date) | Starting install of $appname"
+echo "# $(date) | Starting $banner_verb of $appname"
 echo "##############################################################"
 echo ""
 
-if [[ "$autostart_mode" == "explicit" && -z "$vmlist" ]]; then
-    echo "ERROR: no VM names provided. Set UTM_AUTOSTART_VMS (newline- or comma-separated) or UTM_AUTOSTART_MATCH."
-    exit 1
+if [[ "$autostart_mode" == "explicit" && -z "$vmlist" && "$mode" != "uninstall" ]]; then
+    log_warn "no VM names provided; helper will be a no-op at login. Re-run with UTM_AUTOSTART_VMS (newline- or comma-separated) or UTM_AUTOSTART_MATCH to enable autostart."
 fi
 
 # ----- build the helper script content -----
@@ -642,6 +666,68 @@ if [[ "$mode" == "check" ]]; then
         exit 2
     fi
     echo "All applicable settings already configured."
+    exit 0
+fi
+
+# =============================================================
+# uninstall mode
+# Removes the helper script + LaunchAgent and unloads any running
+# instance for the active console user. Idempotent: succeeds even
+# when nothing is installed. Runtime + install logs are left in
+# place as a diagnostic audit trail.
+# =============================================================
+if [[ "$mode" == "uninstall" ]]; then
+    if [[ "$(id -u)" -ne 0 ]]; then
+        echo "$(date) | ERROR: must be run as root (try: sudo)"
+        exit 1
+    fi
+
+    removed=0
+    skipped=0
+
+    # Bootout the LaunchAgent from the active console user's GUI
+    # domain, if any. Best-effort: ignore "not loaded" errors so this
+    # is safe to re-run after the agent has already been removed.
+    consoleuser="$(stat -f%Su /dev/console 2>/dev/null || true)"
+    if [[ -n "$consoleuser" && "$consoleuser" != "root" && "$consoleuser" != "loginwindow" ]]; then
+        uid="$(id -u "$consoleuser" 2>/dev/null || true)"
+        if [[ -n "$uid" ]]; then
+            echo "$(date) | Unloading LaunchAgent from console user '$consoleuser' (uid $uid)"
+            launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+        fi
+    else
+        echo "$(date) | No console user session detected; nothing to bootout."
+    fi
+
+    if [[ -f "$plistpath" ]]; then
+        echo "$(date) | Removing LaunchAgent plist: $plistpath"
+        if rm -f "$plistpath"; then
+            removed=$((removed + 1))
+        else
+            echo "$(date) | ERROR: failed to remove $plistpath"
+            exit 1
+        fi
+    else
+        echo "$(date) | LaunchAgent plist not present: $plistpath"
+        skipped=$((skipped + 1))
+    fi
+
+    if [[ -f "$helperpath" ]]; then
+        echo "$(date) | Removing helper script: $helperpath"
+        if rm -f "$helperpath"; then
+            removed=$((removed + 1))
+        else
+            echo "$(date) | ERROR: failed to remove $helperpath"
+            exit 1
+        fi
+    else
+        echo "$(date) | Helper script not present: $helperpath"
+        skipped=$((skipped + 1))
+    fi
+
+    echo "$(date) | $appname uninstall complete (removed=$removed, skipped=$skipped)"
+    echo "$(date) | Logs retained: $log, $runtimelog, $runtimeerr"
+    echo "$(date) |   (delete manually if you no longer need them)"
     exit 0
 fi
 
