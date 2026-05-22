@@ -27,22 +27,21 @@ inputs:
   default_runner:
     description: >-
       Value of `vars.DEFAULT_RUNNER` from the calling workflow
-      (`${{ vars.DEFAULT_RUNNER }}`). Required when
+      (composite actions cannot read `vars.*` directly, so the caller
+      must forward it explicitly). Required when
       `require_default_runner: 'true'` (the default).
     required: false
     default: ''
   runner_x64:
     description: >-
-      Value of `vars.RUNNER_X64` from the calling workflow
-      (`${{ vars.RUNNER_X64 }}`). Required when
-      `require_runner_x64: 'true'`.
+      Value of `vars.RUNNER_X64` from the calling workflow.
+      Required when `require_runner_x64: 'true'`.
     required: false
     default: ''
   runner_arm64:
     description: >-
-      Value of `vars.RUNNER_ARM64` from the calling workflow
-      (`${{ vars.RUNNER_ARM64 }}`). Required when
-      `require_runner_arm64: 'true'`.
+      Value of `vars.RUNNER_ARM64` from the calling workflow.
+      Required when `require_runner_arm64: 'true'`.
     required: false
     default: ''
   require_default_runner:
