@@ -1,0 +1,46 @@
+# Dogfood caller: the hub syncs its own managed dotfile sections via
+# the same `sync-managed-files.yml` reusable that consumers use. This
+# guarantees the hub's own `.gitignore` / `.editorconfig` /
+# `.gitattributes` stay aligned with the canonical content it ships
+# to everyone else.
+#
+# Filename is `sync-self.yml` (not `sync-managed-files.yml`) so it
+# doesn't collide with the reusable workflow at
+# `.github/workflows/sync-managed-files.yml` in the same directory.
+
+name: Sync managed files (self)
+
+on:
+  schedule:
+    - cron: '11 14 * * 1'   # Monday 14:11 UTC — stagger off :00
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-self.yml'
+      # When the canonical blocks themselves change, re-sync immediately
+      # so the hub's own dotfiles never lag behind the content it ships.
+      - '.github/actions/sync-managed-files/sync.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-managed-files-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    permissions:
+      contents: write   # required to push the canonical content back
+    uses: ./.github/workflows/sync-managed-files.yml
+    with:
+      services: |
+        common
+        lf_line_endings
+      # `python` intentionally not enabled — the hub has no Dockerfile
+      # and no pytest/mypy/ruff tooling, so it would only create an
+      # orphan `.dockerignore` plus a redundant `.gitignore` block.
+      # The hub's manual `.gitignore` already covers `__pycache__/`,
+      # `.venv/`, `venv/`, `*.py[cod]`. Add `python` here if/when the
+      # hub gains formal Python tooling.

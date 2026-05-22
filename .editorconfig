@@ -32,3 +32,22 @@ indent_style = tab
 # matches every workflow file under .github/workflows/.
 [*.{yml,yaml,json,toml}]
 indent_size = 2
+
+# >>> bos-automation-hub:common >>>
+# Managed by https://github.com/blackoutsecure/bos-automation-hub — do not edit between markers.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+# <<< bos-automation-hub:common <<<
