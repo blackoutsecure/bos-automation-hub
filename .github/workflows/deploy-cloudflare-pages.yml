@@ -657,7 +657,7 @@ jobs:
 
       - name: Generate Web App Manifest
         if: inputs.generate_manifest
-        uses: blackoutsecure/bos-web-application-manifest-generator@80a4378040f636d8ce2941026f47aad22bb75256 # v1.0.8
+        uses: blackoutsecure/bos-web-application-manifest-generator@v1
         with:
           name: ${{ inputs.manifest_name }}
           short_name: ${{ inputs.manifest_short_name }}
@@ -673,7 +673,7 @@ jobs:
 
       - name: Generate robots.txt
         if: inputs.generate_robots
-        uses: blackoutsecure/bos-robotstxt-generator@0a4523ab7fd22579799d5406247f7724b6728293 # v1.2.0
+        uses: blackoutsecure/bos-robotstxt-generator@v1
         with:
           site_url: ${{ inputs.site_url }}
           public_dir: ${{ inputs.deploy_dir }}
