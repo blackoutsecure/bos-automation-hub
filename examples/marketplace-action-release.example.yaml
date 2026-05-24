@@ -14,8 +14,9 @@
 #      a GitHub Release (which is what triggers Marketplace pickup).
 #
 # AUTOMATIC ENFORCEMENT:
-#   * release-promote-allowlist rejects any path under
-#     `.github/workflows/**` in the allowlist (hard error).
+#   * The underlying bos-marketplace-kit `promote` Action rejects
+#     any path under `.github/workflows/**` in the allowlist (hard
+#     error).
 #   * `main` branch must have the org ruleset applied (see
 #     `scripts/marketplace-repo/` in the hub) — that platform-level
 #     enforcement is what catches any path that slips past this caller.

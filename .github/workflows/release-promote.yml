@@ -6,12 +6,18 @@
 # https://docs.github.com/en/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace).
 #
 # Pipeline (two stages):
-#   1. promote   — `release-promote-allowlist` composite copies an
-#                  allowlisted set of paths from `source_branch` to
-#                  `target_branch`, tags `target_branch`.
+#   1. promote   — `bos-marketplace-kit/.github/actions/promote@v0.1.0`
+#                  copies an allowlisted set of paths from
+#                  `source_branch` to `target_branch`, tags
+#                  `target_branch`.
 #   2. release   — calls `github-release.yml@main` against the new tag
 #                  to render notes and create the GitHub Release.
 #
+# Implementation: the promote primitive lives in the published
+# [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit)
+# Action. This workflow is the ergonomic layer (toggles for
+# Dependabot / metadata auto-sync, GitHub Release chaining) around
+# it.
 # Trigger model: this workflow is intended to be called from a thin
 # caller on the SOURCE branch (typically `dev`) — see
 # `examples/marketplace-action-release.example.yml`. Triggers normally
@@ -329,7 +335,11 @@ jobs:
 
       - name: Promote (allowlist)
         id: promote
-        uses: blackoutsecure/bos-automation-hub/.github/actions/release-promote-allowlist@main
+        # Marketplace promote primitive comes from the published
+        # `bos-marketplace-kit` Action. SHA-pinned per the hub's
+        # GHA pin policy (org/repo@<sha> # vX.Y.Z). Dependabot bumps
+        # both halves in lockstep.
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@7dbcdc3d94b02ccd4027510f57ac4727743f2818 # v0.1.0
         with:
           source_branch:         ${{ inputs.source_branch }}
           target_branch:         ${{ inputs.target_branch }}

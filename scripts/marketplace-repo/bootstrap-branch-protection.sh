@@ -6,8 +6,8 @@
 # have repo-admin rights). Branch protection cannot do
 # `file_path_restriction` — that is a ruleset-only feature — so this
 # script configures the surrounding policies and relies on
-# `marketplace-repo-guard.yml` + `release-promote-allowlist` to do
-# the path-block enforcement.
+# `marketplace-repo-guard.yml` + the bos-marketplace-kit `promote`
+# Action to do the path-block enforcement.
 #
 # Usage:
 #   ./bootstrap-branch-protection.sh <owner/repo> [<branch>]
@@ -91,7 +91,7 @@ echo ""
 echo "REMINDER: branch protection does NOT support 'file_path_restriction'."
 echo "The .github/workflows/** block on default is enforced in two ways:"
 echo "  1. marketplace-repo-guard.yml on every PR (fast feedback)"
-echo "  2. release-promote-allowlist composite refuses to promote those paths"
+echo "  2. bos-marketplace-kit 'promote' Action refuses to promote those paths"
 echo ""
 echo "For platform-level enforcement that ALSO catches direct pushes,"
 echo "use the org ruleset path (bootstrap-ruleset.sh) instead."

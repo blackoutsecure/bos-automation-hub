@@ -12,8 +12,13 @@ more repos in the `blackoutsecure` org.
 > publish attempt). Source:
 > <https://docs.github.com/en/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace>.
 
-The hub's runtime defenses ([release-promote-allowlist](../../.github/actions/release-promote-allowlist/action.yml)
-+ [marketplace-repo-guard](../../.github/actions/marketplace-repo-guard/action.yml))
+The hub's runtime defenses (the [`bos-marketplace-kit`](https://github.com/marketplace/actions/blackout-secure-marketplace-kit)
+[`promote`](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote)
++ [`guard`](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/guard)
+composite Actions, invoked from
+[`release-promote.yml`](../../.github/workflows/release-promote.yml)
+and
+[`marketplace-repo-guard.yml`](../../.github/workflows/marketplace-repo-guard.yml))
 prevent the *automation* from doing the wrong thing. The scripts here
 prevent **humans, bots without bypass, and other workflows** from doing
 it by enforcing the rule at the **GitHub platform** layer — the only
@@ -115,7 +120,8 @@ Note: GitHub Branch Protection rules do **not** include the
 configures the surrounding policies (PR-required, no direct push,
 restricted pushers) and relies on the in-PR
 `marketplace-repo-guard.yml` workflow plus the
-`release-promote-allowlist` composite to enforce the path block. This
+[`bos-marketplace-kit` `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote)
+to enforce the path block. This
 is **defense-in-depth without platform enforcement** — slightly weaker
 but still effective for the normal PR flow.
 

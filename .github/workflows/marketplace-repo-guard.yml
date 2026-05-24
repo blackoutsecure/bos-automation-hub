@@ -29,6 +29,13 @@
 # context of the BASE branch with read+write tokens. We do NOT check
 # out the PR head into an execution context — only its SHA is read for
 # `git diff`. No code from the PR is executed.
+#
+# Implementation: this is an ergonomic wrapper (ref resolution +
+# checkout + job summary) around
+# `blackoutsecure/bos-marketplace-kit/.github/actions/guard`. The
+# guard primitive lives in the published
+# [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit)
+# Action — this workflow is the consumer-facing reusable shell.
 name: Marketplace repo guard (reusable)
 
 "on":
@@ -165,7 +172,11 @@ jobs:
 
       - name: Marketplace repo guard
         id: guard
-        uses: blackoutsecure/bos-automation-hub/.github/actions/marketplace-repo-guard@main
+        # Marketplace guard primitive comes from the published
+        # `bos-marketplace-kit` Action. SHA-pinned per the hub's
+        # GHA pin policy (org/repo@<sha> # vX.Y.Z). Dependabot bumps
+        # both halves in lockstep.
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/guard@7dbcdc3d94b02ccd4027510f57ac4727743f2818 # v0.1.0
         with:
           pr_base_sha:        ${{ inputs.pr_base_sha }}
           pr_head_sha:        ${{ inputs.pr_head_sha }}

@@ -142,10 +142,9 @@ preflight on the source variable.
 | [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, `.github/dependabot.yml`), writes canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows in `.github/workflows/bos-launchpad.yml`), and initializes starter templates (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`) on first run only. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
 | [.github/actions/nginx-config-validate/action.yml](.github/actions/nginx-config-validate/action.yml) | Composite action | Spins up the official `nginx` image, renders the consumer repo's `*.conf.template` files via `envsubst`, and runs `nginx -t -c /etc/nginx/nginx.conf`. Used by `nginx-config-validate.yml`. Positional-key envsubst (only listed keys are substituted) so nginx-native variables like `$remote_addr` pass through unchanged. |
 | [.github/actions/shared/commit-and-push/action.yml](.github/actions/shared/commit-and-push/action.yml) | Composite action | Stage files, commit, and push to the current branch with rebase-retry on concurrent commits. Single-line message + author validation. Exits cleanly with `committed=false` when nothing is staged. Used by `monitor-upstream-release.yml` and `sync-managed-files.yml`. |
-| [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying composite — keeps Marketplace Action repos' default branch clean of CI workflow files. Caller example: [`marketplace-action-release.example.yaml`](examples/marketplace-action-release.example.yaml). |
+| [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Caller example: [`marketplace-action-release.example.yaml`](examples/marketplace-action-release.example.yaml). |
 | [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Caller example: [`marketplace-action-guard.example.yaml`](examples/marketplace-action-guard.example.yaml). |
-| [.github/actions/release-promote-allowlist/action.yml](.github/actions/release-promote-allowlist/action.yml) | Composite action | Promotes a newline-separated allowlist of paths from `source_branch` to `target_branch` using an isolated git worktree, then tags + pushes atomically. Hard-rejects `.github/workflows/**` entries, glob characters, absolute paths, and `..`. Retries on concurrent-push races. Used by `release-promote.yml`. |
-| [.github/actions/marketplace-repo-guard/action.yml](.github/actions/marketplace-repo-guard/action.yml) | Composite action | Pure-bash + git guard that fails when a PR diff or current tree contains files under operator-configured `blocked_paths` (default `.github/workflows/`), OR when operator-configured `required_paths` are absent / deleted by the PR (e.g. `.github/dependabot.yml`). Used by `marketplace-repo-guard.yml`. |
+| [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit) (external) | Marketplace Action | Source of the Marketplace `check` / `guard` / `promote` / `name-check` / `branding-preview` composite primitives consumed by `marketplace-repo-guard.yml` and `release-promote.yml`. SHA-pinned to `v0.1.0`; Dependabot tracks bumps. |
 | [scripts/marketplace-repo/](scripts/marketplace-repo/) | Bootstrap scripts | One-time platform-setup scripts for Marketplace Action repos: org ruleset template + `gh api` bootstrap (`bootstrap-ruleset.sh`) for `file_path_restriction` enforcement, and a per-repo branch-protection fallback (`bootstrap-branch-protection.sh`). See [`scripts/marketplace-repo/README.md`](scripts/marketplace-repo/README.md). |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
 | [.github/workflows/openwrt-readsb-wiedehopf-bump.yml](.github/workflows/openwrt-readsb-wiedehopf-bump.yml) | Scheduled automation | Tracks new `wiedehopf/readsb` releases and proposes them upstream as a cross-repo PR to `openwrt/packages` (bumps `PKG_VERSION`/`PKG_HASH`, resets `PKG_RELEASE`) via a bot-owned fork. |
@@ -2090,8 +2089,9 @@ The hub solves this with a **two-branch model**:
 * **`main` (default branch)** — the published-to-Marketplace surface.
   Contains `action.yml`, `src/`, `dist/`, README, LICENSE, NOTICE,
   and nothing under `.github/workflows/`. Only the
-  [`release-promote-allowlist`](.github/actions/release-promote-allowlist/action.yml)
-  composite ever writes to this branch.
+  [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote)
+  (invoked from [`release-promote.yml`](.github/workflows/release-promote.yml))
+  ever writes to this branch.
 * **`dev` (working branch)** — the day-to-day development surface.
   Contains everything `main` has PLUS `.github/workflows/*.yml` (the
   release caller, the guard caller, lint workflows, etc.). All PRs
@@ -2102,7 +2102,8 @@ on `dev`. The hub:
 
 1. Promotes an **allowlisted** set of paths from `dev` to `main` via
    [`release-promote.yml`](.github/workflows/release-promote.yml). The
-   composite hard-rejects any allowlist entry that directly references
+   underlying [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote)
+   hard-rejects any allowlist entry that directly references
    `.github/workflows` or a path under it. Listing a PARENT directory
    (most commonly bare `.github`, to bring across `dependabot.yml`,
    `CODEOWNERS`, `ISSUE_TEMPLATE/`, etc.) is allowed — the
@@ -2208,7 +2209,7 @@ services in `sync-managed-files` produce this layout for you on
 |---------------------------------------------------------|------------------|--------------------------------------------------------------------------------------|
 | PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `marketplace-action-guard.example.yaml` on `dev` as `marketplace-guard.yml`.    |
 | PR-time block on deletion of `.github/dependabot.yml` (or other required files) | **Yes** | Same guard caller — populate `required_paths:` (default empty, opt-in). |
-| Hard-block on workflow paths during `dev -> main` promotion | **Yes**       | Baked into `release-promote-allowlist` — cannot be disabled.                         |
+| Hard-block on workflow paths during `dev -> main` promotion | **Yes**       | Baked into the [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote) — cannot be disabled. |
 | `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `marketplace-action-release.example.yaml` on `dev` as `release.yml`.            |
 | Auto-sync of `.github/dependabot.yml` to `main`         | **Yes**          | `include_dependabot_config: true` on the release caller (default on).                |
 | Auto-sync of `.github/CODEOWNERS` / `FUNDING.yml` / `ISSUE_TEMPLATE/` / `PULL_REQUEST_TEMPLATE.md` / `SECURITY.md` / `CONTRIBUTING.md` to `main` | **Yes** | `include_github_metadata: true` on the release caller (default off). |
