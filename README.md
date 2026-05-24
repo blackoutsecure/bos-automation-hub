@@ -224,11 +224,16 @@ a new release, the full Docker → Balena → GitHub Release pipeline runs
 against `v<upstream_version>` automatically — no tag push required in
 the consumer repo.
 
-> **Full annotated template:** [examples/bos-launchpad-release-example.yml](examples/bos-launchpad-release-example.yml).
-> Copy that file to your repo as `.github/workflows/bos-launchpad.yml`,
-> fill in the `# TODO` placeholders, and you're done. The minimal
-> shape below is for reading; the template has every comment and
-> structural guard rail the production callers use.
+> **Setup:** enable the `bos_launchpad_release` service in your
+> [`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
+> caller — it writes `.github/workflows/bos-launchpad.yml` (the
+> kicker) for you. Your only customization point is
+> `.bos-launchpad.yaml` at the repo root; see
+> [examples/bos-launchpad-release.example.yaml](examples/bos-launchpad-release.example.yaml)
+> for an annotated starter and the
+> [`.bos-launchpad.yaml` schema](#bos-launchpadyaml-schema-used-by-the-bos_launchpad_-services)
+> for the full field reference. The kicker shape below is for
+> reading — you don't author it by hand.
 
 Required `vars`: `UPSTREAM_REPO`, `IMAGE_NAME`, `DOCKERHUB_NAMESPACE`,
 `BALENA_NAMESPACE`.
@@ -481,9 +486,15 @@ releases, upstream-tracked releases, and static-site deploys all wire
 the same way — and forwards every input straight through to
 [`deploy-cloudflare-pages.yml`](#deploy-cloudflare-pagesyml--reusable-workflow).
 
-> **Full annotated template:** [examples/bos-launchpad-cloudflare-pages-example.yml](examples/bos-launchpad-cloudflare-pages-example.yml).
-> Copy that file to your repo as `.github/workflows/bos-launchpad.yml`,
-> fill in the `# TODO` placeholders, and you're done.
+> **Setup:** enable the `bos_launchpad_cf_pages` service in your
+> [`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
+> caller — it writes `.github/workflows/bos-launchpad.yml` (the
+> kicker) for you. Your only customization point is
+> `.bos-launchpad.yaml` at the repo root; see
+> [examples/bos-launchpad-cf-pages.example.yaml](examples/bos-launchpad-cf-pages.example.yaml)
+> for an annotated starter and the
+> [`.bos-launchpad.yaml` schema](#bos-launchpadyaml-schema-used-by-the-bos_launchpad_-services)
+> for the full field reference.
 
 Required `vars`: `CLOUDFLARE_PROJECT_NAME`.
 Required `secrets`: `CLOUDFLARE_API_TOKEN`.
@@ -1611,21 +1622,27 @@ default), then re-prefixed by this workflow. Upstream tags must be
 SemVer (`X.Y.Z[-suffix]`); the release stage rejects calendar-versioned
 or otherwise non-SemVer tags.
 
-### Caller examples
+### Operator-config examples
 
-Two annotated templates ship with the hub — pick the one that matches
-your use case, copy it verbatim into a consumer repo as
-`.github/workflows/bos-launchpad.yml`, and fill in the `# TODO`
-placeholders.
+The kicker workflow at `.github/workflows/bos-launchpad.yml` is
+auto-written by the `bos_launchpad_release` / `bos_launchpad_cf_pages`
+[`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
+services — you don't author it by hand. Your only manual file is
+`.bos-launchpad.yaml` at the repo root. Two annotated starter
+configs ship with the hub:
 
 - **Upstream-tracked container release:**
-  [examples/bos-launchpad-release-example.yml](examples/bos-launchpad-release-example.yml).
+  [examples/bos-launchpad-release.example.yaml](examples/bos-launchpad-release.example.yaml).
   See [Quick start §2](#2-upstream-tracked-release-poll-upstream-then-run-the-same-pipeline)
-  for the inline minimal-shape walkthrough.
+  for the inline kicker walkthrough.
 - **Static-site Cloudflare Pages deploy:**
-  [examples/bos-launchpad-cloudflare-pages-example.yml](examples/bos-launchpad-cloudflare-pages-example.yml).
+  [examples/bos-launchpad-cf-pages.example.yaml](examples/bos-launchpad-cf-pages.example.yaml).
   See [Quick start §7](#7-cloudflare-pages-deploy-static-site-launchpad)
-  for the inline minimal-shape walkthrough.
+  for the inline kicker walkthrough.
+
+Full schema reference for `.bos-launchpad.yaml` is in the
+[schema section](#bos-launchpadyaml-schema-used-by-the-bos_launchpad_-services)
+below.
 
 ### Stage toggle policy (forward-compatibility guarantee)
 
