@@ -43,12 +43,18 @@ on:
           Init-if-missing: `gha_sync_commit`, `gha_sync_drift_check`,
           `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
           one `gha_lint_*` per repo — they all target the same
-          `.github/workflows/lint.yml`), `license_apache2` (verbatim
-          Apache 2.0 to root `LICENSE`), `notice_apache2` (templated
-          Apache NOTICE), `codeowners` (templated `.github/CODEOWNERS`
-          with a catch-all rule). The latter three read per-repo
+          `.github/workflows/lint.yml`), `license` (multi-license;
+          picks from `_LICENSE_REGISTRY` by `license_type:` in
+          `.bos-managed-files.yaml`, supports apache-2.0 / mit /
+          bsd-3-clause / isc), `license_apache2` (deprecated alias
+          that always emits Apache 2.0; mutex with `license`),
+          `notice_apache2` (Apache 2.0 NOTICE; requires
+          `license_type: apache-2.0` when used with `license`),
+          `codeowners` (`.github/CODEOWNERS` with a catch-all rule).
+          The license / notice / codeowners services read per-repo
           placeholder values from optional `.bos-managed-files.yaml`
-          at the repo root (all keys default to org-canonical values).
+          at the repo root (all keys default to org-canonical
+          values).
         required: true
         type: string
       mode:

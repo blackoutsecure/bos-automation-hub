@@ -16,12 +16,15 @@ description: >-
   hub-managed header comment). For init-if-missing services, the
   target file is written ONCE when missing and NEVER overwritten
   afterwards (preceded by an "Initialized by" header, EXCEPT for
-  `license_apache2` / `notice_apache2` which are committed verbatim so
-  license-detection tools recognize them). Templated init services
-  (`notice_apache2`, `codeowners`) render `{{KEY}}` placeholders from
-  per-repo `.bos-managed-files.yaml` at sync time. Disabled services
-  are skipped entirely — existing blocks / files for them are NOT
-  touched.
+  `license` / `license_apache2` / `notice_apache2` which are
+  committed verbatim so license-detection tools recognize them).
+  Templated init services (`license`, `notice_apache2`, `codeowners`)
+  render `{{KEY}}` placeholders from per-repo
+  `.bos-managed-files.yaml` at sync time. The `license` service
+  additionally resolves its canonical text from `_LICENSE_REGISTRY`
+  based on `license_type:` in that config file (apache-2.0 / mit /
+  bsd-3-clause / isc). Disabled services are skipped entirely —
+  existing blocks / files for them are NOT touched.
 
 inputs:
   services:
@@ -37,15 +40,20 @@ inputs:
       Init-if-missing: `gha_sync_commit`, `gha_sync_drift_check`,
       `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
       one `gha_lint_*` per repo — all three target the same
-      `.github/workflows/lint.yml`), `license_apache2` (verbatim
-      Apache 2.0 to root `LICENSE`), `notice_apache2` (templated
-      Apache NOTICE to root `NOTICE`), `codeowners` (templated
-      `.github/CODEOWNERS` with a default catch-all rule). The latter
-      three render `{{COPYRIGHT_HOLDER}}` / `{{COPYRIGHT_YEAR_RANGE}}`
-      / `{{MAINTAINERS_TEAM}}` / `{{REPO_NAME}}` / `{{REPO_OWNER}}`
-      placeholders from optional `.bos-managed-files.yaml` at the repo
-      root (all keys default to org-canonical values when absent).
-      Unknown values fail the action.
+      `.github/workflows/lint.yml`), `license` (multi-license; picks
+      from `_LICENSE_REGISTRY` by `license_type:` in
+      `.bos-managed-files.yaml`, supports apache-2.0 / mit /
+      bsd-3-clause / isc), `license_apache2` (deprecated alias
+      that always emits Apache 2.0; mutex with `license`),
+      `notice_apache2` (Apache 2.0 NOTICE; requires `license_type:
+      apache-2.0` when used with `license`), `codeowners`
+      (`.github/CODEOWNERS` with a default catch-all rule). The
+      license/notice/codeowners services render
+      `{{COPYRIGHT_HOLDER}}` / `{{COPYRIGHT_YEAR_RANGE}}` /
+      `{{MAINTAINERS_TEAM}}` / `{{REPO_NAME}}` / `{{REPO_OWNER}}`
+      placeholders from optional `.bos-managed-files.yaml` at the
+      repo root (all keys default to org-canonical values when
+      absent). Unknown values fail the action.
     required: true
   dry_run:
     description: >-

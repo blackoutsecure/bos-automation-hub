@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=https://json.schemastore.org/none
 #
 # .bos-managed-files.yaml — per-repo placeholder values for the
-# bos-automation-hub `license_apache2`, `notice_apache2`, and
-# `codeowners` sync services.
+# bos-automation-hub `license`, `notice_apache2`, and `codeowners`
+# sync services.
 #
 # Consumed by: blackoutsecure/bos-automation-hub/.github/actions/
 #              sync-managed-files/sync.py
@@ -17,7 +17,9 @@
 # stripped. Unknown keys, malformed lines, and out-of-range years
 # fail the sync.
 
-# Copyright holder rendered into NOTICE.
+# Copyright holder rendered into LICENSE (MIT/BSD/ISC only — Apache
+# 2.0 LICENSE has no copyright slot; the Apache convention puts that
+# in NOTICE) AND into NOTICE.
 # Default: "Blackout Secure"
 copyright_holder: "Blackout Secure"
 
@@ -35,3 +37,34 @@ copyright_year_start: 2024
 # `.github/CODEOWNERS` (CODEOWNERS uses last-match-wins semantics).
 # Default: "@blackoutsecure/maintainers"
 maintainers_team: "@blackoutsecure/maintainers"
+
+# SPDX short identifier (lowercased) for the `license` service. Picks
+# which canonical text the hub renders into `LICENSE`. Supported:
+#
+#   apache-2.0   — Apache License 2.0 (default; verbatim 201-line text,
+#                  no placeholders — copyright lives in NOTICE per
+#                  Apache convention).
+#   mit          — MIT License (~20 lines, `{{COPYRIGHT_YEAR_RANGE}}`
+#                  and `{{COPYRIGHT_HOLDER}}` inline).
+#   bsd-3-clause — BSD 3-Clause "Modified" License (~30 lines).
+#   isc          — ISC License (~15 lines, MIT-equivalent but with
+#                  distinct SPDX ID).
+#
+# NOTE: changing `license_type` does NOT rewrite an existing LICENSE
+# file — the `license` service is init-if-missing, so the hub only
+# writes LICENSE on the FIRST sync. Switching license type after the
+# fact requires `git rm LICENSE` followed by re-sync (deliberate
+# action; legal change requires human decision).
+#
+# NOTE: the legacy `license_apache2` service IGNORES this setting and
+# always emits Apache 2.0 (back-compat for early adopters). New
+# consumers should use `license` + this key instead.
+#
+# NOTE: enabling `notice_apache2` REQUIRES `license_type: apache-2.0`
+# — NOTICE files are an Apache 2.0 §4 distribution requirement and
+# don't apply under MIT/BSD/ISC. The hub fails loud rather than
+# silently producing a misleading NOTICE.
+#
+# Default: "apache-2.0"
+license_type: apache-2.0
+

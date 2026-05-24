@@ -1836,8 +1836,9 @@ services are **not** removed — they're simply ignored on this run.
 | `gha_lint_node`        | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Node-based GitHub Action repos. Runs `actionlint` + `eslint` (`npm run lint`) + `prettier --check`. Mutually exclusive with `gha_lint_python` / `gha_lint_shell`. |
 | `gha_lint_python`      | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Python-based GitHub Action repos. Runs `actionlint` + `ruff check` + `pytest`. Mutually exclusive with `gha_lint_node` / `gha_lint_shell`. |
 | `gha_lint_shell`       | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for shell/bash-based GitHub Action repos. Runs `actionlint` + `shellcheck` + `bats`. Mutually exclusive with `gha_lint_node` / `gha_lint_python`. |
-| `license_apache2`      | init-if-missing  | `LICENSE`                                        | Verbatim Apache 2.0 LICENSE (byte-identical to `apache.org/licenses/LICENSE-2.0.txt`). Written WITHOUT the "Initialized by hub" header so license-detection tools (GitHub linguist, FOSSA, etc.) match the canonical SHA. The hub will NEVER overwrite an existing LICENSE — change of license is a deliberate human decision. |
-| `notice_apache2`       | init-if-missing  | `NOTICE`                                         | Apache 2.0-style NOTICE with placeholders rendered from `.bos-managed-files.yaml` (schema below). Written WITHOUT the hub header (same reasoning as `license_apache2`). |
+| `license`              | init-if-missing  | `LICENSE`                                        | Multi-license: writes the canonical text for `license_type` in `.bos-managed-files.yaml` (one of `apache-2.0`, `mit`, `bsd-3-clause`, `isc`; default `apache-2.0`). MIT / BSD-3-Clause / ISC carry `{{COPYRIGHT_YEAR_RANGE}}` and `{{COPYRIGHT_HOLDER}}` inline; Apache 2.0 is verbatim (per Apache convention, copyright lives in NOTICE). Written WITHOUT the "Initialized by hub" header so license-detection tools (GitHub linguist, FOSSA, etc.) match the canonical SHA. The hub will NEVER overwrite an existing LICENSE — switching license type after the first sync requires `git rm LICENSE` followed by re-sync (deliberate legal decision). Mutex with `license_apache2`. |
+| `license_apache2`      | init-if-missing  | `LICENSE`                                        | **Deprecated alias** kept for back-compat. ALWAYS emits Apache 2.0 regardless of `license_type` in config. Use `license` + `license_type: apache-2.0` for new repos. Mutex with `license`. |
+| `notice_apache2`       | init-if-missing  | `NOTICE`                                         | Apache 2.0-style NOTICE with placeholders rendered from `.bos-managed-files.yaml` (schema below). Written WITHOUT the hub header (same reasoning as `license`). **Requires `license_type: apache-2.0` when used alongside `license`** — NOTICE files are an Apache 2.0 §4 distribution requirement and don't apply under MIT/BSD/ISC. The hub fails loud rather than silently producing a misleading NOTICE. |
 | `codeowners`           | init-if-missing  | `.github/CODEOWNERS`                             | Default CODEOWNERS with a catch-all `* @<team>` rule routing all PRs to the maintainers team. Placeholder rendered from `.bos-managed-files.yaml`. Once present, the hub leaves the file alone — consumers add per-path overrides below the catch-all (last-match-wins). CODEOWNERS does NOT inherit from the org `.github` repo; each repo curates its own. |
 
 ### `.bos-launchpad.yaml` schema (used by the `bos_launchpad_*` services)
@@ -2017,7 +2018,7 @@ hand-authored.
 > **Migration tip:** see [examples/](examples/) for a worked
 > `.bos-launchpad.yaml` for each kicker flavor (release + cf-pages).
 
-### `.bos-managed-files.yaml` schema (used by `license_apache2` / `notice_apache2` / `codeowners`)
+### `.bos-managed-files.yaml` schema (used by `license` / `notice_apache2` / `codeowners`)
 
 Optional per-repo file at the repo root that supplies values for
 `{{KEY}}` placeholders rendered into the templated init-if-missing
@@ -2025,13 +2026,14 @@ services. All keys are optional — when the file is absent OR a key is
 missing the hub falls back to org-canonical defaults. The file is
 parsed by a tiny stdlib-only flat-YAML reader: only `key: value` pairs
 are supported (no nesting, no lists, no multi-line scalars). Unknown
-keys, malformed lines, and out-of-range years fail the action.
+keys, malformed lines, out-of-range years, and unknown `license_type`
+values fail the action.
 
 ```yaml
 # .bos-managed-files.yaml
 # All keys optional. Comment lines (#) and inline comments are stripped.
 
-# Copyright holder rendered into NOTICE.
+# Copyright holder rendered into LICENSE (MIT/BSD/ISC only) AND NOTICE.
 # Default: "Blackout Secure"
 copyright_holder: "Blackout Secure"
 
@@ -2048,6 +2050,14 @@ copyright_year_start: 2024
 # per-path overrides BELOW the catch-all rule.
 # Default: "@blackoutsecure/maintainers"
 maintainers_team: "@blackoutsecure/maintainers"
+
+# SPDX short identifier (lowercased) for the `license` service.
+# Supported: apache-2.0 | mit | bsd-3-clause | isc
+# Changing this does NOT rewrite an existing LICENSE — the `license`
+# service is init-if-missing; switching license type requires
+# `git rm LICENSE && <resync>` (deliberate legal decision).
+# Default: "apache-2.0"
+license_type: apache-2.0
 ```
 
 **Placeholder reference**
@@ -2063,7 +2073,26 @@ maintainers_team: "@blackoutsecure/maintainers"
 `{{KEY}}` markers in the canonical bodies are validated at module
 import time — an unknown placeholder name in any templated service
 body fails the action before any file is written, so typos cannot
-silently land in a consumer's committed file.
+silently land in a consumer's committed file. The same import-time
+check walks every entry in `_LICENSE_REGISTRY` so unknown placeholders
+in MIT / BSD-3-Clause / ISC texts also fail fast.
+
+**License switching workflow**
+
+The `license` service is init-if-missing — changing `license_type`
+does NOT rewrite an existing `LICENSE` because re-licensing a
+distributed work is a legal decision that should be deliberate, not
+automated. To switch:
+
+1. Edit `.bos-managed-files.yaml` → set new `license_type`.
+2. `git rm LICENSE` (and `NOTICE` if dropping Apache 2.0).
+3. If dropping Apache, also remove `notice_apache2` from your
+   `services:` list (the hub will refuse to render NOTICE under
+   non-Apache `license_type`).
+4. Re-run the sync. The hub writes the new LICENSE; commit it.
+5. Update package metadata: `package.json` `"license"`,
+   `pyproject.toml` `[project] license`, etc. — these are NOT
+   managed by the hub.
 
 **Why these three services don't inherit from `.github`**
 
@@ -2077,6 +2106,31 @@ copyright law; required for GitHub Marketplace listings), `NOTICE`
 `CODEOWNERS` (used at PR-review time and resolved per-repo). For
 those three the hub centralizes the canonical content/template and
 delivers it on first sync; subsequent edits stay in-repo.
+
+**Roadmap: managed-mode for NOTICE and CODEOWNERS (deferred)**
+
+Two dynamic-update patterns are designed but not yet shipped — they
+deserve focused review on their own merits:
+
+- **NOTICE year-refresh** — every Jan 1, `{{COPYRIGHT_YEAR_RANGE}}`
+  in NOTICE should auto-bump (e.g. `2024-2025` → `2024-2026`)
+  without manual edits. Planned implementation: new
+  `notice_apache2_managed` service in `SERVICE_FILES` (whole-file
+  overwrite mode) sharing the NOTICE path with the existing
+  init-if-missing `notice_apache2`. Mutex per repo: pick one mode.
+- **CODEOWNERS team-rename propagation** — when `maintainers_team`
+  in `.bos-managed-files.yaml` changes, the catch-all rule should
+  update without clobbering per-path overrides. Planned
+  implementation: new `codeowners_managed` service using
+  **section-mode** markers around just the catch-all line,
+  reusing the existing `apply_block()` mechanism. Per-path rules
+  below the marker pair survive untouched.
+
+LICENSE itself stays init-only (no managed-mode planned): changing
+a distributed work's LICENSE is a deliberate legal act, not
+something CI should automate. The init-if-missing semantics
+correctly model "hub provides the initial LICENSE, human owns
+subsequent changes."
 
 ### Modes
 

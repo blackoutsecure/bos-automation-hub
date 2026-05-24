@@ -1460,6 +1460,150 @@ _LICENSE_APACHE2 = """\
    limitations under the License.
 """
 
+# MIT License (SPDX: MIT). The 2-paragraph permissive license that
+# dominates the npm ecosystem. Year + copyright holder appear IN the
+# license text (unlike Apache, where they live in NOTICE).
+_LICENSE_MIT = """\
+MIT License
+
+Copyright (c) {{COPYRIGHT_YEAR_RANGE}} {{COPYRIGHT_HOLDER}}
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+"""
+
+
+# BSD 3-Clause License (SPDX: BSD-3-Clause). The "Modified BSD License"
+# — adds the no-endorsement clause to the original 2-clause BSD. Common
+# in academic / networking projects. Note the comma after the year, per
+# canonical SPDX template.
+_LICENSE_BSD_3_CLAUSE = """\
+BSD 3-Clause License
+
+Copyright (c) {{COPYRIGHT_YEAR_RANGE}}, {{COPYRIGHT_HOLDER}}
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+"""
+
+
+# ISC License (SPDX: ISC). Functionally equivalent to MIT but shorter;
+# used by npm itself and other Node tooling. Distinct SPDX identifier
+# matters for downstream license-policy enforcement (some corporate
+# license allowlists list MIT but not ISC, or vice versa).
+_LICENSE_ISC = """\
+ISC License
+
+Copyright (c) {{COPYRIGHT_YEAR_RANGE}} {{COPYRIGHT_HOLDER}}
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+"""
+
+
+# SPDX-keyed registry. The `license` service (init-if-missing,
+# templated) reads `license_type` from `.bos-managed-files.yaml` and
+# resolves the rendered body from here at sync time. Keys MUST match
+# the lowercased SPDX short identifier so consumers can copy-paste
+# from spdx.org/licenses. Apache 2.0 has no placeholders by design
+# (the Apache convention puts copyright in NOTICE); MIT/BSD/ISC carry
+# `{{COPYRIGHT_YEAR_RANGE}}` and `{{COPYRIGHT_HOLDER}}` inline.
+_LICENSE_REGISTRY: Dict[str, str] = {
+    "apache-2.0": _LICENSE_APACHE2,
+    "mit": _LICENSE_MIT,
+    "bsd-3-clause": _LICENSE_BSD_3_CLAUSE,
+    "isc": _LICENSE_ISC,
+}
+
+
+def _resolve_license_text(license_type: str) -> str:
+    """Look up canonical text for `license_type` in `_LICENSE_REGISTRY`.
+    Caller is responsible for validating `license_type` against
+    `_LICENSE_REGISTRY.keys()` BEFORE calling — this function will
+    raise KeyError otherwise (defensive; should never happen because
+    the config loader validates eagerly)."""
+    return _LICENSE_REGISTRY[license_type]
+
+
+# --------------------------------------------------------------------------- #
+# DEFERRED: managed-mode for NOTICE and CODEOWNERS                            #
+# --------------------------------------------------------------------------- #
+#
+# The current LICENSE / NOTICE / CODEOWNERS services are all
+# init-if-missing — the hub writes them ONCE on first sync and never
+# overwrites afterwards. Two of these have legitimate dynamic-update
+# use cases that aren't yet supported:
+#
+#   * NOTICE year-refresh: every Jan 1, `{COPYRIGHT_YEAR_RANGE}` should
+#     auto-bump from e.g. "2024-2025" to "2024-2026" without manual
+#     edits. Cleanest implementation: add a new `notice_apache2_managed`
+#     service in SERVICE_FILES (whole-file overwrite mode) sharing the
+#     same NOTICE path. Cross-registry path mutex needs an exemption
+#     (see `_ALLOWED_CROSS_MODE_VARIANTS` design — TBD).
+#
+#   * CODEOWNERS team-rename propagation: when `maintainers_team` in
+#     `.bos-managed-files.yaml` changes, the catch-all rule should
+#     update without clobbering per-path overrides the consumer has
+#     added below. Cleanest implementation: SECTION mode (markers
+#     around just the catch-all line), reusing the existing
+#     `apply_block()` mechanism. Whole-file overwrite is too blunt
+#     here — it would destroy per-path overrides.
+#
+# LICENSE-managed-mode is intentionally NOT planned: changing a
+# distributed work's LICENSE is a deliberate legal act, not something
+# CI should automate. The init-if-missing semantics correctly model
+# "hub provides the initial LICENSE, human owns subsequent changes."
+# A `license_type` change in config does NOT rewrite an existing
+# LICENSE file — consumers must delete-and-resync to switch licenses,
+# which forces a deliberate review.
+
 
 # Apache 2.0 NOTICE template. Substitutions are applied per-repo by
 # `_render_placeholders()`. The file format follows the convention from
@@ -1500,7 +1644,8 @@ _CODEOWNERS_TEMPLATE = """\
 # --------------------------------------------------------------------------- #
 #
 # Tiny flat-YAML reader for per-repo placeholder values consumed by the
-# `license_apache2`, `notice_apache2`, and `codeowners` services. Pure
+# `license`, `license_apache2`, `notice_apache2`, and `codeowners`
+# services. Pure
 # stdlib — sync.py intentionally has no third-party deps.
 #
 # Schema (all keys optional; defaults applied for missing keys):
@@ -1519,6 +1664,13 @@ _DEFAULT_MANAGED_CONFIG: Dict[str, str] = {
     "copyright_holder": "Blackout Secure",
     "copyright_year_start": "",
     "maintainers_team": "@blackoutsecure/maintainers",
+    # SPDX short identifier (lowercased). Used by the `license` service
+    # to pick which canonical text from `_LICENSE_REGISTRY` to render.
+    # Must be one of the keys in `_LICENSE_REGISTRY`. The deprecated
+    # alias service `license_apache2` IGNORES this and always emits
+    # Apache 2.0 — useful when a repo wants to keep its existing
+    # license while the org default shifts.
+    "license_type": "apache-2.0",
 }
 
 _KNOWN_CONFIG_KEYS = frozenset(_DEFAULT_MANAGED_CONFIG.keys())
@@ -1586,6 +1738,19 @@ def _load_managed_config(root: str) -> Dict[str, str]:
     with open(config_path, "r", encoding="utf-8") as fh:
         parsed = _parse_flat_yaml(fh.read())
     merged.update(parsed)
+
+    # Validate license_type eagerly so an unknown SPDX ID fails fast
+    # (with a helpful list of supported types) rather than crashing
+    # deep inside the init-files loop with a KeyError.
+    license_type = merged.get("license_type", "").strip().lower()
+    if license_type and license_type not in _LICENSE_REGISTRY:
+        die(
+            f"{MANAGED_FILES_CONFIG_FILENAME}: 'license_type' "
+            f"({license_type!r}) is not a supported SPDX identifier. "
+            f"Supported: {', '.join(sorted(_LICENSE_REGISTRY))}."
+        )
+    merged["license_type"] = license_type or _DEFAULT_MANAGED_CONFIG["license_type"]
+
     return merged
 
 
@@ -1658,22 +1823,44 @@ def _render_placeholders(body: str, subs: Dict[str, str]) -> str:
 
 
 # Init-if-missing services whose canonical body is committed VERBATIM
-# (no `# Initialized by ...` header injection). The Apache 2.0 LICENSE
-# and NOTICE files MUST stay byte-identical to the canonical form so
-# license-detection tools (GitHub linguist, FOSSA, etc.) can recognize
-# the file by SHA / fuzzy hash. Any service NOT in this set goes
-# through the standard `_make_init_file()` header injection.
-_NO_HEADER_INIT_SERVICES = frozenset({"license_apache2", "notice_apache2"})
+# (no `# Initialized by ...` header injection). LICENSE and NOTICE files
+# MUST stay byte-identical to the canonical form so license-detection
+# tools (GitHub linguist, FOSSA, etc.) can recognize the file by SHA /
+# fuzzy hash. Any service NOT in this set goes through the standard
+# `_make_init_file()` header injection. Both `license` (multi-type) and
+# `license_apache2` (alias) are listed — they share the LICENSE path
+# and the no-header requirement is per-PATH-content, not per-service.
+_NO_HEADER_INIT_SERVICES = frozenset({
+    "license",
+    "license_apache2",
+    "notice_apache2",
+})
 
 # Init-if-missing services whose body contains `{{KEY}}` placeholders
 # that must be rendered at sync time (not registry time, since values
 # vary per-repo). Pre-flight: every such service's canonical body MUST
 # only reference placeholder names in `_KNOWN_PLACEHOLDERS`; an unknown
 # `{{KEY}}` would silently land in the consumer's file.
+#
+# `license` is templated because MIT/BSD-3-Clause/ISC carry
+# `{{COPYRIGHT_YEAR_RANGE}}` and `{{COPYRIGHT_HOLDER}}` INSIDE the
+# license text (only Apache 2.0 puts those in NOTICE instead, but
+# `license` covers all four types via dynamic resolution — see
+# `_DYNAMIC_LICENSE_INIT_SERVICES`).
 _TEMPLATED_INIT_SERVICES = frozenset({
+    "license",
     "notice_apache2",
     "codeowners",
 })
+
+# Init-if-missing services whose body is RESOLVED at sync time from
+# `_LICENSE_REGISTRY` based on `license_type` in `.bos-managed-files.yaml`.
+# The body registered in `SERVICE_INIT_FILES` for these services is
+# a fallback placeholder; the init-loop swaps it for the right canonical
+# text BEFORE placeholder rendering. The `license_apache2` alias is
+# intentionally NOT here — it always emits Apache 2.0 regardless of
+# config, preserving backward compatibility for early adopters.
+_DYNAMIC_LICENSE_INIT_SERVICES = frozenset({"license"})
 
 
 # --------------------------------------------------------------------------- #
@@ -1786,8 +1973,23 @@ SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
     },
     # Templated whole-file content (init-if-missing). Values for
     # `{{KEY}}` placeholders come from `.bos-managed-files.yaml` at
-    # the consumer repo root (see `_load_managed_config`). LICENSE
-    # has no placeholders by design (Apache convention = verbatim).
+    # the consumer repo root (see `_load_managed_config`).
+    #
+    # `license` resolves its body DYNAMICALLY at sync time by looking
+    # up `license_type` from config in `_LICENSE_REGISTRY`. The
+    # registered body below is just a fallback placeholder — the
+    # real text is swapped in by the init-loop. See
+    # `_DYNAMIC_LICENSE_INIT_SERVICES`.
+    #
+    # `license_apache2` is a deprecated back-compat alias that ALWAYS
+    # emits Apache 2.0, ignoring `license_type` in config. Existing
+    # consumers using `license_apache2` continue to work unchanged;
+    # new consumers should use `license` + set `license_type` in
+    # `.bos-managed-files.yaml`. Both target `LICENSE` and are
+    # mutually exclusive per repo (enforced at parse time).
+    "license": {
+        "LICENSE": _LICENSE_APACHE2,
+    },
     "license_apache2": {
         "LICENSE": _LICENSE_APACHE2,
     },
@@ -1869,6 +2071,27 @@ for _svc in _TEMPLATED_INIT_SERVICES:
                     f"Known: {sorted(_KNOWN_PLACEHOLDERS)}."
                 )
 
+# Dynamic-license services pick their body from `_LICENSE_REGISTRY` at
+# sync time, so we also need to validate the placeholders inside EVERY
+# registered license text — not just the fallback body registered in
+# SERVICE_INIT_FILES. Apache 2.0 has no placeholders; MIT/BSD/ISC do.
+for _svc in _DYNAMIC_LICENSE_INIT_SERVICES:
+    if _svc not in _TEMPLATED_INIT_SERVICES:
+        raise RuntimeError(
+            f"sync.py: dynamic-license service '{_svc}' must also be "
+            f"in _TEMPLATED_INIT_SERVICES (license texts carry "
+            f"placeholders)."
+        )
+    for _lic_type, _lic_body in _LICENSE_REGISTRY.items():
+        for _ph_match in _PLACEHOLDER_RE.finditer(_lic_body):
+            _ph = _ph_match.group(1)
+            if _ph not in _KNOWN_PLACEHOLDERS:
+                raise RuntimeError(
+                    f"sync.py: _LICENSE_REGISTRY[{_lic_type!r}] "
+                    f"references unknown placeholder '{{{{{_ph}}}}}'. "
+                    f"Known: {sorted(_KNOWN_PLACEHOLDERS)}."
+                )
+
 # Tidy module scope. The list of names mirrors every loop-variable
 # introduced above; if you add another sanity check, append its names
 # here to keep `dir()` clean.
@@ -1883,6 +2106,8 @@ del (
     _body,
     _ph,
     _ph_match,
+    _lic_type,
+    _lic_body,
 )
 
 
@@ -2193,7 +2418,28 @@ def sync_files(
         _placeholder_subs = _resolve_placeholders(
             _managed_config, _resolve_repo_full_name(root)
         )
+        # NOTICE files are an Apache 2.0 §4 distribution requirement —
+        # they don't apply under MIT/BSD/ISC and would mislead downstream
+        # consumers about the project's licensing terms. Fail loud rather
+        # than silently produce a NOTICE under a non-Apache license.
+        # The `license_apache2` alias is treated as implicit
+        # `license_type: apache-2.0` (which it always is). When `license`
+        # is enabled with a non-Apache `license_type`, `notice_apache2`
+        # must NOT be in the services list.
+        if "notice_apache2" in services and "license_apache2" not in services:
+            _lic_type = _managed_config.get("license_type", "apache-2.0")
+            if _lic_type != "apache-2.0":
+                die(
+                    f"service 'notice_apache2' requires "
+                    f"license_type='apache-2.0' (got: {_lic_type!r}). "
+                    f"NOTICE files are an Apache 2.0 §4 distribution "
+                    f"requirement and don't apply under {_lic_type}. "
+                    f"Either change 'license_type' in "
+                    f"{MANAGED_FILES_CONFIG_FILENAME} to 'apache-2.0', "
+                    f"or remove 'notice_apache2' from the services list."
+                )
     else:
+        _managed_config = dict(_DEFAULT_MANAGED_CONFIG)
         _placeholder_subs = {}
 
     for svc in services:
@@ -2212,10 +2458,20 @@ def sync_files(
                 after = before
             else:
                 before = ""
+                # Dynamic license-text resolution: for `license`
+                # service, swap the registered placeholder body for
+                # the right canonical text from `_LICENSE_REGISTRY`
+                # BEFORE placeholder rendering. Other services use
+                # their registered body as-is.
+                resolved_body = body
+                if svc in _DYNAMIC_LICENSE_INIT_SERVICES:
+                    resolved_body = _resolve_license_text(
+                        _managed_config["license_type"]
+                    )
                 rendered = (
-                    _render_placeholders(body, _placeholder_subs)
+                    _render_placeholders(resolved_body, _placeholder_subs)
                     if svc in _TEMPLATED_INIT_SERVICES
-                    else body
+                    else resolved_body
                 )
                 if svc in _NO_HEADER_INIT_SERVICES:
                     # Verbatim — no "Initialized by hub" header so
