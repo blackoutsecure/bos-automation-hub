@@ -37,9 +37,9 @@ name: Monitor Upstream Release (reusable)
           [bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher)
           composite action.
 
-          * `github_release` (alias: `latest_release`) — poll
+          * `github_release` — poll
             `GET /repos/<repo>/releases/latest`. Default.
-          * `github_branch_file` (alias: `branch_head`) — fetch a single
+          * `github_branch_file` — fetch a single
             file from a branch's HEAD; the raw contents are the version
             string. Use for rolling-build projects that never cut a Release
             (e.g. `wiedehopf/readsb` `dev`).
@@ -270,27 +270,11 @@ jobs:
           # Need credentials to push the marker-file commit back.
           persist-credentials: true
 
-      - name: Resolve legacy source aliases
-        id: source
-        env:
-          IN_SOURCE: ${{ inputs.source }}
-        run: |
-          set -euo pipefail
-          # Translate legacy alias names accepted by this reusable workflow to
-          # the canonical names exposed by bos-upstream-watcher.
-          case "${IN_SOURCE}" in
-            latest_release) resolved=github_release ;;
-            branch_head)    resolved=github_branch_file ;;
-            *)              resolved="${IN_SOURCE}" ;;
-          esac
-          echo "value=${resolved}" >> "${GITHUB_OUTPUT}"
-
       - name: Discover upstream version
         id: discover
-        # TODO: pin to @v1 once bos-upstream-watcher publishes a tag.
-        uses: blackoutsecure/bos-upstream-watcher@main
+        uses: blackoutsecure/bos-upstream-watcher@v1
         with:
-          source:            ${{ steps.source.outputs.value }}
+          source:            ${{ inputs.source }}
           upstream_repo:     ${{ inputs.upstream_repo }}
           upstream_branch:   ${{ inputs.upstream_branch }}
           version_file_path: ${{ inputs.version_file_path }}

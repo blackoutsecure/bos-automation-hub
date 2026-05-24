@@ -281,9 +281,8 @@ jobs:
 Some upstreams ship rolling builds off a development branch and never
 cut GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). The same
 `bos-launchpad.yml` meta-workflow handles that case via
-`source: github_branch_file` (legacy alias: `branch_head`) — the
-monitor reads a version file from the branch HEAD and resolves the
-commit SHA via the GitHub API.
+`source: github_branch_file` — the monitor reads a version file from
+the branch HEAD and resolves the commit SHA via the GitHub API.
 
 Required `vars` and `secrets` are identical to example 2.
 
@@ -347,20 +346,13 @@ providers by changing `source:` and the matching input:
 
 | `source:`               | Required inputs                                  | Notes |
 |-------------------------|--------------------------------------------------|-------|
-| `github_release`        | `upstream_repo`                                  | Default. Polls `releases/latest`. Alias: `latest_release`. |
-| `github_branch_file`    | `upstream_repo`, `upstream_branch`               | Reads `version_file_path` from branch HEAD. Alias: `branch_head`. |
+| `github_release`        | `upstream_repo`                                  | Default. Polls `releases/latest`. |
+| `github_branch_file`    | `upstream_repo`, `upstream_branch`               | Reads `version_file_path` from branch HEAD. |
 | `github_tags`           | `upstream_repo`                                  | Lists tags, picks highest SemVer. Filter via `tag_pattern`. |
 | `container_image`       | `image_ref` (e.g. `docker.io/library/nginx`)     | Docker Hub tags only in this revision. Picks highest SemVer. |
 | `npm`                   | `package_name` (scoped names allowed)            | `registry.npmjs.org/<pkg>/latest`. |
 | `pypi`                  | `package_name`                                   | `pypi.org/pypi/<pkg>/json`. |
 | `generic_url`           | `version_url`, `version_regex` (1 capture group) | Stdlib-only HTTP, no auth. |
-
-Legacy aliases `latest_release` and `branch_head` continue to work at
-the input level (this workflow translates them before forwarding to
-the action). **Note:** existing `branch_head` tracker files will
-register one spurious "changed" event on the first run after upgrade
-because the tracker JSON now writes `"source": "github_branch_file"`
-instead of `"source": "branch_head"`. Subsequent runs are stable.
 
 ### 3. Scheduled Docker Scout re-scan
 
@@ -1386,8 +1378,8 @@ details, and tracker-file schemas.
 
 | `source` | Behaviour | When to use |
 |---|---|---|
-| `github_release` *(default; alias: `latest_release`)* | Polls `GET /repos/<repo>/releases/latest`. Uses the release's `tag_name` and resolves the commit via `repos/.../commits/<tag>`. | Upstream publishes proper GitHub Releases (the majority case). |
-| `github_branch_file` *(alias: `branch_head`)* | Fetches a version file from the branch HEAD; resolves the commit via the GitHub API. SemVer-validates the fetched string and synthesizes `upstream_tag = upstream_version`. | Upstream ships rolling builds off a development branch and never cuts GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). |
+| `github_release` *(default)* | Polls `GET /repos/<repo>/releases/latest`. Uses the release's `tag_name` and resolves the commit via `repos/.../commits/<tag>`. | Upstream publishes proper GitHub Releases (the majority case). |
+| `github_branch_file` | Fetches a version file from the branch HEAD; resolves the commit via the GitHub API. SemVer-validates the fetched string and synthesizes `upstream_tag = upstream_version`. | Upstream ships rolling builds off a development branch and never cuts GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). |
 
 The action exposes four additional providers — `github_tags`,
 `container_image`, `npm`, `pypi`, `generic_url` — that this workflow
@@ -1405,10 +1397,7 @@ to `version` and is overridable via `version_file_path`.
   - `github_release`: `{repo, tag, version, commit}` — held byte-stable
     for back-compat with existing tracker files.
   - `github_branch_file`: `{repo, source: "github_branch_file", branch, version, commit}` —
-    self-describing on inspection. **Upgrade note:** files written by
-    the legacy `branch_head` source contained `"source": "branch_head"`
-    and will register one spurious "changed" event on first run after
-    upgrade. Subsequent runs are stable.
+    self-describing on inspection.
   The file is committed back to the default branch when the upstream
   changes; subsequent runs diff against it to detect change.
 - **Real commit SHA.** In `github_release` mode, the release's

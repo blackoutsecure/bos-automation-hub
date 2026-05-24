@@ -84,8 +84,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           Upstream-version discovery strategy. Forwarded to the monitor
           stage. See `monitor-upstream-release.yml` for the full provider
           list (`github_release`, `github_branch_file`, `github_tags`,
-          `container_image`, `npm`, `pypi`, `generic_url`). Legacy aliases
-          `latest_release` and `branch_head` continue to work.
+          `container_image`, `npm`, `pypi`, `generic_url`).
         required: false
         type: string
         default: github_release
