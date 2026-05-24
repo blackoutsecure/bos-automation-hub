@@ -317,7 +317,7 @@ jobs:
 
       - name: Discover upstream version
         id: discover
-        uses: blackoutsecure/bos-upstream-watcher@v1
+        uses: blackoutsecure/bos-upstream-watcher@v1.1.0
         with:
           source:              ${{ inputs.source }}
           upstream_repo:       ${{ inputs.upstream_repo }}
@@ -406,7 +406,7 @@ jobs:
       - name: Job summary
         if: always()
         env:
-          # bos-upstream-watcher@v1 writes its own "🔍 Upstream Watcher"
+          # bos-upstream-watcher@v1.1.0 writes its own "🔍 Upstream Watcher"
           # block to $GITHUB_STEP_SUMMARY (source, label, tag, version,
           # commit, source_url, release info). This wrapper-side summary
           # is deliberately scoped to what the WRAPPER did on top of that:
