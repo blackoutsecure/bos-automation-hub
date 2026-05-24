@@ -1,0 +1,418 @@
+# Marketplace-compliant release: dev -> main allowlist promotion + GitHub Release.
+#
+# Designed for **GitHub Marketplace Action repos**, where the default
+# branch MUST NOT contain any `.github/workflows/*.yml` files
+# (Marketplace publishing prerequisite, see
+# https://docs.github.com/en/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace).
+#
+# Pipeline (two stages):
+#   1. promote   — `release-promote-allowlist` composite copies an
+#                  allowlisted set of paths from `source_branch` to
+#                  `target_branch`, tags `target_branch`.
+#   2. release   — calls `github-release.yml@main` against the new tag
+#                  to render notes and create the GitHub Release.
+#
+# Trigger model: this workflow is intended to be called from a thin
+# caller on the SOURCE branch (typically `dev`) — see
+# `examples/marketplace-action-release.example.yml`. Triggers normally
+# include `workflow_dispatch` (operator types the version) and may
+# include `push: tags: ['v*']` when the operator prefers to tag on dev
+# first.
+#
+# Hard constraints enforced by the underlying composite:
+#   * `.github/workflows/**` paths in the allowlist are rejected.
+#   * Existing tags cannot be overwritten.
+#   * `source_branch` and `target_branch` must differ.
+#   * Tag must match SemVer (`vX.Y.Z[-suffix]`).
+name: Release promote (reusable)
+
+"on":
+  workflow_call:
+    inputs:
+      # ----- Promotion ------------------------------------------------------
+      source_branch:
+        description: >-
+          Branch to promote FROM (e.g. `dev`). Must exist on origin.
+        required: true
+        type: string
+      target_branch:
+        description: >-
+          Branch to promote TO (e.g. `main`). Created from
+          `source_branch` if it does not exist on origin.
+        required: false
+        type: string
+        default: 'main'
+      allowlist_paths:
+        description: >-
+          Newline-separated repo-relative paths to copy from
+          `source_branch` to `target_branch`. Direct listing of
+          `.github/workflows` or paths under it is hard-blocked;
+          listing a PARENT directory (e.g. bare `.github`) is allowed
+          and the `.github/workflows/` subtree is silently stripped
+          from the staged tree before commit. Every listed path MUST
+          exist on `source_branch`. Anything on `target_branch` NOT
+          in the merged allowlist is REMOVED on this commit.
+        required: true
+        type: string
+      include_dependabot_config:
+        description: >-
+          When `true` (default), `.github/dependabot.yml` is
+          auto-appended to the effective allowlist if it exists on
+          `source_branch`. Strongly recommended for Marketplace
+          Action repos because Dependabot reads its config ONLY from
+          the default branch — a `dev`-only `dependabot.yml` is
+          ignored by Dependabot entirely.
+
+          The file is auto-skipped (with a notice) if absent, so this
+          input is safe to leave `true` even on repos that don't use
+          Dependabot.
+        required: false
+        type: boolean
+        default: true
+      include_github_metadata:
+        description: >-
+          When `true`, the following Marketplace-safe `.github/*`
+          metadata files are auto-appended to the effective allowlist
+          if they exist on `source_branch`:
+
+            * `.github/CODEOWNERS`
+            * `.github/FUNDING.yml`
+            * `.github/SECURITY.md`
+            * `.github/CONTRIBUTING.md`
+            * `.github/ISSUE_TEMPLATE`
+            * `.github/PULL_REQUEST_TEMPLATE.md`
+            * `.github/PULL_REQUEST_TEMPLATE`
+
+          Each is skipped silently if absent. Default `false` because
+          most repos either curate these explicitly via
+          `allowlist_paths` or don't use them. Set `true` to opt into
+          the convenience batch.
+        required: false
+        type: boolean
+        default: false
+      extra_sync_paths:
+        description: >-
+          Operator-supplied newline-separated paths merged into the
+          effective allowlist. Same syntax as `allowlist_paths`, BUT
+          entries that don't exist on `source_branch` are silently
+          skipped. Use this for paths that may legitimately be absent
+          on some forks/snapshots.
+
+          Subject to the same hard-block on direct `.github/workflows*`
+          entries; transitive workflow inclusion via a parent
+          directory is silently stripped post-checkout.
+        required: false
+        type: string
+        default: ''
+      tag_name:
+        description: >-
+          Tag to create on the new `target_branch` commit.
+          SemVer (`vX.Y.Z[-suffix]`). Required.
+        required: true
+        type: string
+      commit_message:
+        description: >-
+          Commit message for the promotion commit. Default
+          `release: <tag_name>`.
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: >-
+          When `true`, validates inputs and stages the diff but does
+          not commit, tag, push, or create a release.
+        required: false
+        type: boolean
+        default: false
+
+      # ----- GitHub Release publishing (forwarded to github-release.yml) ----
+      release_name:
+        description: 'Release title. Defaults to `tag_name`.'
+        required: false
+        type: string
+        default: ''
+      release_template_path:
+        description: >-
+          Path to a Markdown release-notes template (resolved on the
+          PROMOTED tag, i.e. the `target_branch` snapshot). Empty uses
+          the bundled default in `render-release-notes`.
+        required: false
+        type: string
+        default: ''
+      release_extra_context:
+        description: 'Newline-separated `KEY=VALUE` pairs interpolated into the release notes template.'
+        required: false
+        type: string
+        default: ''
+      release_draft:
+        description: 'Create the release as a draft.'
+        required: false
+        type: boolean
+        default: false
+      release_prerelease:
+        description: "`true`/`false` to force pre-release. Empty lets the renderer auto-detect from `vX.Y.Z-<suffix>`."
+        required: false
+        type: string
+        default: ''
+      release_make_latest:
+        description: '`true`/`false`/`legacy`. Forwarded to softprops/action-gh-release.'
+        required: false
+        type: string
+        default: 'true'
+      release_generate_notes:
+        description: "Append GitHub's auto-generated PR/contributor notes after the rendered body."
+        required: false
+        type: boolean
+        default: true
+      release_files:
+        description: 'Newline-separated globs of artifacts to attach to the release.'
+        required: false
+        type: string
+        default: ''
+
+    outputs:
+      target_sha:
+        description: 'SHA on `target_branch` after the promotion commit (empty when no-op or dry-run).'
+        value: ${{ jobs.promote.outputs.target_sha }}
+      source_sha:
+        description: 'SHA on `source_branch` that was promoted.'
+        value: ${{ jobs.promote.outputs.source_sha }}
+      tag_name:
+        description: 'Resolved tag name (echoed for caller convenience).'
+        value: ${{ jobs.promote.outputs.tag_name }}
+      promoted:
+        description: '`true` when a new commit + tag were created and pushed.'
+        value: ${{ jobs.promote.outputs.promoted }}
+      removed_paths:
+        description: >-
+          Newline-separated list of paths that were present on the
+          OLD `target_branch` tree but were removed by this promote.
+          Includes any Marketplace-violating files that drifted onto
+          `target_branch` since the last promote.
+        value: ${{ jobs.promote.outputs.removed_paths }}
+      removed_violations:
+        description: >-
+          Newline-separated subset of `removed_paths` that matched
+          known Marketplace-prohibited patterns (currently
+          `.github/workflows/**`). Empty when target_branch was
+          already compliant.
+        value: ${{ jobs.promote.outputs.removed_violations }}
+      release_url:
+        description: 'GitHub Release HTML URL (when the release stage ran).'
+        value: ${{ jobs.release.outputs.release_url }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Tag-scoped — a re-run for the same version waits in line behind
+  # the previous run rather than racing it (matches `release.yml`).
+  group: release-promote-${{ github.workflow }}-${{ inputs.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate `vars.DEFAULT_RUNNER` once before any downstream
+  # job evaluates its `runs-on:` expression. See README "Runner resolution".
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+        with:
+          default_runner: ${{ vars.DEFAULT_RUNNER }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 1 — promote source_branch -> target_branch (allowlist) + tag.
+  # ---------------------------------------------------------------------------
+  promote:
+    name: Promote and tag
+    needs: preflight-runner-config
+    # Resolves `vars.DEFAULT_RUNNER` (bare label or JSON-array string).
+    # Shape is enforced by `preflight-runner-config`, so no fallback —
+    # see README ("Runner resolution") for the full rationale.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
+    timeout-minutes: 10
+    permissions:
+      # `contents: write` is required for the push of the promotion
+      # commit + tag. The default `GITHUB_TOKEN` is used; if the
+      # `target_branch` is gated by a ruleset/branch-protection that
+      # excludes `github-actions[bot]` from push, the caller must
+      # bypass via a ruleset bypass actor (recommended) or pass a PAT
+      # via a secret-forwarded checkout.
+      contents: write
+    outputs:
+      target_sha:         ${{ steps.promote.outputs.target_sha }}
+      source_sha:         ${{ steps.promote.outputs.source_sha }}
+      tag_name:           ${{ steps.promote.outputs.tag_name }}
+      promoted:           ${{ steps.promote.outputs.promoted }}
+      removed_paths:      ${{ steps.promote.outputs.removed_paths }}
+      removed_violations: ${{ steps.promote.outputs.removed_violations }}
+    steps:
+      - name: Checkout source_branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.source_branch }}
+          # Full history is required so the worktree-based promotion
+          # can fetch + checkout arbitrary refs.
+          fetch-depth: 0
+          # We re-push via the same checkout — persist the bot token.
+          persist-credentials: true
+
+      - name: Resolve extra allowlist (toggles + operator paths)
+        id: extras
+        env:
+          INCLUDE_DEPENDABOT: ${{ inputs.include_dependabot_config }}
+          INCLUDE_METADATA:   ${{ inputs.include_github_metadata }}
+          EXTRA_SYNC_PATHS:   ${{ inputs.extra_sync_paths }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Build the effective extra-allowlist list from:
+          #   1. operator-supplied extra_sync_paths
+          #   2. include_dependabot_config toggle
+          #   3. include_github_metadata toggle
+          #
+          # Each path is optional on the underlying composite
+          # (silently skipped if absent on source_branch), so it's
+          # safe to enumerate aggressively here.
+          EXTRAS=()
+
+          if [ -n "${EXTRA_SYNC_PATHS}" ]; then
+            while IFS= read -r raw || [ -n "${raw}" ]; do
+              for token in ${raw}; do
+                [ -z "${token}" ] && continue
+                case "${token}" in \#*) continue ;; esac
+                EXTRAS+=("${token}")
+              done
+            done <<< "${EXTRA_SYNC_PATHS}"
+          fi
+
+          case "${INCLUDE_DEPENDABOT}" in
+            true)  EXTRAS+=('.github/dependabot.yml') ;;
+            false) ;;
+            *) echo "::error::include_dependabot_config must be 'true' or 'false', got '${INCLUDE_DEPENDABOT}'" >&2; exit 1 ;;
+          esac
+
+          case "${INCLUDE_METADATA}" in
+            true)
+              EXTRAS+=(
+                '.github/CODEOWNERS'
+                '.github/FUNDING.yml'
+                '.github/SECURITY.md'
+                '.github/CONTRIBUTING.md'
+                '.github/ISSUE_TEMPLATE'
+                '.github/PULL_REQUEST_TEMPLATE.md'
+                '.github/PULL_REQUEST_TEMPLATE'
+              )
+              ;;
+            false) ;;
+            *) echo "::error::include_github_metadata must be 'true' or 'false', got '${INCLUDE_METADATA}'" >&2; exit 1 ;;
+          esac
+
+          if [ "${#EXTRAS[@]}" -gt 0 ]; then
+            echo "Effective extra_allowlist_paths (${#EXTRAS[@]} entries, missing entries silently skipped):"
+            printf '  - %s\n' "${EXTRAS[@]}"
+          else
+            echo "No extra allowlist paths configured."
+          fi
+
+          {
+            echo 'extra_allowlist_paths<<__END_EXTRAS__'
+            if [ "${#EXTRAS[@]}" -gt 0 ]; then
+              printf '%s\n' "${EXTRAS[@]}"
+            fi
+            echo '__END_EXTRAS__'
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Promote (allowlist)
+        id: promote
+        uses: blackoutsecure/bos-automation-hub/.github/actions/release-promote-allowlist@main
+        with:
+          source_branch:         ${{ inputs.source_branch }}
+          target_branch:         ${{ inputs.target_branch }}
+          allowlist_paths:       ${{ inputs.allowlist_paths }}
+          extra_allowlist_paths: ${{ steps.extras.outputs.extra_allowlist_paths }}
+          tag_name:              ${{ inputs.tag_name }}
+          commit_message:        ${{ inputs.commit_message }}
+          dry_run:               ${{ inputs.dry_run }}
+
+      - name: Job summary
+        if: always()
+        env:
+          PROMOTED:           ${{ steps.promote.outputs.promoted }}
+          SOURCE_BRANCH:      ${{ inputs.source_branch }}
+          TARGET_BRANCH:      ${{ inputs.target_branch }}
+          SOURCE_SHA:         ${{ steps.promote.outputs.source_sha }}
+          TARGET_SHA:         ${{ steps.promote.outputs.target_sha }}
+          TAG_NAME:           ${{ steps.promote.outputs.tag_name }}
+          DRY_RUN:            ${{ inputs.dry_run }}
+          REMOVED_PATHS:      ${{ steps.promote.outputs.removed_paths }}
+          REMOVED_VIOLATIONS: ${{ steps.promote.outputs.removed_violations }}
+        run: |
+          {
+            echo "## Release promote"
+            echo ""
+            echo "| Field          | Value |"
+            echo "|----------------|-------|"
+            echo "| Source branch  | \`${SOURCE_BRANCH}\` |"
+            echo "| Target branch  | \`${TARGET_BRANCH}\` |"
+            echo "| Source SHA     | \`${SOURCE_SHA:-n/a}\` |"
+            echo "| Target SHA     | \`${TARGET_SHA:-n/a}\` |"
+            echo "| Tag            | \`${TAG_NAME}\` |"
+            echo "| Promoted       | \`${PROMOTED}\` |"
+            echo "| Dry run        | \`${DRY_RUN}\` |"
+            echo ""
+
+            if [ -n "${REMOVED_VIOLATIONS}" ]; then
+              echo "### ⚠️ Marketplace violations removed"
+              echo ""
+              echo "Files matching prohibited paths were present on \`${TARGET_BRANCH}\` and have been removed by this promote:"
+              echo ""
+              echo '```'
+              printf '%s\n' "${REMOVED_VIOLATIONS}"
+              echo '```'
+              echo ""
+              echo "This typically means the platform-level ruleset is missing or has a bypass route. See \`scripts/marketplace-repo/\` in the hub."
+              echo ""
+            fi
+
+            if [ -n "${REMOVED_PATHS}" ]; then
+              REMOVED_COUNT="$(printf '%s\n' "${REMOVED_PATHS}" | grep -cv '^$' || true)"
+              echo "### Files removed from \`${TARGET_BRANCH}\` (${REMOVED_COUNT})"
+              echo ""
+              echo '<details><summary>Show removed paths</summary>'
+              echo ""
+              echo '```'
+              printf '%s\n' "${REMOVED_PATHS}"
+              echo '```'
+              echo "</details>"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 — publish the GitHub Release on the new tag.
+  #
+  # Skipped when the promote stage was a no-op (no commit created),
+  # when `dry_run: true`, or when the promote stage failed.
+  # ---------------------------------------------------------------------------
+  release:
+    name: GitHub Release
+    needs: promote
+    if: ${{ needs.promote.outputs.promoted == 'true' && !inputs.dry_run }}
+    permissions:
+      contents: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/github-release.yml@main
+    with:
+      tag_name:               ${{ needs.promote.outputs.tag_name }}
+      release_name:           ${{ inputs.release_name }}
+      template_path:          ${{ inputs.release_template_path }}
+      extra_context:          ${{ inputs.release_extra_context }}
+      draft:                  ${{ inputs.release_draft }}
+      prerelease:             ${{ inputs.release_prerelease }}
+      make_latest:            ${{ inputs.release_make_latest }}
+      generate_release_notes: ${{ inputs.release_generate_notes }}
+      target_commitish:       ${{ needs.promote.outputs.target_sha }}
+      files:                  ${{ inputs.release_files }}

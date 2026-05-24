@@ -1,0 +1,115 @@
+# .bos-launchpad.yaml — release flavor example
+#
+# Copy to `.bos-launchpad.yaml` at your repo root and customize.
+# Required when the `bos_launchpad_release` service is enabled in
+# your sync-managed-files caller.
+#
+# Schema reference (full): see the "`.bos-launchpad.yaml` schema"
+# section in the hub README.
+# https://github.com/blackoutsecure/bos-automation-hub
+
+# ----- Upstream tracking -----
+# Where does "the upstream project" live? The launchpad delegates
+# discovery to bos-upstream-watcher; each `source` has its own
+# required fields.
+upstream:
+  repo: 'sdr-enthusiasts/docker-readsb-protobuf'
+  source: 'github_branch_file'   # github_release | github_branch_file | github_tags | container_registry | npm | pypi | url
+  branch: 'main'
+  # `version_file_path` defaults to 'version'; override for upstream
+  # repos that publish version somewhere non-canonical (e.g.
+  # debian/changelog).
+  version_file_path: 'version'
+  # Optional capture-group regex to extract a version from the file
+  # body. Default is "treat the entire file body as the version".
+  # Example for Debian changelog format:
+  #   version_regex: '^dump978-fa \((\d+(?:\.\d+){0,2})\)'
+  version_regex: ''
+
+# ----- Stage toggles -----
+# All default false — enable exactly the stages this repo ships.
+stages:
+  docker: true
+  balena: true
+  github_release: true
+  companion_docker: false
+
+# ----- Trigger gating -----
+triggers:
+  # Set `true` if your image embeds your OWN source (i.e. a `git push`
+  # MUST trigger a rebuild even when upstream hasn't moved). Default
+  # false: pushes that don't move upstream are a no-op release.
+  # Recommended `true` for docker-github-runner-style repos.
+  force_on_push: false
+
+# ----- Docker build & push -----
+docker:
+  image_name: 'readsb'
+  # Override which `vars.*` carries your Docker Hub namespace. Default
+  # 'DOCKERHUB_NAMESPACE'. The kicker resolves `vars[<name>]` at run
+  # time.
+  namespace_var: 'DOCKERHUB_NAMESPACE'
+  extra_tags: ''                  # comma-separated additional tags
+  short_description: 'readsb — Mode-S/ADS-B decoder, hub-built'
+  latest: true                    # tag the build as `:latest`
+  multi_arch: true                # build amd64 + arm64
+  update_description: true        # push README to Docker Hub
+
+# ----- Docker Scout vuln scan -----
+scout:
+  enable: true
+  command: 'cves'                 # cves | sbom | recommendations
+  severities: 'critical,high'
+  only_fixed: false
+  ignore_base: false
+  organization: ''                # blank → use Docker Hub namespace
+  record_environment: ''          # e.g. 'production' to push to Scout env
+  sarif_upload: true              # upload to GitHub Code Scanning
+  exit_code: false                # `true` fails the job on findings
+  enable_repo: true               # idempotently enroll repo in Scout
+
+# ----- Balena block publish -----
+balena:
+  block_name: 'readsb'
+  namespace_var: 'BALENA_NAMESPACE'
+  sync_yml: true                  # commit the rendered balena.yml back
+  draft: false                    # `true` publishes as a draft release
+  generate_yml: false             # let the action render balena.yml
+  type: 'sw.block'                # sw.block | sw.application
+  repository_url: 'https://github.com/blackoutsecure/docker-readsb'
+  logo_url: ''                    # optional, 512px PNG URL
+  default_device_type: 'raspberrypi4-64'
+  # Multi-line values use `|-` so the trailing newline is chomped at
+  # every forwarding hop. One device-type per line.
+  supported_device_types: |-
+    raspberrypi3-64
+    raspberrypi4-64
+    raspberrypi5
+    intel-nuc
+    genericx86-64-ext
+  description: |-
+    readsb — Mode-S/ADS-B decoder packaged for balenaCloud.
+    Multi-arch Docker build, hub-managed release pipeline.
+  post_provisioning: |-
+    ## After deploy
+    1. Plug in your SDR (RTL2832U / Mode-S Beast).
+    2. Set the `RECEIVER_OPTIONS` env var on the device.
+    3. Connect to port 30005 from a downstream feeder (e.g. tar1090).
+
+# ----- Companion Docker image (optional sidecar) -----
+# Leave blank if your repo only ships one image.
+companion_docker:
+  image_name: ''
+  build_target: ''
+  short_description: ''
+
+# ----- GitHub Release publish -----
+release:
+  template_path: '.github/release-template.md'
+  extra_context: ''               # YAML / JSON map serialized as string
+  generate_notes: true            # auto-append GitHub's commit-since notes
+  files: ''                       # newline-separated artifact globs
+  draft: false
+
+# ----- Shared -----
+platforms: 'linux/amd64,linux/arm64'

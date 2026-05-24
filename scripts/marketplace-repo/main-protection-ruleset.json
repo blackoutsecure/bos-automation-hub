@@ -1,0 +1,61 @@
+{
+  "_comment_top": "Org ruleset template for Marketplace Action repos. See scripts/marketplace-repo/README.md.",
+  "_comment_bypass": "Replace BYPASS_ACTOR_ID_PLACEHOLDER with the integration / App ID permitted to push around the path block (release-promote.yml's bot identity).",
+  "_comment_repos": "Replace the example entries in conditions.repository_name.include with the actual Marketplace Action repo names in the blackoutsecure org.",
+
+  "name": "marketplace-action-default-branch-guard",
+  "target": "branch",
+  "enforcement": "active",
+
+  "bypass_actors": [
+    {
+      "actor_id": "BYPASS_ACTOR_ID_PLACEHOLDER",
+      "actor_type": "Integration",
+      "bypass_mode": "always"
+    }
+  ],
+
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    },
+    "repository_name": {
+      "include": [
+        "bos-sitemap-generator",
+        "bos-upstream-watcher",
+        "bos-nginx-config-validator"
+      ],
+      "exclude": [],
+      "protected": true
+    }
+  },
+
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "allowed_merge_methods": ["merge", "squash", "rebase"]
+      }
+    },
+    {
+      "type": "file_path_restriction",
+      "parameters": {
+        "restricted_file_paths": [
+          ".github/workflows/**"
+        ]
+      }
+    }
+  ]
+}

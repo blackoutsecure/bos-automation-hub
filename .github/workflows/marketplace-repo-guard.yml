@@ -1,0 +1,230 @@
+# Marketplace repo compliance guard (reusable).
+#
+# Fails fast on PRs / pushes that would put `.github/workflows/*.yml`
+# (or other operator-listed paths) onto the default branch, breaking
+# GitHub Marketplace publishing (see
+# https://docs.github.com/en/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace).
+#
+# This is the **defense-in-depth** companion to org-level rulesets:
+#
+#   * The org ruleset (see `scripts/marketplace-repo/main-protection-ruleset.json`)
+#     is the platform-level enforcement: GitHub itself refuses the
+#     write at merge time, no exceptions outside the configured
+#     bypass actor.
+#
+#   * This workflow runs on the PR ITSELF, surfacing the violation in
+#     the PR check list within seconds — operators see the problem
+#     before reviewers waste cycles, instead of discovering it at the
+#     merge button.
+#
+# Trigger model: call from a thin caller on the **source branch**
+# (`dev`) that fires on `pull_request_target` for PRs targeting the
+# default branch — see `examples/marketplace-action-guard.example.yml`.
+# `pull_request_target` (not `pull_request`) is required because the
+# workflow file lives on the source branch (`dev`); PR-base reads
+# would otherwise look for the workflow on the PR's BASE branch, which
+# (correctly) has no workflows.
+#
+# Security note on `pull_request_target`: this workflow runs in the
+# context of the BASE branch with read+write tokens. We do NOT check
+# out the PR head into an execution context — only its SHA is read for
+# `git diff`. No code from the PR is executed.
+name: Marketplace repo guard (reusable)
+
+"on":
+  workflow_call:
+    inputs:
+      pr_base_sha:
+        description: >-
+          PR base SHA. Caller passes
+          `github.event.pull_request.base.sha`. Required when the
+          PR-diff check is desired (default).
+        required: false
+        type: string
+        default: ''
+      pr_head_sha:
+        description: >-
+          PR head SHA. Caller passes
+          `github.event.pull_request.head.sha`. Required when the
+          PR-diff check is desired (default).
+        required: false
+        type: string
+        default: ''
+      check_pr_diff:
+        description: '`true` to run the PR-diff check (requires both PR SHAs).'
+        required: false
+        type: boolean
+        default: true
+      check_tree_state:
+        description: '`true` to run the tree-state check on the BASE ref.'
+        required: false
+        type: boolean
+        default: true
+      require_action_yml:
+        description: >-
+          `true` to require `action.yml` (or `.yaml`) at the repo root
+          on the BASE ref — useful guard against accidentally enabling
+          this workflow on a non-Action repo.
+        required: false
+        type: boolean
+        default: false
+      blocked_paths:
+        description: >-
+          Newline-separated git pathspec patterns that may not be
+          added or modified on the BASE branch. Default
+          `.github/workflows/`.
+        required: false
+        type: string
+        default: '.github/workflows/'
+      required_paths:
+        description: >-
+          Newline-separated paths that MUST exist on the protected
+          branch AND must not be deleted by a PR. Symmetric inverse
+          of `blocked_paths`. Most common entry:
+          `.github/dependabot.yml` (Dependabot reads its config only
+          from the default branch, so removing it from `dev` cascades
+          to a silent break on next promote). Default empty (opt-in).
+        required: false
+        type: string
+        default: ''
+      checkout_ref:
+        description: >-
+          Ref to check out for the tree-state check (and `git diff`
+          base resolution). Defaults to the PR BASE ref when the event
+          is `pull_request_target`; falls back to `github.ref` for
+          other events.
+        required: false
+        type: string
+        default: ''
+
+    outputs:
+      violations:
+        description: 'Newline-separated list of violating paths (empty when clean).'
+        value: ${{ jobs.guard.outputs.violations }}
+      missing_required:
+        description: 'Newline-separated list of `required_paths` entries absent from the protected branch (empty when clean).'
+        value: ${{ jobs.guard.outputs.missing_required }}
+      removed_required:
+        description: 'Newline-separated list of `required_paths` entries deleted by the PR diff (empty when clean).'
+        value: ${{ jobs.guard.outputs.removed_required }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # PR-scoped — cancel earlier runs on the same PR when a new push
+  # arrives, since only the latest diff matters.
+  group: marketplace-guard-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Pinned to ubuntu-latest deliberately:
+  #   * The guard is read-only metadata + a tiny `git diff` — no need
+  #     to consume self-hosted runner capacity for it.
+  #   * It MUST be able to run when self-hosted runners are unhealthy.
+  # ---------------------------------------------------------------------------
+  guard:
+    name: Check Marketplace compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      violations:       ${{ steps.guard.outputs.violations }}
+      missing_required: ${{ steps.guard.outputs.missing_required }}
+      removed_required: ${{ steps.guard.outputs.removed_required }}
+    steps:
+      - name: Resolve checkout ref
+        id: ref
+        env:
+          INPUT_REF:    ${{ inputs.checkout_ref }}
+          EVENT_NAME:   ${{ github.event_name }}
+          PR_BASE_REF:  ${{ github.event.pull_request.base.ref }}
+          GITHUB_REF:   ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_REF}" ]; then
+            REF="${INPUT_REF}"
+          elif [ "${EVENT_NAME}" = "pull_request_target" ] && [ -n "${PR_BASE_REF}" ]; then
+            REF="${PR_BASE_REF}"
+          else
+            REF="${GITHUB_REF}"
+          fi
+          echo "ref=${REF}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved checkout ref: ${REF}"
+
+      - name: Checkout (base ref, full history)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
+          # Full history is needed so the diff base + head are both
+          # resolvable; the composite action falls back to a targeted
+          # fetch if either SHA is missing, but starting with full
+          # history avoids that extra round-trip on most PRs.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Marketplace repo guard
+        id: guard
+        uses: blackoutsecure/bos-automation-hub/.github/actions/marketplace-repo-guard@main
+        with:
+          pr_base_sha:        ${{ inputs.pr_base_sha }}
+          pr_head_sha:        ${{ inputs.pr_head_sha }}
+          check_pr_diff:      ${{ inputs.check_pr_diff }}
+          check_tree_state:   ${{ inputs.check_tree_state }}
+          require_action_yml: ${{ inputs.require_action_yml }}
+          blocked_paths:      ${{ inputs.blocked_paths }}
+          required_paths:     ${{ inputs.required_paths }}
+
+      - name: Job summary
+        if: always()
+        env:
+          VIOLATIONS:       ${{ steps.guard.outputs.violations }}
+          MISSING_REQUIRED: ${{ steps.guard.outputs.missing_required }}
+          REMOVED_REQUIRED: ${{ steps.guard.outputs.removed_required }}
+        run: |
+          {
+            echo "## Marketplace repo guard"
+            echo ""
+            if [ -z "${VIOLATIONS}" ] && [ -z "${MISSING_REQUIRED}" ] && [ -z "${REMOVED_REQUIRED}" ]; then
+              echo "**Status:** OK — no violations."
+            else
+              echo "**Status:** FAIL."
+              echo ""
+              if [ -n "${VIOLATIONS}" ]; then
+                echo "### Blocked paths present / added"
+                echo ""
+                echo '```'
+                printf '%s\n' "${VIOLATIONS}"
+                echo '```'
+                echo ""
+                echo "Move CI workflow files to your source branch (\`dev\`) and"
+                echo "use \`release-promote.yml\` to publish without including"
+                echo "them on the default branch. See README **Marketplace"
+                echo "Action repo enrollment**."
+                echo ""
+              fi
+              if [ -n "${MISSING_REQUIRED}" ]; then
+                echo "### Required paths missing from protected branch"
+                echo ""
+                echo '```'
+                printf '%s\n' "${MISSING_REQUIRED}"
+                echo '```'
+                echo ""
+                echo "Add these on the source branch and enable the relevant"
+                echo "\`include_*\` toggle on \`release-promote.yml\` so the"
+                echo "next promote auto-syncs them (e.g. \`include_dependabot_config: true\`)."
+                echo ""
+              fi
+              if [ -n "${REMOVED_REQUIRED}" ]; then
+                echo "### Required paths deleted by this PR"
+                echo ""
+                echo '```'
+                printf '%s\n' "${REMOVED_REQUIRED}"
+                echo '```'
+                echo ""
+                echo "Restoring the file is usually the right fix. If the"
+                echo "deletion IS intentional, remove the path from the"
+                echo "\`required_paths\` input on the guard caller."
+              fi
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

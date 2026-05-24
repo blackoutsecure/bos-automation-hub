@@ -1,11 +1,13 @@
 name: Sync managed dotfiles
 
 # Reusable workflow that keeps standardized "managed" sections of
-# `.gitignore`, `.dockerignore`, `.editorconfig`, and `.gitattributes`
-# in sync with the canonical blocks defined in
-# `.github/actions/sync-managed-files/sync.py`, AND delivers canonical
-# whole files (e.g. `root/usr/local/bin/log-functions.sh`) for
-# whole-file services such as `logger`.
+# `.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`,
+# `.github/dependabot.yml` in sync with the canonical blocks defined
+# in `.github/actions/sync-managed-files/sync.py`, delivers canonical
+# whole files (e.g. `root/usr/local/bin/log-functions.sh`,
+# `.prettierrc.yaml`) for whole-file services, AND initializes starter
+# templates (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`,
+# `lint.yml`) on first run for init-if-missing services.
 #
 # Modes:
 #   commit  (default) — write changes and push back to the calling
@@ -13,11 +15,14 @@ name: Sync managed dotfiles
 #   check             — exit non-zero if any managed section or file
 #                       is drifted. Use in PR CI to enforce that
 #                       consumers commit canonical content. Does NOT
-#                       modify the workspace.
+#                       modify the workspace. Init-if-missing files are
+#                       reported as drift on the FIRST run only (file
+#                       does not exist → would be created); subsequent
+#                       runs see the file present and emit no change.
 #
 # Disabled services (any not listed in `services:`) are skipped
-# entirely; existing managed blocks AND existing whole-file targets
-# for them are left untouched.
+# entirely; existing managed blocks AND existing whole-file / init-file
+# targets for them are left untouched.
 
 on:
   workflow_call:
@@ -25,8 +30,17 @@ on:
       services:
         description: >-
           Newline or whitespace separated list of enabled services.
-          Known: `common`, `docker`, `balena`, `node`, `python`,
-          `lf_line_endings`, `logger`.
+          Section: `common`, `docker`, `balena`, `node`, `python`,
+          `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
+          `dependabot_pip`. Whole-file: `logger`, `prettier`,
+          `bos_launchpad_release`, `bos_launchpad_cf_pages` (at most
+          one `bos_launchpad_*` per repo — both target the same
+          `.github/workflows/bos-launchpad.yml`; the enabled kicker
+          reads per-repo customization from `.bos-launchpad.yaml`).
+          Init-if-missing: `gha_sync_commit`, `gha_sync_drift_check`,
+          `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
+          one `gha_lint_*` per repo — they all target the same
+          `.github/workflows/lint.yml`).
         required: true
         type: string
       mode:

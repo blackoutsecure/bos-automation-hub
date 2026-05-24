@@ -1,0 +1,65 @@
+# .bos-launchpad.yaml — Cloudflare Pages flavor example
+#
+# Copy to `.bos-launchpad.yaml` at your repo root and customize.
+# Required when the `bos_launchpad_cf_pages` service is enabled in
+# your sync-managed-files caller.
+#
+# Schema reference (full): see the "`.bos-launchpad.yaml` schema"
+# section in the hub README.
+# https://github.com/blackoutsecure/bos-automation-hub
+
+# ----- Stage toggles -----
+# cf-pages flavor only needs `cloudflare_pages` enabled. Default
+# `true` if this file is present at all; explicit here for clarity.
+stages:
+  cloudflare_pages: true
+
+# ----- Cloudflare Pages deploy -----
+cloudflare:
+  project_name: 'blackoutsecure-site'
+  site_url: 'https://blackoutsecure.app'
+  deployment_environment: 'production'
+
+  # `public_dir` is the directory that gets STAGED (copied into
+  # deploy_dir). `.` = repo root.
+  public_dir: '.'
+  deploy_dir: './dist'
+  clean_deploy_dir: true
+
+  # Files & directories to stage into `deploy_dir` from `public_dir`.
+  # One path per line; `|-` chomps the trailing newline so multi-line
+  # values stay byte-stable through the forwarding chain.
+  copy_files: |-
+    index.html
+    _redirects
+    _headers
+    humans.txt
+  copy_dirs: |-
+    assets
+
+  prebuild_command: ''            # e.g. 'npm ci && npm run build'
+  working_directory: ''           # blank = repo root
+  branch: ''                      # blank = use default branch
+  commit_message: ''              # blank = use trigger commit message
+  wrangler_version: ''            # blank = action default
+  extra_wrangler_args: ''
+  runs_on: ''                     # blank = ubuntu-latest
+  checkout_fetch_depth: 0         # 0 = full history
+  purge_cache: true               # purge edge cache after deploy
+
+  # ----- Generators (all default false — opt in per generator) -----
+  generate_sitemap: true
+  generate_robots: true
+  generate_security_txt: true
+  security_contact: 'info@blackoutsecure.app'
+  generate_manifest: true
+  manifest_name: 'Blackout Secure'
+  manifest_short_name: 'BOS'
+  manifest_description: 'Edge-secure, audit-ready ADS-B and runner infrastructure.'
+  manifest_orientation: 'portrait'
+  manifest_theme_color: '#0a0a0a'
+  manifest_background_color: '#0a0a0a'
+  manifest_lang: 'en-US'
+  manifest_dir: 'ltr'
+  manifest_categories: 'utilities,productivity'
+  manifest_icons_dir: 'assets/icons'
