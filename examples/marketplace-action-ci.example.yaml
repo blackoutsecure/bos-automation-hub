@@ -1,0 +1,87 @@
+# Marketplace Action — PR-time CI example.
+#
+# WHERE THIS LIVES: on the **dev** branch of a GitHub Marketplace
+# Action repo, at `.github/workflows/ci.yml` (or `marketplace-ci.yml`
+# if you already have a `ci.yml`). This file MUST NOT exist on
+# `main` — Marketplace publishing requires zero workflow files on
+# the default branch.
+#
+# WHAT IT DOES:
+#   Runs three jobs on every PR into `dev` (and every push to `dev`):
+#
+#     1. **Marketplace check** — validates the manifest, LICENSE,
+#        README, branding allowlist, community-health files, and
+#        Marketplace `name:` rules. Driven by the published
+#        `bos-marketplace-kit` `check` composite.
+#     2. **Branding preview** — renders the actual Marketplace card
+#        SVG (Feather icon + colour) and uploads it as a build
+#        artifact so reviewers can see how the listing will look.
+#     3. **Name check** (opt-in) — verifies the proposed
+#        Marketplace listing name is available. Run this **once**
+#        before first publish; leave off afterward (you'll always
+#        collide with your own listing).
+#
+# THIS IS ONE OF THREE WORKFLOWS in the canonical Marketplace Action
+# stack. The other two:
+#
+#   * `marketplace-action-guard.example.yaml` — PR-time guard against
+#     workflow files landing on `main` (runs on PRs into `main`).
+#   * `marketplace-action-release.example.yaml` — `dev -> main`
+#     allowlist promote + GitHub Release publish (runs on
+#     `workflow_dispatch`).
+#
+# All three call hub reusable workflows, which in turn call
+# `bos-marketplace-kit` composites. Dependabot in the hub tracks the
+# kit pin; consumer repos pick up new kit releases automatically on
+# the next hub release.
+name: Marketplace CI
+
+"on":
+  pull_request:
+    branches: ['dev']
+  push:
+    branches: ['dev']
+  workflow_dispatch:
+    inputs:
+      run_name_check:
+        description: 'Run the Marketplace name availability check (one-shot before first publish).'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/marketplace-action-ci.yml@main
+    with:
+      # ----- check ----------------------------------------------------------
+      action_yml_path: 'action.yml'
+      # `fail_on_warning: true` is the recommended steady-state once
+      # the repo is clean. Start with `false` while migrating to
+      # avoid blocking PRs on yet-unaddressed OP-class warnings.
+      fail_on_warning: false
+      # Skip rule IDs while migrating; remove entries as fixes land.
+      skip_checks: ''
+
+      # ----- community-health files ----------------------------------------
+      # Default policy for each `require_*` knob is `warn` (presence
+      # is encouraged but not blocking). Flip individual ones to
+      # `fail` once you've added the file, or `skip` to opt out
+      # entirely.
+      require_security:        'warn'
+      require_code_of_conduct: 'warn'
+      require_contributing:    'warn'
+
+      # ----- branding preview -----------------------------------------------
+      run_branding_preview: true
+
+      # ----- name check (opt-in; defaults to off) --------------------------
+      # On `workflow_dispatch`, allow the operator to flip it on
+      # manually. On other triggers it stays off.
+      run_name_check: ${{ github.event_name == 'workflow_dispatch' && inputs.run_name_check || false }}

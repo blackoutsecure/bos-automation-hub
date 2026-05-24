@@ -144,7 +144,8 @@ preflight on the source variable.
 | [.github/actions/shared/commit-and-push/action.yml](.github/actions/shared/commit-and-push/action.yml) | Composite action | Stage files, commit, and push to the current branch with rebase-retry on concurrent commits. Single-line message + author validation. Exits cleanly with `committed=false` when nothing is staged. Used by `monitor-upstream-release.yml` and `sync-managed-files.yml`. |
 | [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Caller example: [`marketplace-action-release.example.yaml`](examples/marketplace-action-release.example.yaml). |
 | [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Caller example: [`marketplace-action-guard.example.yaml`](examples/marketplace-action-guard.example.yaml). |
-| [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit) (external) | Marketplace Action | Source of the Marketplace `check` / `guard` / `promote` / `name-check` / `branding-preview` composite primitives consumed by `marketplace-repo-guard.yml` and `release-promote.yml`. SHA-pinned to `v0.1.0`; Dependabot tracks bumps. |
+| [.github/workflows/marketplace-action-ci.yml](.github/workflows/marketplace-action-ci.yml) | Reusable workflow | **Marketplace Action CI.** PR-time `check` (manifest + LICENSE + README + branding + community-health) + `branding-preview` (Marketplace card SVG, uploaded as artifact) + opt-in `name-check` (Marketplace name availability). Drives every PR into `dev` on a Marketplace Action repo. Caller example: [`marketplace-action-ci.example.yaml`](examples/marketplace-action-ci.example.yaml). |
+| [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit) (external) | Marketplace Action | Source of the `check` / `guard` / `promote` / `name-check` / `branding-preview` composite primitives consumed by `marketplace-repo-guard.yml`, `release-promote.yml`, and `marketplace-action-ci.yml`. SHA-pinned to `v0.1.0`; Dependabot tracks bumps. |
 | [scripts/marketplace-repo/](scripts/marketplace-repo/) | Bootstrap scripts | One-time platform-setup scripts for Marketplace Action repos: org ruleset template + `gh api` bootstrap (`bootstrap-ruleset.sh`) for `file_path_restriction` enforcement, and a per-repo branch-protection fallback (`bootstrap-branch-protection.sh`). See [`scripts/marketplace-repo/README.md`](scripts/marketplace-repo/README.md). |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
 | [.github/workflows/openwrt-readsb-wiedehopf-bump.yml](.github/workflows/openwrt-readsb-wiedehopf-bump.yml) | Scheduled automation | Tracks new `wiedehopf/readsb` releases and proposes them upstream as a cross-repo PR to `openwrt/packages` (bumps `PKG_VERSION`/`PKG_HASH`, resets `PKG_RELEASE`) via a bot-owned fork. |
@@ -2208,6 +2209,7 @@ services in `sync-managed-files` produce this layout for you on
 | Setup item                                              | Auto-setup-able? | How                                                                                  |
 |---------------------------------------------------------|------------------|--------------------------------------------------------------------------------------|
 | PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `marketplace-action-guard.example.yaml` on `dev` as `marketplace-guard.yml`.    |
+| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `marketplace-action-ci.example.yaml` on `dev` as `ci.yml`.                      |
 | PR-time block on deletion of `.github/dependabot.yml` (or other required files) | **Yes** | Same guard caller — populate `required_paths:` (default empty, opt-in). |
 | Hard-block on workflow paths during `dev -> main` promotion | **Yes**       | Baked into the [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote) — cannot be disabled. |
 | `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `marketplace-action-release.example.yaml` on `dev` as `release.yml`.            |
@@ -2224,7 +2226,11 @@ services in `sync-managed-files` produce this layout for you on
 
 1. **Set the default branch to `main`** (UI: Settings → Branches).
 2. **Push `dev`**: `git push origin main:dev`.
-3. **On `dev`**, add the two caller workflows:
+3. **On `dev`**, add the three caller workflows:
+   * `.github/workflows/ci.yml` — copy from
+     [`examples/marketplace-action-ci.example.yaml`](examples/marketplace-action-ci.example.yaml).
+     Runs the kit `check` + `branding-preview` (+ opt-in `name-check`)
+     on every PR into `dev` and on `push: dev`.
    * `.github/workflows/release.yml` — copy from
      [`examples/marketplace-action-release.example.yaml`](examples/marketplace-action-release.example.yaml).
      Customize the `allowlist_paths:` to match what the published
