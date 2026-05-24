@@ -1836,6 +1836,9 @@ services are **not** removed — they're simply ignored on this run.
 | `gha_lint_node`        | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Node-based GitHub Action repos. Runs `actionlint` + `eslint` (`npm run lint`) + `prettier --check`. Mutually exclusive with `gha_lint_python` / `gha_lint_shell`. |
 | `gha_lint_python`      | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Python-based GitHub Action repos. Runs `actionlint` + `ruff check` + `pytest`. Mutually exclusive with `gha_lint_node` / `gha_lint_shell`. |
 | `gha_lint_shell`       | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for shell/bash-based GitHub Action repos. Runs `actionlint` + `shellcheck` + `bats`. Mutually exclusive with `gha_lint_node` / `gha_lint_python`. |
+| `license_apache2`      | init-if-missing  | `LICENSE`                                        | Verbatim Apache 2.0 LICENSE (byte-identical to `apache.org/licenses/LICENSE-2.0.txt`). Written WITHOUT the "Initialized by hub" header so license-detection tools (GitHub linguist, FOSSA, etc.) match the canonical SHA. The hub will NEVER overwrite an existing LICENSE — change of license is a deliberate human decision. |
+| `notice_apache2`       | init-if-missing  | `NOTICE`                                         | Apache 2.0-style NOTICE with placeholders rendered from `.bos-managed-files.yaml` (schema below). Written WITHOUT the hub header (same reasoning as `license_apache2`). |
+| `codeowners`           | init-if-missing  | `.github/CODEOWNERS`                             | Default CODEOWNERS with a catch-all `* @<team>` rule routing all PRs to the maintainers team. Placeholder rendered from `.bos-managed-files.yaml`. Once present, the hub leaves the file alone — consumers add per-path overrides below the catch-all (last-match-wins). CODEOWNERS does NOT inherit from the org `.github` repo; each repo curates its own. |
 
 ### `.bos-launchpad.yaml` schema (used by the `bos_launchpad_*` services)
 
@@ -2013,6 +2016,67 @@ hand-authored.
 
 > **Migration tip:** see [examples/](examples/) for a worked
 > `.bos-launchpad.yaml` for each kicker flavor (release + cf-pages).
+
+### `.bos-managed-files.yaml` schema (used by `license_apache2` / `notice_apache2` / `codeowners`)
+
+Optional per-repo file at the repo root that supplies values for
+`{{KEY}}` placeholders rendered into the templated init-if-missing
+services. All keys are optional — when the file is absent OR a key is
+missing the hub falls back to org-canonical defaults. The file is
+parsed by a tiny stdlib-only flat-YAML reader: only `key: value` pairs
+are supported (no nesting, no lists, no multi-line scalars). Unknown
+keys, malformed lines, and out-of-range years fail the action.
+
+```yaml
+# .bos-managed-files.yaml
+# All keys optional. Comment lines (#) and inline comments are stripped.
+
+# Copyright holder rendered into NOTICE.
+# Default: "Blackout Secure"
+copyright_holder: "Blackout Secure"
+
+# First-publication year for this repo. The hub computes
+# `COPYRIGHT_YEAR_RANGE` automatically:
+#   * unset OR equal to current year → "YYYY"
+#   * earlier year                   → "YYYY-current"
+# Must be between 1970 and the current year if set.
+# Default: "" (renders as just the current year)
+copyright_year_start: 2024
+
+# CODEOWNERS catch-all team. Must be a valid GitHub team slug or
+# username (prefix `@`). Last-match-wins per path, so consumers add
+# per-path overrides BELOW the catch-all rule.
+# Default: "@blackoutsecure/maintainers"
+maintainers_team: "@blackoutsecure/maintainers"
+```
+
+**Placeholder reference**
+
+| Placeholder              | Source                                            | Example output                  |
+|--------------------------|---------------------------------------------------|---------------------------------|
+| `{{COPYRIGHT_HOLDER}}`   | `copyright_holder` (default: `Blackout Secure`)   | `Blackout Secure`               |
+| `{{COPYRIGHT_YEAR_RANGE}}` | computed from `copyright_year_start` + current year | `2024-2026` or `2026`         |
+| `{{MAINTAINERS_TEAM}}`   | `maintainers_team` (default: `@blackoutsecure/maintainers`) | `@blackoutsecure/maintainers` |
+| `{{REPO_NAME}}`          | `GITHUB_REPOSITORY` (after the slash), else workspace basename | `docker-tar1090`           |
+| `{{REPO_OWNER}}`         | `GITHUB_REPOSITORY` (before the slash), else `blackoutsecure` | `blackoutsecure`              |
+
+`{{KEY}}` markers in the canonical bodies are validated at module
+import time — an unknown placeholder name in any templated service
+body fails the action before any file is written, so typos cannot
+silently land in a consumer's committed file.
+
+**Why these three services don't inherit from `.github`**
+
+GitHub's [community-health inheritance](https://docs.github.com/communities/setting-up-your-project-for-healthy-contributions/creating-a-default-community-health-file)
+covers `README`, `CODE_OF_CONDUCT`, `CONTRIBUTING`, `GOVERNANCE`,
+`SECURITY`, `SUPPORT`, `FUNDING`, and the `ISSUE_TEMPLATE` /
+`PULL_REQUEST_TEMPLATE` / `DISCUSSION_TEMPLATE` directories. It does
+NOT cover `LICENSE` (every distributed work needs its own under
+copyright law; required for GitHub Marketplace listings), `NOTICE`
+(part of the Apache 2.0 distribution requirement under §4), or
+`CODEOWNERS` (used at PR-review time and resolved per-repo). For
+those three the hub centralizes the canonical content/template and
+delivers it on first sync; subsequent edits stay in-repo.
 
 ### Modes
 

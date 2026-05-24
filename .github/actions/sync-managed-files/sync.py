@@ -1221,6 +1221,462 @@ jobs:
 
 
 # --------------------------------------------------------------------------- #
+# Templated whole-file canonical content (LICENSE / NOTICE / CODEOWNERS)      #
+# --------------------------------------------------------------------------- #
+#
+# These three services are init-if-missing (the hub writes them ONLY when
+# the target file is absent and NEVER overwrites a hand-edited version).
+# They support `{{KEY}}` placeholder substitution from per-repo
+# `.bos-managed-files.yaml` config (see `_load_managed_config` below).
+#
+# Supported placeholders:
+#
+#   * `{{COPYRIGHT_HOLDER}}`     — from config; default "Blackout Secure".
+#   * `{{COPYRIGHT_YEAR_RANGE}}` — auto-computed: `YYYY` when
+#     `copyright_year_start` is current year (or unset), `YYYY-YYYY`
+#     otherwise.
+#   * `{{MAINTAINERS_TEAM}}`     — from config; default
+#     "@blackoutsecure/maintainers".
+#   * `{{REPO_NAME}}`            — repo name from `GITHUB_REPOSITORY`
+#     (after the slash) or the workspace root basename.
+#   * `{{REPO_OWNER}}`           — org from `GITHUB_REPOSITORY` (before
+#     the slash) or `"blackoutsecure"`.
+#
+# LICENSE is intentionally verbatim Apache 2.0 with NO placeholders — the
+# Apache convention is that the LICENSE file is a verbatim copy and any
+# copyright / project identification belongs in NOTICE.
+#
+# LICENSE and NOTICE skip the "Initialized by hub" header injection so
+# automatic license-detection tools (GitHub linguist, FOSSA, etc.) can
+# still match the canonical SHA. CODEOWNERS uses `#` comments natively
+# so the header is kept (helpful provenance for reviewers).
+
+# Embedded verbatim from `LICENSE` at the hub repo root.
+# DO NOT EDIT IN PLACE — re-run `scripts/sync-license-from-disk.py` if the
+# canonical text ever needs to be refreshed (e.g., new section numbering
+# from apache.org). The text below MUST byte-match `apache.org/licenses/
+# LICENSE-2.0.txt` so license-detection tools recognize it.
+_LICENSE_APACHE2 = """\
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+"""
+
+
+# Apache 2.0 NOTICE template. Substitutions are applied per-repo by
+# `_render_placeholders()`. The file format follows the convention from
+# https://www.apache.org/foundation/license-faq.html#Required-Notice
+# (project name, copyright line, then any required attributions).
+_NOTICE_TEMPLATE = """\
+{{REPO_NAME}}
+Copyright {{COPYRIGHT_YEAR_RANGE}} {{COPYRIGHT_HOLDER}}
+
+This product is part of the Blackout Secure open-source platform
+(https://github.com/{{REPO_OWNER}}).
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the
+full terms.
+"""
+
+
+# Default CODEOWNERS — single catch-all rule routing all PRs to the
+# maintainers team. Consumers are encouraged to add per-path rules
+# BELOW the catch-all (CODEOWNERS uses last-match-wins semantics).
+# Init-if-missing — once the file exists, the hub leaves it alone.
+_CODEOWNERS_TEMPLATE = """\
+# CODEOWNERS — default reviewer routing.
+#
+# See https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# for the full pattern syntax. CODEOWNERS does NOT inherit from the
+# org `.github` repo; each repo curates its own.
+#
+# Pattern matching is last-match-wins per path, so add per-path
+# overrides BELOW this default catch-all (e.g. `*.md @docs-team`).
+
+*  {{MAINTAINERS_TEAM}}
+"""
+
+
+# --------------------------------------------------------------------------- #
+# Per-repo managed-files config (.bos-managed-files.yaml)                     #
+# --------------------------------------------------------------------------- #
+#
+# Tiny flat-YAML reader for per-repo placeholder values consumed by the
+# `license_apache2`, `notice_apache2`, and `codeowners` services. Pure
+# stdlib — sync.py intentionally has no third-party deps.
+#
+# Schema (all keys optional; defaults applied for missing keys):
+#
+#     copyright_holder: Blackout Secure
+#     copyright_year_start: 2024
+#     maintainers_team: "@blackoutsecure/maintainers"
+#
+# Comments (`#` whole-line and inline-after-value) are stripped. Values
+# may be unquoted, double-quoted, or single-quoted. Nesting, lists, and
+# multi-line scalars are NOT supported — the file is intentionally tiny.
+
+MANAGED_FILES_CONFIG_FILENAME = ".bos-managed-files.yaml"
+
+_DEFAULT_MANAGED_CONFIG: Dict[str, str] = {
+    "copyright_holder": "Blackout Secure",
+    "copyright_year_start": "",
+    "maintainers_team": "@blackoutsecure/maintainers",
+}
+
+_KNOWN_CONFIG_KEYS = frozenset(_DEFAULT_MANAGED_CONFIG.keys())
+
+_KNOWN_PLACEHOLDERS = frozenset({
+    "COPYRIGHT_HOLDER",
+    "COPYRIGHT_YEAR_RANGE",
+    "MAINTAINERS_TEAM",
+    "REPO_NAME",
+    "REPO_OWNER",
+})
+
+_PLACEHOLDER_RE = re.compile(r"\{\{([A-Z_][A-Z0-9_]*)\}\}")
+
+# Flat-YAML line: `key: value` or `key: "value"` or `key: 'value'`.
+# Anchored to allow leading whitespace (tolerated even though flat YAML
+# shouldn't have indentation).
+_FLAT_YAML_LINE_RE = re.compile(
+    r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*"
+    r"(?:\"([^\"]*)\"|'([^']*)'|([^#\n]*?))\s*(?:#.*)?$"
+)
+
+
+def _parse_flat_yaml(text: str) -> Dict[str, str]:
+    """Parse a tiny subset of YAML: flat key/value pairs, optional quoting,
+    `#` comments, blank lines. Unknown keys are rejected with `die()` so
+    typos fail fast rather than silently fall through to defaults.
+
+    Returns a dict of {key: value}. Caller merges with defaults.
+    """
+    result: Dict[str, str] = {}
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m = _FLAT_YAML_LINE_RE.match(raw)
+        if not m:
+            die(
+                f"{MANAGED_FILES_CONFIG_FILENAME}:{lineno}: cannot parse line: "
+                f"{raw!r}. Expected `key: value` or `key: \"value\"`."
+            )
+        key = m.group(1)
+        # First non-None capture group of (double, single, bare) is the value.
+        value = m.group(2) if m.group(2) is not None else (
+            m.group(3) if m.group(3) is not None else (m.group(4) or "")
+        )
+        value = value.strip()
+        if key not in _KNOWN_CONFIG_KEYS:
+            die(
+                f"{MANAGED_FILES_CONFIG_FILENAME}:{lineno}: unknown key "
+                f"'{key}'. Known: {', '.join(sorted(_KNOWN_CONFIG_KEYS))}."
+            )
+        result[key] = value
+    return result
+
+
+def _load_managed_config(root: str) -> Dict[str, str]:
+    """Read `.bos-managed-files.yaml` if present at `root`; return the
+    parsed config merged over the defaults. Missing file is fine —
+    defaults are used."""
+    config_path = os.path.join(root, MANAGED_FILES_CONFIG_FILENAME)
+    merged = dict(_DEFAULT_MANAGED_CONFIG)
+    if not os.path.exists(config_path):
+        return merged
+    with open(config_path, "r", encoding="utf-8") as fh:
+        parsed = _parse_flat_yaml(fh.read())
+    merged.update(parsed)
+    return merged
+
+
+def _resolve_repo_full_name(root: str) -> str:
+    """Best-effort `owner/repo` resolution. Prefers `GITHUB_REPOSITORY`
+    (set by every GHA runner). Falls back to the workspace basename
+    prefixed with the canonical org so local smoke tests still produce
+    sane output."""
+    env = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if "/" in env:
+        return env
+    basename = os.path.basename(os.path.abspath(root)) or "repo"
+    return f"blackoutsecure/{basename}"
+
+
+def _resolve_placeholders(
+    config: Dict[str, str], repo_full_name: str
+) -> Dict[str, str]:
+    """Build the final substitution dict from config + env.
+
+    Year range: `copyright_year_start` empty or equal to current year
+    yields just `YYYY`; otherwise `YYYY-YYYY` (start-current).
+    """
+    import datetime
+
+    current_year = datetime.datetime.now(datetime.timezone.utc).year
+    start_raw = (config.get("copyright_year_start") or "").strip()
+    if start_raw:
+        try:
+            start_year = int(start_raw)
+        except ValueError:
+            die(
+                f"{MANAGED_FILES_CONFIG_FILENAME}: 'copyright_year_start' "
+                f"must be an integer year (got: {start_raw!r})."
+            )
+        if start_year < 1970 or start_year > current_year:
+            die(
+                f"{MANAGED_FILES_CONFIG_FILENAME}: 'copyright_year_start' "
+                f"({start_year}) must be between 1970 and {current_year}."
+            )
+        year_range = (
+            f"{start_year}" if start_year == current_year
+            else f"{start_year}-{current_year}"
+        )
+    else:
+        year_range = f"{current_year}"
+
+    owner, _, repo = repo_full_name.partition("/")
+    return {
+        "COPYRIGHT_HOLDER": config["copyright_holder"],
+        "COPYRIGHT_YEAR_RANGE": year_range,
+        "MAINTAINERS_TEAM": config["maintainers_team"],
+        "REPO_NAME": repo or "repo",
+        "REPO_OWNER": owner or "blackoutsecure",
+    }
+
+
+def _render_placeholders(body: str, subs: Dict[str, str]) -> str:
+    """Substitute `{{KEY}}` markers in `body` using `subs`. Unknown
+    placeholders (not in `_KNOWN_PLACEHOLDERS`) are left untouched — we
+    don't want to silently rewrite content that happens to look like a
+    marker. Known placeholders without a value also pass through (caller
+    is responsible for ensuring `subs` covers every known key)."""
+    def _sub(match: "re.Match[str]") -> str:
+        key = match.group(1)
+        if key in _KNOWN_PLACEHOLDERS and key in subs:
+            return subs[key]
+        return match.group(0)
+    return _PLACEHOLDER_RE.sub(_sub, body)
+
+
+# Init-if-missing services whose canonical body is committed VERBATIM
+# (no `# Initialized by ...` header injection). The Apache 2.0 LICENSE
+# and NOTICE files MUST stay byte-identical to the canonical form so
+# license-detection tools (GitHub linguist, FOSSA, etc.) can recognize
+# the file by SHA / fuzzy hash. Any service NOT in this set goes
+# through the standard `_make_init_file()` header injection.
+_NO_HEADER_INIT_SERVICES = frozenset({"license_apache2", "notice_apache2"})
+
+# Init-if-missing services whose body contains `{{KEY}}` placeholders
+# that must be rendered at sync time (not registry time, since values
+# vary per-repo). Pre-flight: every such service's canonical body MUST
+# only reference placeholder names in `_KNOWN_PLACEHOLDERS`; an unknown
+# `{{KEY}}` would silently land in the consumer's file.
+_TEMPLATED_INIT_SERVICES = frozenset({
+    "notice_apache2",
+    "codeowners",
+})
+
+
+# --------------------------------------------------------------------------- #
 # Service registry                                                            #
 # --------------------------------------------------------------------------- #
 #
@@ -1328,6 +1784,19 @@ SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
     "gha_lint_shell": {
         ".github/workflows/lint.yml": _GHA_LINT_SHELL_YML,
     },
+    # Templated whole-file content (init-if-missing). Values for
+    # `{{KEY}}` placeholders come from `.bos-managed-files.yaml` at
+    # the consumer repo root (see `_load_managed_config`). LICENSE
+    # has no placeholders by design (Apache convention = verbatim).
+    "license_apache2": {
+        "LICENSE": _LICENSE_APACHE2,
+    },
+    "notice_apache2": {
+        "NOTICE": _NOTICE_TEMPLATE,
+    },
+    "codeowners": {
+        ".github/CODEOWNERS": _CODEOWNERS_TEMPLATE,
+    },
 }
 
 KNOWN_SERVICES = (
@@ -1381,6 +1850,25 @@ for _path in _section_paths & _init_paths:
         f"are mutually exclusive per path."
     )
 
+# Templated init services must reference only known placeholders. An
+# unknown `{{X}}` would be silently passed through by `_render_placeholders`
+# and land in the consumer's committed file, so catch typos at import.
+for _svc in _TEMPLATED_INIT_SERVICES:
+    if _svc not in SERVICE_INIT_FILES:
+        raise RuntimeError(
+            f"sync.py registry conflict: '{_svc}' is listed in "
+            f"_TEMPLATED_INIT_SERVICES but missing from SERVICE_INIT_FILES."
+        )
+    for _path, _body in SERVICE_INIT_FILES[_svc].items():
+        for _ph_match in _PLACEHOLDER_RE.finditer(_body):
+            _ph = _ph_match.group(1)
+            if _ph not in _KNOWN_PLACEHOLDERS:
+                raise RuntimeError(
+                    f"sync.py: service '{_svc}' body for '{_path}' "
+                    f"references unknown placeholder '{{{{{_ph}}}}}'. "
+                    f"Known: {sorted(_KNOWN_PLACEHOLDERS)}."
+                )
+
 # Tidy module scope. The list of names mirrors every loop-variable
 # introduced above; if you add another sanity check, append its names
 # here to keep `dir()` clean.
@@ -1392,6 +1880,9 @@ del (
     _svcs,
     _files,
     _path,
+    _body,
+    _ph,
+    _ph_match,
 )
 
 
@@ -1685,6 +2176,26 @@ def sync_files(
     # before is "" and after is the rendered init body, so the diff
     # shows the new file. `apply_writes()` (the caller below) writes
     # only `drift` entries, so existing files are never touched.
+    #
+    # Templated services (`_TEMPLATED_INIT_SERVICES`) get their
+    # `{{KEY}}` placeholders rendered from `.bos-managed-files.yaml`
+    # (or defaults). License/NOTICE (`_NO_HEADER_INIT_SERVICES`) skip
+    # the "Initialized by ..." header injection so license-detection
+    # tools still match the canonical text.
+    #
+    # Config is loaded ONCE per sync run (not per service) — values are
+    # the same across services, and a missing config file is cheap.
+    _needs_config = any(
+        svc in _TEMPLATED_INIT_SERVICES for svc in services
+    )
+    if _needs_config:
+        _managed_config = _load_managed_config(root)
+        _placeholder_subs = _resolve_placeholders(
+            _managed_config, _resolve_repo_full_name(root)
+        )
+    else:
+        _placeholder_subs = {}
+
     for svc in services:
         if svc not in SERVICE_INIT_FILES:
             continue
@@ -1701,7 +2212,18 @@ def sync_files(
                 after = before
             else:
                 before = ""
-                after = _make_init_file(svc, body)
+                rendered = (
+                    _render_placeholders(body, _placeholder_subs)
+                    if svc in _TEMPLATED_INIT_SERVICES
+                    else body
+                )
+                if svc in _NO_HEADER_INIT_SERVICES:
+                    # Verbatim — no "Initialized by hub" header so
+                    # license-detection tools can still match the
+                    # canonical SHA.
+                    after = rendered if rendered.endswith("\n") else rendered + "\n"
+                else:
+                    after = _make_init_file(svc, rendered)
             all_changes.append(
                 FileChange(path=rel_path, before=before, after=after)
             )

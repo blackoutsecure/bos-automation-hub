@@ -6,17 +6,22 @@ description: >-
   deliver canonical whole files (e.g. `root/usr/local/bin/log-functions.sh`,
   `.prettierrc.yaml`, hub-managed thin kicker workflows in
   `.github/workflows/`) for whole-file services, AND initialize starter
-  templates (`.github/workflows/*.yml`) on first run for
-  init-if-missing services. For section services, content between the
-  `>>> bos-automation-hub:<svc> >>>` / `<<< bos-automation-hub:<svc>
-  <<<` markers is kept in sync with the canonical blocks defined in
-  `sync.py`; everything outside the markers is left untouched. For
-  whole-file services, the target file is overwritten outright with
-  the canonical body (preceded by a hub-managed header comment). For
-  init-if-missing services, the target file is written ONCE when
-  missing and NEVER overwritten afterwards (preceded by an
-  "Initialized by" header). Disabled services are skipped entirely —
-  existing blocks / files for them are NOT touched.
+  templates (`.github/workflows/*.yml`, `LICENSE`, `NOTICE`,
+  `.github/CODEOWNERS`) on first run for init-if-missing services. For
+  section services, content between the `>>> bos-automation-hub:<svc>
+  >>>` / `<<< bos-automation-hub:<svc> <<<` markers is kept in sync
+  with the canonical blocks defined in `sync.py`; everything outside
+  the markers is left untouched. For whole-file services, the target
+  file is overwritten outright with the canonical body (preceded by a
+  hub-managed header comment). For init-if-missing services, the
+  target file is written ONCE when missing and NEVER overwritten
+  afterwards (preceded by an "Initialized by" header, EXCEPT for
+  `license_apache2` / `notice_apache2` which are committed verbatim so
+  license-detection tools recognize them). Templated init services
+  (`notice_apache2`, `codeowners`) render `{{KEY}}` placeholders from
+  per-repo `.bos-managed-files.yaml` at sync time. Disabled services
+  are skipped entirely — existing blocks / files for them are NOT
+  touched.
 
 inputs:
   services:
@@ -32,7 +37,15 @@ inputs:
       Init-if-missing: `gha_sync_commit`, `gha_sync_drift_check`,
       `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
       one `gha_lint_*` per repo — all three target the same
-      `.github/workflows/lint.yml`). Unknown values fail the action.
+      `.github/workflows/lint.yml`), `license_apache2` (verbatim
+      Apache 2.0 to root `LICENSE`), `notice_apache2` (templated
+      Apache NOTICE to root `NOTICE`), `codeowners` (templated
+      `.github/CODEOWNERS` with a default catch-all rule). The latter
+      three render `{{COPYRIGHT_HOLDER}}` / `{{COPYRIGHT_YEAR_RANGE}}`
+      / `{{MAINTAINERS_TEAM}}` / `{{REPO_NAME}}` / `{{REPO_OWNER}}`
+      placeholders from optional `.bos-managed-files.yaml` at the repo
+      root (all keys default to org-canonical values when absent).
+      Unknown values fail the action.
     required: true
   dry_run:
     description: >-

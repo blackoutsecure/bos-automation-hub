@@ -7,7 +7,10 @@ name: Sync managed dotfiles
 # whole files (e.g. `root/usr/local/bin/log-functions.sh`,
 # `.prettierrc.yaml`) for whole-file services, AND initializes starter
 # templates (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`,
-# `lint.yml`) on first run for init-if-missing services.
+# `lint.yml`, `LICENSE`, `NOTICE`, `.github/CODEOWNERS`) on first run
+# for init-if-missing services. Templated init services
+# (`notice_apache2`, `codeowners`) render `{{KEY}}` placeholders from
+# per-repo `.bos-managed-files.yaml` at sync time.
 #
 # Modes:
 #   commit  (default) — write changes and push back to the calling
@@ -40,7 +43,12 @@ on:
           Init-if-missing: `gha_sync_commit`, `gha_sync_drift_check`,
           `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
           one `gha_lint_*` per repo — they all target the same
-          `.github/workflows/lint.yml`).
+          `.github/workflows/lint.yml`), `license_apache2` (verbatim
+          Apache 2.0 to root `LICENSE`), `notice_apache2` (templated
+          Apache NOTICE), `codeowners` (templated `.github/CODEOWNERS`
+          with a catch-all rule). The latter three read per-repo
+          placeholder values from optional `.bos-managed-files.yaml`
+          at the repo root (all keys default to org-canonical values).
         required: true
         type: string
       mode:
