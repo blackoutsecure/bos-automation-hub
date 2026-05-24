@@ -122,7 +122,7 @@ preflight on the source variable.
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/workflows/balena-fleet-deploy.yml](.github/workflows/balena-fleet-deploy.yml) | Reusable workflow | Render a per-fleet `balena.yml` from inputs and deploy the same block to one or more balenaCloud fleets in a matrix. |
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
-| [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Discover the latest upstream version from a pluggable source (GitHub Releases / branch HEAD / tag list / container registry / npm / PyPI / generic URL), dispatch downstream workflows on change, and commit a tracking file. Provider plugins live in `.github/actions/discover-upstream-release/`. |
+| [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Discover the latest upstream version from a pluggable source (GitHub Releases / branch HEAD / tag list / container registry / npm / PyPI / generic URL), dispatch downstream workflows on change, and commit a tracking file. Discovery is delegated to the [bos-discover-upstream-release](https://github.com/blackoutsecure/bos-discover-upstream-release) standalone action. |
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
 | [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Launchpad). **Container mode:** composes `monitor-upstream-release.yml` → `release.yml` to detect a new upstream release and run the full Docker → Balena → GitHub Release pipeline against the new version. **Static-site mode:** runs `deploy-cloudflare-pages.yml` on every push for continuous Cloudflare Pages deploys. Both modes can run side-by-side in the same call. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
@@ -137,7 +137,6 @@ preflight on the source variable.
 | [.github/actions/shared/docker-scout-scan/action.yml](.github/actions/shared/docker-scout-scan/action.yml) | Composite action | Wraps `docker/scout-action` with input validation, Docker Hub login, and optional SARIF upload to GitHub code scanning. Used by both the embedded scan in `docker-build-push.yml` and the standalone `docker-scout-scan.yml`. |
 | [.github/actions/shared/render-balena-yml/action.yml](.github/actions/shared/render-balena-yml/action.yml) | Composite action | Renders `balena.yml` from scalar inputs (PyYAML `safe_dump`, path-traversal + HTTPS-URL + default-vs-supported-device-type validation, defensive re-parse). Shared by `balena-block-publish.yml` (default `type: sw.block`) and `balena-fleet-deploy.yml` (default `type: sw.application`, `emit_assets: false` for the legacy per-target omit-assets behavior). |
 | [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
-| [.github/actions/discover-upstream-release/action.yml](.github/actions/discover-upstream-release/action.yml) | Composite action | Pluggable upstream-version discovery (stdlib-only Python). Sources: `github_release`, `github_branch_file`, `github_tags`, `container_image`, `npm`, `pypi`, `generic_url`. Writes a byte-stable tracker JSON file and reports whether the version changed. Used by `monitor-upstream-release.yml`. |
 | [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`) AND writes canonical whole files (`root/usr/local/bin/log-functions.sh` via the `logger` service) for each enabled service. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
 | [.github/actions/nginx-config-validate/action.yml](.github/actions/nginx-config-validate/action.yml) | Composite action | Spins up the official `nginx` image, renders the consumer repo's `*.conf.template` files via `envsubst`, and runs `nginx -t -c /etc/nginx/nginx.conf`. Used by `nginx-config-validate.yml`. Positional-key envsubst (only listed keys are substituted) so nginx-native variables like `$remote_addr` pass through unchanged. |
 | [.github/actions/shared/commit-and-push/action.yml](.github/actions/shared/commit-and-push/action.yml) | Composite action | Stage files, commit, and push to the current branch with rebase-retry on concurrent commits. Single-line message + author validation. Exits cleanly with `committed=false` when nothing is staged. Used by `monitor-upstream-release.yml` and `sync-managed-files.yml`. |
@@ -342,8 +341,8 @@ file path is `version` (the wiedehopf convention); override with
 #### 2b. Other upstream sources (tags, container image, npm, PyPI, arbitrary URL)
 
 The monitor delegates version discovery to the
-[`discover-upstream-release`](.github/actions/discover-upstream-release/action.yml)
-composite action, which ships with seven pluggable providers. Switch
+[bos-discover-upstream-release](https://github.com/blackoutsecure/bos-discover-upstream-release)
+standalone action, which ships with seven pluggable providers. Switch
 providers by changing `source:` and the matching input:
 
 | `source:`               | Required inputs                                  | Notes |
@@ -356,8 +355,12 @@ providers by changing `source:` and the matching input:
 | `pypi`                  | `package_name`                                   | `pypi.org/pypi/<pkg>/json`. |
 | `generic_url`           | `version_url`, `version_regex` (1 capture group) | Stdlib-only HTTP, no auth. |
 
-Legacy aliases `latest_release` and `branch_head` continue to work
-byte-for-byte against existing `tracked-release.json` files.
+Legacy aliases `latest_release` and `branch_head` continue to work at
+the input level (this workflow translates them before forwarding to
+the action). **Note:** existing `branch_head` tracker files will
+register one spurious "changed" event on the first run after upgrade
+because the tracker JSON now writes `"source": "github_branch_file"`
+instead of `"source": "branch_head"`. Subsequent runs are stable.
 
 ### 3. Scheduled Docker Scout re-scan
 
@@ -1374,35 +1377,47 @@ living in every caller repo.
 ### Source modes
 
 The `source` input selects how the upstream version is discovered.
-Both modes produce the same outputs (`upstream_tag`, `upstream_version`,
+All modes produce the same outputs (`upstream_tag`, `upstream_version`,
 `upstream_commit`, `changed`) so downstream consumers don't branch on it.
+Discovery is delegated to the
+[bos-discover-upstream-release](https://github.com/blackoutsecure/bos-discover-upstream-release)
+standalone action; see its README for the full provider list, behaviour
+details, and tracker-file schemas.
 
 | `source` | Behaviour | When to use |
 |---|---|---|
-| `latest_release` *(default)* | Polls `GET /repos/<repo>/releases/latest`. Uses the release's `tag_name` and resolves the commit via `repos/.../commits/<tag>`. | Upstream publishes proper GitHub Releases (the majority case). |
-| `branch_head` | `curl`s a `version` file from the branch HEAD; resolves the commit via `git ls-remote refs/heads/<branch>`. SemVer-validates the fetched string and synthesizes `upstream_tag = upstream_version`. | Upstream ships rolling builds off a development branch and never cuts GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). |
+| `github_release` *(default; alias: `latest_release`)* | Polls `GET /repos/<repo>/releases/latest`. Uses the release's `tag_name` and resolves the commit via `repos/.../commits/<tag>`. | Upstream publishes proper GitHub Releases (the majority case). |
+| `github_branch_file` *(alias: `branch_head`)* | Fetches a version file from the branch HEAD; resolves the commit via the GitHub API. SemVer-validates the fetched string and synthesizes `upstream_tag = upstream_version`. | Upstream ships rolling builds off a development branch and never cuts GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). |
 
-`branch_head` requires `upstream_branch`; the file path defaults to
-`version` and is overridable via `version_file_path`.
+The action exposes four additional providers — `github_tags`,
+`container_image`, `npm`, `pypi`, `generic_url` — that this workflow
+also forwards. See the table in [§2b](#2b-other-upstream-sources-tags-container-image-npm-pypi-arbitrary-url)
+above.
+
+`github_branch_file` requires `upstream_branch`; the file path defaults
+to `version` and is overridable via `version_file_path`.
 
 ### Default behaviour
 
 - **Tracking file.** A small JSON file at `inputs.track_file` (default
   `.github/upstream/tracked-release.json`) records the last-seen state.
   Schema depends on `source`:
-  - `latest_release`: `{repo, tag, version, commit}` — held byte-stable
+  - `github_release`: `{repo, tag, version, commit}` — held byte-stable
     for back-compat with existing tracker files.
-  - `branch_head`: `{repo, source: "branch_head", branch, version, commit}` —
-    self-describing on inspection.
+  - `github_branch_file`: `{repo, source: "github_branch_file", branch, version, commit}` —
+    self-describing on inspection. **Upgrade note:** files written by
+    the legacy `branch_head` source contained `"source": "branch_head"`
+    and will register one spurious "changed" event on first run after
+    upgrade. Subsequent runs are stable.
   The file is committed back to the default branch when the upstream
   changes; subsequent runs diff against it to detect change.
-- **Real commit SHA.** In `latest_release` mode, the release's
+- **Real commit SHA.** In `github_release` mode, the release's
   `target_commitish` field is often a branch name (`main`), and the Git
   Refs API returns the *tag-object* SHA for annotated tags — neither is
-  the commit you want. The workflow resolves the actual commit SHA via
+  the commit you want. The action resolves the actual commit SHA via
   `repos/<owner>/<repo>/commits/<tag>`, which handles lightweight and
-  annotated tags uniformly. In `branch_head` mode, `git ls-remote` on
-  the branch ref returns the commit directly.
+  annotated tags uniformly. In `github_branch_file` mode, the commit
+  comes from `repos/<owner>/<repo>/commits/<branch>`.
 - **Dispatch-then-commit ordering.** Downstream workflows are
   dispatched **before** the tracking file is committed — if dispatch
   fails, the marker is unchanged and the next scheduled run retries.

@@ -33,8 +33,9 @@ name: Monitor Upstream Release (reusable)
         default: 'false'
       source:
         description: >-
-          Where to read the upstream version from. Pluggable via the
-          `discover-upstream-release` composite action.
+          Where to read the upstream version from. Delegated to the
+          [bos-discover-upstream-release](https://github.com/blackoutsecure/bos-discover-upstream-release)
+          composite action.
 
           * `github_release` (alias: `latest_release`) — poll
             `GET /repos/<repo>/releases/latest`. Default.
@@ -269,11 +270,27 @@ jobs:
           # Need credentials to push the marker-file commit back.
           persist-credentials: true
 
+      - name: Resolve legacy source aliases
+        id: source
+        env:
+          IN_SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          # Translate legacy alias names accepted by this reusable workflow to
+          # the canonical names exposed by bos-discover-upstream-release.
+          case "${IN_SOURCE}" in
+            latest_release) resolved=github_release ;;
+            branch_head)    resolved=github_branch_file ;;
+            *)              resolved="${IN_SOURCE}" ;;
+          esac
+          echo "value=${resolved}" >> "${GITHUB_OUTPUT}"
+
       - name: Discover upstream version
         id: discover
-        uses: blackoutsecure/bos-automation-hub/.github/actions/discover-upstream-release@main
+        # TODO: pin to @v1 once bos-discover-upstream-release publishes a tag.
+        uses: blackoutsecure/bos-discover-upstream-release@main
         with:
-          source:            ${{ inputs.source }}
+          source:            ${{ steps.source.outputs.value }}
           upstream_repo:     ${{ inputs.upstream_repo }}
           upstream_branch:   ${{ inputs.upstream_branch }}
           version_file_path: ${{ inputs.version_file_path }}
@@ -284,7 +301,7 @@ jobs:
           tag_pattern:       ${{ inputs.tag_pattern }}
           strip_v_prefix:    ${{ inputs.strip_v_prefix }}
           tracker_path:      ${{ inputs.track_file }}
-          gh_token:          ${{ secrets.UPSTREAM_TOKEN || github.token }}
+          github_token:      ${{ secrets.UPSTREAM_TOKEN || github.token }}
 
       # Dispatch happens BEFORE the commit so a transient dispatch failure
       # leaves the marker file unchanged and the next scheduled run retries.
