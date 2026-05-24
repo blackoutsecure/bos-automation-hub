@@ -122,7 +122,7 @@ preflight on the source variable.
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/workflows/balena-fleet-deploy.yml](.github/workflows/balena-fleet-deploy.yml) | Reusable workflow | Render a per-fleet `balena.yml` from inputs and deploy the same block to one or more balenaCloud fleets in a matrix. |
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
-| [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Discover the latest upstream version from a pluggable source (GitHub Releases / branch HEAD / tag list / container registry / npm / PyPI / generic URL), dispatch downstream workflows on change, and commit a tracking file. Discovery is delegated to the [bos-discover-upstream-release](https://github.com/blackoutsecure/bos-discover-upstream-release) standalone action. |
+| [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Discover the latest upstream version from a pluggable source (GitHub Releases / branch HEAD / tag list / container registry / npm / PyPI / generic URL), dispatch downstream workflows on change, and commit a tracking file. Discovery is delegated to the [bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher) standalone action. |
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
 | [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Launchpad). **Container mode:** composes `monitor-upstream-release.yml` → `release.yml` to detect a new upstream release and run the full Docker → Balena → GitHub Release pipeline against the new version. **Static-site mode:** runs `deploy-cloudflare-pages.yml` on every push for continuous Cloudflare Pages deploys. Both modes can run side-by-side in the same call. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
@@ -341,7 +341,7 @@ file path is `version` (the wiedehopf convention); override with
 #### 2b. Other upstream sources (tags, container image, npm, PyPI, arbitrary URL)
 
 The monitor delegates version discovery to the
-[bos-discover-upstream-release](https://github.com/blackoutsecure/bos-discover-upstream-release)
+[bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher)
 standalone action, which ships with seven pluggable providers. Switch
 providers by changing `source:` and the matching input:
 
@@ -1380,7 +1380,7 @@ The `source` input selects how the upstream version is discovered.
 All modes produce the same outputs (`upstream_tag`, `upstream_version`,
 `upstream_commit`, `changed`) so downstream consumers don't branch on it.
 Discovery is delegated to the
-[bos-discover-upstream-release](https://github.com/blackoutsecure/bos-discover-upstream-release)
+[bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher)
 standalone action; see its README for the full provider list, behaviour
 details, and tracker-file schemas.
 

@@ -34,7 +34,7 @@ name: Monitor Upstream Release (reusable)
       source:
         description: >-
           Where to read the upstream version from. Delegated to the
-          [bos-discover-upstream-release](https://github.com/blackoutsecure/bos-discover-upstream-release)
+          [bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher)
           composite action.
 
           * `github_release` (alias: `latest_release`) — poll
@@ -277,7 +277,7 @@ jobs:
         run: |
           set -euo pipefail
           # Translate legacy alias names accepted by this reusable workflow to
-          # the canonical names exposed by bos-discover-upstream-release.
+          # the canonical names exposed by bos-upstream-watcher.
           case "${IN_SOURCE}" in
             latest_release) resolved=github_release ;;
             branch_head)    resolved=github_branch_file ;;
@@ -287,8 +287,8 @@ jobs:
 
       - name: Discover upstream version
         id: discover
-        # TODO: pin to @v1 once bos-discover-upstream-release publishes a tag.
-        uses: blackoutsecure/bos-discover-upstream-release@main
+        # TODO: pin to @v1 once bos-upstream-watcher publishes a tag.
+        uses: blackoutsecure/bos-upstream-watcher@main
         with:
           source:            ${{ steps.source.outputs.value }}
           upstream_repo:     ${{ inputs.upstream_repo }}
