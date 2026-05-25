@@ -11,9 +11,7 @@
 # Place this file at the repo ROOT (sibling to `LICENSE` / `NOTICE`)
 # as `bos-managed-files.yaml` — a VISIBLE filename, NOT a dotfile, so
 # it shows up in `ls`, file pickers, and code reviews without needing
-# `ls -a`. The legacy dotfile name `.bos-managed-files.yaml` is still
-# honored for backward compatibility but emits a `::warning::` on
-# every sync until renamed.
+# `ls -a`.
 #
 # All keys are OPTIONAL — when this file is absent OR a key is
 # missing, the hub uses org-canonical defaults shown in parentheses.

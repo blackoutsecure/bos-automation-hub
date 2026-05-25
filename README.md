@@ -2030,12 +2030,8 @@ keys, malformed lines, out-of-range years, and unknown `license_type`
 values fail the action.
 
 > **Visible filename (not a dotfile).** The config lives at
-> `bos-managed-files.yaml` — deliberately NOT `.bos-managed-files.yaml`
-> — so it shows up in `ls`, file pickers, and code reviews without
-> needing `ls -a`. The legacy dotfile name is still honored for
-> backward compatibility but emits a `::warning::` GitHub Actions
-> annotation on every sync until renamed; please rename it on first
-> touch.
+> `bos-managed-files.yaml` — deliberately NOT a dotfile — so it shows
+> up in `ls`, file pickers, and code reviews without needing `ls -a`.
 
 ```yaml
 # bos-managed-files.yaml

@@ -1660,16 +1660,9 @@ _CODEOWNERS_TEMPLATE = """\
 #
 # The config file is `bos-managed-files.yaml` at the repo root —
 # deliberately NOT a dotfile so it shows up in `ls`, file pickers, and
-# code reviews without needing `ls -a`. Consumers who created the
-# legacy dotfile `.bos-managed-files.yaml` are still supported (with a
-# loud one-time deprecation warning) so renames can be staged.
+# code reviews without needing `ls -a`.
 
 MANAGED_FILES_CONFIG_FILENAME = "bos-managed-files.yaml"
-
-# Legacy dotfile name. Still honored (with a `::warning::` annotation
-# pointing the consumer at the rename) so existing repos keep working
-# during the cutover. Remove once all consumer repos are renamed.
-_MANAGED_FILES_CONFIG_FILENAME_LEGACY = ".bos-managed-files.yaml"
 
 _DEFAULT_MANAGED_CONFIG: Dict[str, str] = {
     "copyright_holder": "Blackout Secure",
@@ -1705,14 +1698,10 @@ _FLAT_YAML_LINE_RE = re.compile(
 )
 
 
-def _parse_flat_yaml(text: str, filename: str = MANAGED_FILES_CONFIG_FILENAME) -> Dict[str, str]:
+def _parse_flat_yaml(text: str) -> Dict[str, str]:
     """Parse a tiny subset of YAML: flat key/value pairs, optional quoting,
     `#` comments, blank lines. Unknown keys are rejected with `die()` so
     typos fail fast rather than silently fall through to defaults.
-
-    `filename` is purely for error messages — pass the actual filename
-    that was opened (e.g. the legacy dotfile) so the consumer sees the
-    correct path in errors.
 
     Returns a dict of {key: value}. Caller merges with defaults.
     """
@@ -1724,7 +1713,7 @@ def _parse_flat_yaml(text: str, filename: str = MANAGED_FILES_CONFIG_FILENAME) -
         m = _FLAT_YAML_LINE_RE.match(raw)
         if not m:
             die(
-                f"{filename}:{lineno}: cannot parse line: "
+                f"{MANAGED_FILES_CONFIG_FILENAME}:{lineno}: cannot parse line: "
                 f"{raw!r}. Expected `key: value` or `key: \"value\"`."
             )
         key = m.group(1)
@@ -1735,7 +1724,7 @@ def _parse_flat_yaml(text: str, filename: str = MANAGED_FILES_CONFIG_FILENAME) -
         value = value.strip()
         if key not in _KNOWN_CONFIG_KEYS:
             die(
-                f"{filename}:{lineno}: unknown key "
+                f"{MANAGED_FILES_CONFIG_FILENAME}:{lineno}: unknown key "
                 f"'{key}'. Known: {', '.join(sorted(_KNOWN_CONFIG_KEYS))}."
             )
         result[key] = value
@@ -1745,58 +1734,13 @@ def _parse_flat_yaml(text: str, filename: str = MANAGED_FILES_CONFIG_FILENAME) -
 def _load_managed_config(root: str) -> Dict[str, str]:
     """Read `bos-managed-files.yaml` if present at `root`; return the
     parsed config merged over the defaults. Missing file is fine —
-    defaults are used.
-
-    Backward-compat: if the visible-named file is absent but the legacy
-    dotfile `.bos-managed-files.yaml` exists, fall back to it and emit
-    a `::warning::` GHA annotation telling the consumer to rename. If
-    BOTH exist (consumer mid-migration), the visible name wins and the
-    legacy file is flagged for removal — never silently merged.
-    """
+    defaults are used."""
     config_path = os.path.join(root, MANAGED_FILES_CONFIG_FILENAME)
-    legacy_path = os.path.join(root, _MANAGED_FILES_CONFIG_FILENAME_LEGACY)
     merged = dict(_DEFAULT_MANAGED_CONFIG)
-
-    visible_exists = os.path.exists(config_path)
-    legacy_exists = os.path.exists(legacy_path)
-
-    if visible_exists and legacy_exists:
-        # Consumer is mid-rename. Use the visible file (the intended
-        # new name) and warn loudly so they delete the dotfile rather
-        # than leaving a stale shadow config that future maintainers
-        # might mistakenly edit.
-        sys.stderr.write(
-            "::warning file={legacy}::Both '{new}' and '{legacy}' exist; "
-            "ignoring legacy dotfile. Delete '{legacy}' to silence this "
-            "warning.\n".format(
-                new=MANAGED_FILES_CONFIG_FILENAME,
-                legacy=_MANAGED_FILES_CONFIG_FILENAME_LEGACY,
-            )
-        )
-        active_path = config_path
-        active_name = MANAGED_FILES_CONFIG_FILENAME
-    elif visible_exists:
-        active_path = config_path
-        active_name = MANAGED_FILES_CONFIG_FILENAME
-    elif legacy_exists:
-        # Pure-legacy consumer. Honor the file but warn about the
-        # rename so they migrate before we drop support.
-        sys.stderr.write(
-            "::warning file={legacy}::'{legacy}' is deprecated; rename to "
-            "'{new}' (visible filename, no leading dot). The legacy name "
-            "still works but will be removed in a future hub release.\n"
-            .format(
-                new=MANAGED_FILES_CONFIG_FILENAME,
-                legacy=_MANAGED_FILES_CONFIG_FILENAME_LEGACY,
-            )
-        )
-        active_path = legacy_path
-        active_name = _MANAGED_FILES_CONFIG_FILENAME_LEGACY
-    else:
+    if not os.path.exists(config_path):
         return merged
-
-    with open(active_path, "r", encoding="utf-8") as fh:
-        parsed = _parse_flat_yaml(fh.read(), filename=active_name)
+    with open(config_path, "r", encoding="utf-8") as fh:
+        parsed = _parse_flat_yaml(fh.read())
     merged.update(parsed)
 
     # Validate license_type eagerly so an unknown SPDX ID fails fast
@@ -1805,7 +1749,7 @@ def _load_managed_config(root: str) -> Dict[str, str]:
     license_type = merged.get("license_type", "").strip().lower()
     if license_type and license_type not in _LICENSE_REGISTRY:
         die(
-            f"{active_name}: 'license_type' "
+            f"{MANAGED_FILES_CONFIG_FILENAME}: 'license_type' "
             f"({license_type!r}) is not a supported SPDX identifier. "
             f"Supported: {', '.join(sorted(_LICENSE_REGISTRY))}."
         )
