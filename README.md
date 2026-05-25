@@ -2387,11 +2387,11 @@ services in `sync-managed-files` produce this layout for you on
 
 | Setup item                                              | Auto-setup-able? | How                                                                                  |
 |---------------------------------------------------------|------------------|--------------------------------------------------------------------------------------|
-| PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `marketplace-action-guard.example.yaml` on `dev` as `marketplace-guard.yml`.    |
-| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `marketplace-action-ci.example.yaml` on `dev` as `ci.yml`.                      |
-| PR-time block on deletion of `.github/dependabot.yml` (or other required files) | **Yes** | Same guard caller — populate `required_paths:` (default empty, opt-in). |
+| PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `marketplace-launchpad.example.yaml` on `dev` (the `guard` job), or `marketplace-action-guard.example.yaml` as `marketplace-guard.yml` for the legacy 3-file shape. |
+| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `marketplace-launchpad.example.yaml` on `dev` (the `ci` job), or `marketplace-action-ci.example.yaml` as `ci.yml` for the legacy 3-file shape. |
+| PR-time block on deletion of `.github/dependabot.yml` (or other required files) | **Yes** | Same guard job — populate `required_paths:` (default empty, opt-in). |
 | Hard-block on workflow paths during `dev -> main` promotion | **Yes**       | Baked into the [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote) — cannot be disabled. |
-| `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `marketplace-action-release.example.yaml` on `dev` as `release.yml`.            |
+| `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `marketplace-launchpad.example.yaml` on `dev` (the `release` job), or `marketplace-action-release.example.yaml` as `release.yml` for the legacy 3-file shape. |
 | Auto-sync of `.github/dependabot.yml` to `main`         | **Yes**          | `include_dependabot_config: true` on the release caller (default on).                |
 | Auto-sync of `.github/CODEOWNERS` / `FUNDING.yml` / `ISSUE_TEMPLATE/` / `PULL_REQUEST_TEMPLATE.md` / `SECURITY.md` / `CONTRIBUTING.md` to `main` | **Yes** | `include_github_metadata: true` on the release caller (default off). |
 | Removal of Marketplace-violating files from `main` during promote | **Yes** | Inherent to wipe-and-replay; surfaced via `removed_violations` workflow output and job summary. |
@@ -2405,18 +2405,31 @@ services in `sync-managed-files` produce this layout for you on
 
 1. **Set the default branch to `main`** (UI: Settings → Branches).
 2. **Push `dev`**: `git push origin main:dev`.
-3. **On `dev`**, add the three caller workflows:
-   * `.github/workflows/ci.yml` — copy from
+3. **On `dev`**, add the consolidated launchpad workflow (recommended):
+   * `.github/workflows/marketplace-launchpad.yml` — copy from
+     [`examples/marketplace-launchpad.example.yaml`](examples/marketplace-launchpad.example.yaml).
+     Single file that routes each event-type to the right hub reusable:
+     `pull_request` / `push` (base = `dev`) → CI; `pull_request_target`
+     (base = `main`) → guard; `workflow_dispatch` mode `release` →
+     promote dev → main + GitHub Release; `workflow_dispatch` mode
+     `name-check` → one-shot Marketplace name availability probe.
+     Customize the `allowlist_paths:` and `required_paths:` to match
+     what the published Action consumer needs at runtime (typically
+     `action.yml`, `src`, `README.md`, `LICENSE`, `NOTICE`; swap `src`
+     for `dist` on JS Actions). Each job inherits only the permissions
+     it needs; concurrency is keyed by event-type so a release
+     in-flight is never cancelled by an incoming PR.
+
+   *Alternative — three single-purpose files:* if you'd rather keep
+   workflows split (one trigger per file), drop the three legacy
+   examples instead. They're functionally equivalent to the
+   consolidated launchpad:
+
+   * `.github/workflows/ci.yml` — from
      [`examples/marketplace-action-ci.example.yaml`](examples/marketplace-action-ci.example.yaml).
-     Runs the kit `check` + `branding-preview` (+ opt-in `name-check`)
-     on every PR into `dev` and on `push: dev`.
-   * `.github/workflows/release.yml` — copy from
+   * `.github/workflows/release.yml` — from
      [`examples/marketplace-action-release.example.yaml`](examples/marketplace-action-release.example.yaml).
-     Customize the `allowlist_paths:` to match what the published
-     Action consumer needs at runtime (typically `action.yml`,
-     `src`, `README.md`, `LICENSE`, `NOTICE`, `SECURITY.md`; add
-     `dist` for JS Actions).
-   * `.github/workflows/marketplace-guard.yml` — copy from
+   * `.github/workflows/marketplace-guard.yml` — from
      [`examples/marketplace-action-guard.example.yaml`](examples/marketplace-action-guard.example.yaml).
 4. **Enroll a sync-managed-files caller on `dev`** (NOT on `main`)
    with the service set from the table below.

@@ -1,0 +1,161 @@
+# Marketplace Action — consolidated Launchpad example.
+#
+# WHERE THIS LIVES: on the **dev** branch of a GitHub Marketplace
+# Action repo, at `.github/workflows/marketplace-launchpad.yml`.
+# This file MUST NOT exist on `main` — Marketplace publishing
+# requires zero workflow files on the default branch.
+#
+# WHAT IT DOES:
+#   Single front-door kicker that replaces the three legacy files
+#     `marketplace-ci.yml`
+#     `marketplace-guard.yml`
+#     `release.yml`
+#   with one workflow that routes each event-type to the right hub
+#   reusable. The three jobs you'd otherwise spread across three
+#   files become three `if:`-gated jobs in a single workflow:
+#
+#     pull_request (base = dev)         → ci      (lint / artefact / branding)
+#     push (branch = dev)               → ci      (post-merge re-verify)
+#     pull_request_target (base = main) → guard   (workflows / required-files)
+#     workflow_dispatch mode=release    → release (promote dev → main + GH Release)
+#     workflow_dispatch mode=name-check → ci      (one-shot Marketplace name probe)
+#
+# Each job inherits ONLY the permissions it needs (workflow default
+# is read-only). Concurrency is keyed by event-type so a release
+# in-flight is never cancelled by an incoming PR.
+#
+# CUSTOMIZE FOR YOUR REPO: the only field that typically varies
+# between Marketplace Action repos is the runtime artefact path
+# (`dist` for JS Actions, `src` for composite Actions). It appears
+# twice — once in `guard.with.required_paths` and once in
+# `release.with.allowlist_paths`. Search for the comment
+# `# >>> RUNTIME ARTIFACT <<<` and edit both occurrences.
+#
+# COMPANION FILES IN THIS DIRECTORY: you can still use the three
+# legacy single-purpose examples if you'd rather keep workflows
+# split. They're functionally equivalent — pick one shape per repo:
+#
+#   * `marketplace-action-ci.example.yaml`      (CI only)
+#   * `marketplace-action-guard.example.yaml`   (guard only)
+#   * `marketplace-action-release.example.yaml` (release only)
+#
+# Whichever shape you adopt, drop a SECURITY.md, CODE_OF_CONDUCT.md
+# and CONTRIBUTING.md alongside this workflow so the `require_*`
+# Marketplace community-health checks pass cleanly when you flip
+# them from `warn` to `error`.
+
+name: Marketplace Launchpad
+
+"on":
+  pull_request:
+    branches: ['dev']
+  push:
+    branches: ['dev']
+  pull_request_target:
+    branches: ['main']
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Operation: `release` or `name-check`.'
+        required: true
+        type: choice
+        options:
+          - release
+          - name-check
+        default: release
+      tag_name:
+        description: 'Release tag (SemVer, e.g. v1.2.0). Required when mode=release.'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run — validate + diff, do not push/tag.'
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: 'Publish the GitHub Release as a draft.'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: >-
+    marketplace-launchpad-${{ github.workflow }}-${{ github.event_name }}-${{
+      github.event.pull_request.number
+      || inputs.tag_name
+      || github.ref
+    }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  ci:
+    if: >-
+      github.event_name == 'pull_request'
+      || github.event_name == 'push'
+      || (github.event_name == 'workflow_dispatch' && inputs.mode == 'name-check')
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/marketplace-action-ci.yml@main
+    with:
+      action_yml_path: 'action.yml'
+      fail_on_warning: false
+      skip_checks: ''
+      require_security:        'warn'
+      require_code_of_conduct: 'warn'
+      require_contributing:    'warn'
+      run_branding_preview: true
+      run_name_check: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'name-check' }}
+
+  guard:
+    if: github.event_name == 'pull_request_target'
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/marketplace-repo-guard.yml@main
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      pr_base_sha:        ${{ github.event.pull_request.base.sha }}
+      pr_head_sha:        ${{ github.event.pull_request.head.sha }}
+      check_pr_diff:      true
+      check_tree_state:   true
+      require_action_yml: true
+      blocked_paths: |
+        .github/workflows/
+      required_paths: |
+        .github/dependabot.yml
+        action.yml
+        # >>> RUNTIME ARTIFACT <<< — `dist` for JS Actions, `src` for composite Actions.
+        dist
+        LICENSE
+        NOTICE
+        README.md
+
+  release:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'release'
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release-promote.yml@main
+    permissions:
+      contents: write
+    with:
+      source_branch: 'dev'
+      target_branch: 'main'
+      allowlist_paths: |
+        action.yml
+        # >>> RUNTIME ARTIFACT <<< — `dist` for JS Actions, `src` for composite Actions.
+        dist
+        README.md
+        LICENSE
+        NOTICE
+      include_dependabot_config: true
+      include_github_metadata: true
+      extra_sync_paths: ''
+      tag_name: ${{ inputs.tag_name }}
+      dry_run:  ${{ inputs.dry_run }}
+      release_template_path:  ''
+      release_extra_context:  |
+        REPO=${{ github.repository }}
+        TAG=${{ inputs.tag_name }}
+      release_draft:          ${{ inputs.draft }}
+      release_prerelease:     ''
+      release_make_latest:    'true'
+      release_generate_notes: true
