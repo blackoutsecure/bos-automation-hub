@@ -5,6 +5,17 @@
 # This file MUST NOT exist on `main` — Marketplace publishing
 # requires zero workflow files on the default branch.
 #
+# NOT THE SAME FILE AS `bos-launchpad.yml`. The hub also ships a
+# reusable meta-workflow named `bos-launchpad.yml` (composes the
+# upstream-monitor → Docker → Balena → GitHub Release → Cloudflare
+# Pages stages for the container/site repo family). That one is a
+# `workflow_call` reusable invoked from a thin caller rendered by
+# `sync-managed-files`. THIS file is a per-consumer **caller** for
+# Marketplace Action repos: it subscribes to events directly and
+# routes them to three single-purpose Marketplace reusables. The
+# two are deliberately separate orchestrators for two different
+# domains; the shared `launchpad` name is convention, not coupling.
+#
 # WHAT IT DOES:
 #   Single front-door kicker that replaces the three legacy files
 #     `marketplace-ci.yml`

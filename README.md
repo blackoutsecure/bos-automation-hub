@@ -2403,6 +2403,30 @@ services in `sync-managed-files` produce this layout for you on
 
 #### Per-repo enrollment steps
 
+> **Naming note — two different "launchpads".** The hub ships two
+> files with `launchpad` in the name and they live at different
+> architectural layers; don't conflate them.
+>
+> * [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) is a
+>   **hub-side reusable meta-workflow** (`on: workflow_call`) that
+>   composes the upstream-monitor / Docker / Balena / GitHub Release
+>   / Cloudflare Pages stages for **container and static-site repos**
+>   (the `docker-*` family and `blackoutsecure-site`). Consumers
+>   drive it from a `.bos-launchpad.yaml` config + a thin caller
+>   rendered by `sync-managed-files`.
+> * [`marketplace-launchpad.example.yaml`](examples/marketplace-launchpad.example.yaml)
+>   is a **per-consumer caller** (`on: pull_request | push |
+>   pull_request_target | workflow_dispatch`) that lives on the
+>   `dev` branch of a **Marketplace Action repo** and routes each
+>   event-type to the three single-purpose Marketplace reusables
+>   (`marketplace-action-ci.yml`, `marketplace-repo-guard.yml`,
+>   `release-promote.yml`). It is NOT a `workflow_call` reusable.
+>
+> Container/site delivery and Marketplace Action publishing share
+> no inputs, no stages, and no event model — they are deliberately
+> kept on separate orchestrators. Use `bos-launchpad.yml` for the
+> former and `marketplace-launchpad.yml` for the latter.
+
 1. **Set the default branch to `main`** (UI: Settings → Branches).
 2. **Push `dev`**: `git push origin main:dev`.
 3. **On `dev`**, add the consolidated launchpad workflow (recommended):
