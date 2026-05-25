@@ -63,7 +63,7 @@ jobs:
           persist-credentials: false
 
       - name: Run actionlint via kit composite
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@b068c7a101b9364eeb0c0b172b9d22a724388df7 # v0.1.1
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@8cb53a2c81712c47b61af1031a1db69058bc5be3 # v0.1.2
         with:
           run_markdownlint: 'false'
           run_yamllint: 'false'
@@ -82,7 +82,7 @@ jobs:
           persist-credentials: false
 
       - name: Run markdownlint / yamllint / shellcheck via kit composite
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@b068c7a101b9364eeb0c0b172b9d22a724388df7 # v0.1.1
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@8cb53a2c81712c47b61af1031a1db69058bc5be3 # v0.1.2
         with:
           run_markdownlint: 'true'
           run_yamllint: 'true'
