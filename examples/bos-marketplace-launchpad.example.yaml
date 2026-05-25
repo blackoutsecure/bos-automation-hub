@@ -1,0 +1,124 @@
+# Blackout Secure Marketplace Launchpad — thin consumer caller example.
+#
+# WHERE THIS LIVES: on the **dev** branch of a GitHub Marketplace
+# Action repo, at `.github/workflows/bos-marketplace-launchpad.yml`.
+# This file MUST NOT exist on `main` — Marketplace publishing
+# requires zero workflow files on the default branch.
+#
+# WHAT IT DOES: subscribes to the four event types that drive a
+# Marketplace Action repo (PR to `dev`, push to `dev`, PR to
+# `main`, operator dispatch) and forwards them to the hub-side
+# reusable `bos-marketplace-launchpad.yml@main`, which composes
+# the three single-purpose Marketplace reusables
+# (`marketplace-action-ci.yml`, `marketplace-repo-guard.yml`,
+# `release-promote.yml`) and routes each event-type to the right
+# one via internal `if:` gates.
+#
+# All orchestration / composition logic lives in the hub. This
+# caller is intentionally a thin event-trigger + input-forwarder
+# wrapper: ~60 lines of YAML, identical shape across every
+# Marketplace Action repo in the org.
+#
+# Per-repo customization happens via the `with:` block on the one
+# job below. The only field that typically varies is
+# `runtime_artifact_dir` — `dist` for JS Actions, `src` for
+# composite Actions (Python / Shell / Docker `runs:` entry point).
+# Other fields (extra allowlist entries, dry-run defaults, release
+# template path, etc.) are also `with:`-overridable; see the hub
+# reusable for the full input list.
+#
+# NOT THE SAME FILE AS `bos-launchpad.yml`. That sibling reusable
+# (also in this repo's `.github/workflows/`) handles container /
+# Balena / GitHub Release / Cloudflare Pages delivery for the
+# `docker-*` and site repos. The two share no inputs, no stages,
+# and no event model — they are deliberately separate orchestrators
+# for two different domains. Use THIS one for Marketplace Action
+# repos.
+#
+# Event routing inside the hub reusable:
+#
+#   pull_request (base = dev)         → ci      stage runs
+#   push (branch = dev)               → ci      stage runs (post-merge re-verify)
+#   pull_request_target (base = main) → guard   stage runs
+#   workflow_dispatch mode=release    → release stage runs
+#   workflow_dispatch mode=name-check → ci      stage runs (name-check on)
+
+name: Blackout Secure Marketplace Launchpad
+
+"on":
+  pull_request:
+    branches: ['dev']
+  push:
+    branches: ['dev']
+  pull_request_target:
+    branches: ['main']
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Operation: `release` (promote dev → main + GH Release) or `name-check` (one-shot Marketplace name availability probe).'
+        required: true
+        type: choice
+        options:
+          - release
+          - name-check
+        default: release
+      tag_name:
+        description: 'Release tag (SemVer, e.g. v1.2.0). Required when `mode: release`.'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run — validate + diff, do not push/tag.'
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: 'Publish the GitHub Release as a draft.'
+        required: false
+        type: boolean
+        default: false
+
+# Workflow-default permissions. Each sub-job inside the hub reusable
+# scopes its own narrower permissions internally; this top-level grant
+# is the UNION (the maximum the nested workflow may use).
+permissions:
+  contents: write       # required by the release stage (promote + tag + GH Release)
+  pull-requests: read   # required by the guard stage (PR diff inspection)
+
+# Per-event concurrency: PRs cancel themselves on new pushes; releases
+# never cancel each other (so a manual re-run of a release waits in
+# line rather than racing). Keyed by event_name so a release in-flight
+# is never cancelled by an incoming PR.
+concurrency:
+  group: >-
+    bos-marketplace-launchpad-${{ github.workflow }}-${{ github.event_name }}-${{
+      github.event.pull_request.number
+      || inputs.tag_name
+      || github.ref
+    }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  launchpad:
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-marketplace-launchpad.yml@main
+    permissions:
+      contents: write
+      pull-requests: read
+    with:
+      # ----- Event-routing context (forwarded from the caller event) -----
+      event_name:      ${{ github.event_name }}
+      dispatched_mode: ${{ inputs.mode || '' }}
+      pr_base_sha:     ${{ github.event.pull_request.base.sha || '' }}
+      pr_head_sha:     ${{ github.event.pull_request.head.sha || '' }}
+
+      # ----- Per-repo customization -----
+      # `dist` for JS Actions (compiled bundle); `src` for composite Actions
+      # (Python / Shell / Docker `runs:` entry point). Auto-appended to both
+      # `allowlist_paths` (release) and `required_paths` (guard) — single
+      # source of truth.
+      runtime_artifact_dir: 'dist'
+
+      # ----- Release dispatch inputs (ignored for non-release events) -----
+      tag_name:      ${{ inputs.tag_name || '' }}
+      dry_run:       ${{ inputs.dry_run || false }}
+      release_draft: ${{ inputs.draft || false }}

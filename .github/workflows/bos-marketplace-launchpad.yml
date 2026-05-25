@@ -1,0 +1,424 @@
+# Blackout Secure Marketplace Launchpad — automated CI / guard / release
+# meta-workflow for GitHub Marketplace Action repos.
+#
+# Single front-door for the Marketplace publishing loop. Composes the three
+# stage-level reusable workflows into one event-routed orchestrator so
+# consumer Marketplace Action repos can drive a full pipeline from a thin
+# ~50-line caller workflow:
+#
+#   1. marketplace-action-ci.yml      — PR-time `check` (manifest + LICENSE
+#                                       + README + branding + community-
+#                                       health) + `branding-preview`
+#                                       (Marketplace card SVG, uploaded as
+#                                       artifact) + opt-in `name-check`
+#                                       (Marketplace name availability).
+#                                       Routed for `pull_request`, `push`,
+#                                       and `workflow_dispatch` mode
+#                                       `name-check`.
+#   2. marketplace-repo-guard.yml     — PR-time block on workflow files or
+#                                       other prohibited paths landing on
+#                                       `main`, plus required-files
+#                                       enforcement. Routed for
+#                                       `pull_request_target`.
+#   3. release-promote.yml            — `dev` → `main` allowlist promotion,
+#                                       tag the promoted SHA, publish a
+#                                       GitHub Release. Routed for
+#                                       `workflow_dispatch` mode `release`.
+#
+# Event routing (the whole reason this reusable exists): the consumer
+# caller subscribes to events and forwards a small set of context inputs
+# (`event_name`, `dispatched_mode`, PR SHAs); this reusable then if-gates
+# each sub-job so exactly one stage runs per invocation. Consumer callers
+# stay tiny and uniform across all Marketplace Action repos — every per-
+# repo customization is an input to this reusable, not boilerplate to
+# duplicate in N consumer files.
+#
+#   pull_request (base = dev)         → ci      stage runs
+#   push (branch = dev)               → ci      stage runs (post-merge re-verify)
+#   pull_request_target (base = main) → guard   stage runs
+#   workflow_dispatch mode=release    → release stage runs
+#   workflow_dispatch mode=name-check → ci      stage runs (name-check on)
+#
+# Per-job permissions are scoped least-privilege at the sub-reusable level:
+#   * ci      — `contents: read` only.
+#   * guard   — `contents: read`, `pull-requests: read`.
+#   * release — `contents: write`.
+#
+# Concurrency is the CALLER's responsibility — it owns the event subscription
+# and is what GitHub schedules. Recommended caller pattern: scope concurrency
+# by event-type so a release in-flight is never cancelled by an incoming PR.
+# See `examples/bos-marketplace-launchpad.example.yaml` for the canonical
+# caller shape.
+#
+# Trigger model: this workflow is intended to be called from a thin caller
+# in a Marketplace Action repo's `dev` branch (typically triggered on
+# `pull_request`/`push` to `dev`, `pull_request_target` against `main`, and
+# `workflow_dispatch` for releases / name-checks). It is **not** intended
+# to be triggered directly on this repo. See the README "Marketplace Action
+# repo enrollment" section for copy-paste caller examples.
+#
+# NOT THE SAME FILE AS `bos-launchpad.yml`. That sibling reusable handles
+# container/Balena/GitHub Release/Cloudflare Pages delivery for the
+# `docker-*` and site repos. The two share no inputs, no stages, and no
+# event model — they are deliberately separate orchestrators for two
+# different domains. Use this one for Marketplace Action repos.
+name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
+
+"on":
+  workflow_call:
+    inputs:
+      # =====================================================================
+      # Event-routing context (caller-forwarded).
+      # The caller subscribes to events; the reusable can't see the caller's
+      # `github.event_name` directly, so the caller must forward it. PR SHAs
+      # are similarly forwarded for the guard stage. Missing values are
+      # tolerated (sub-job `if:` gates short-circuit when the inputs don't
+      # match the stage's event).
+      # =====================================================================
+      event_name:
+        description: >-
+          Forwarded from `github.event_name` on the caller. Drives which
+          sub-job runs. Recognised values: `pull_request`, `push`,
+          `pull_request_target`, `workflow_dispatch`.
+        required: true
+        type: string
+      dispatched_mode:
+        description: >-
+          Sub-command when `event_name == workflow_dispatch`. Recognised
+          values: `release`, `name-check`. Ignored for other events.
+        required: false
+        type: string
+        default: ''
+      pr_base_sha:
+        description: >-
+          `github.event.pull_request.base.sha` from the caller. Forwarded
+          to the guard stage. Empty when not a PR event.
+        required: false
+        type: string
+        default: ''
+      pr_head_sha:
+        description: >-
+          `github.event.pull_request.head.sha` from the caller. Forwarded
+          to the guard stage. Empty when not a PR event.
+        required: false
+        type: string
+        default: ''
+
+      # =====================================================================
+      # Shared customization (used by multiple stages).
+      # =====================================================================
+      runtime_artifact_dir:
+        description: >-
+          Directory holding the Action's runtime artifact. `dist` for JS
+          Actions (compiled bundle), `src` for composite Actions (Python
+          / Shell / Docker `runs:` entry point). Auto-appended to both
+          `allowlist_paths` (release stage) and `required_paths` (guard
+          stage) so a single input drives both protections.
+        required: false
+        type: string
+        default: 'src'
+
+      # =====================================================================
+      # CI stage inputs — forwarded to marketplace-action-ci.yml.
+      # See that reusable for full descriptions.
+      # =====================================================================
+      action_yml_path:
+        required: false
+        type: string
+        default: 'action.yml'
+      fail_on_warning:
+        required: false
+        type: boolean
+        default: false
+      skip_checks:
+        required: false
+        type: string
+        default: ''
+      check_org_health:
+        required: false
+        type: boolean
+        default: true
+      org_health_repo:
+        required: false
+        type: string
+        default: ''
+      require_security:
+        required: false
+        type: string
+        default: 'warn'
+      require_code_of_conduct:
+        required: false
+        type: string
+        default: 'warn'
+      require_contributing:
+        required: false
+        type: string
+        default: 'warn'
+      require_support:
+        required: false
+        type: string
+        default: 'skip'
+      require_issue_templates:
+        required: false
+        type: string
+        default: 'skip'
+      require_pr_template:
+        required: false
+        type: string
+        default: 'skip'
+      require_funding:
+        required: false
+        type: string
+        default: 'skip'
+      proposed_name:
+        description: 'Marketplace name to probe; empty reads `name:` from manifest. Only used when `dispatched_mode: name-check`.'
+        required: false
+        type: string
+        default: ''
+      name_check_fail_on_collision:
+        required: false
+        type: boolean
+        default: true
+      run_branding_preview:
+        required: false
+        type: boolean
+        default: true
+      branding_preview_feather_ref:
+        required: false
+        type: string
+        default: 'v4.28.0'
+      branding_preview_artifact_name:
+        required: false
+        type: string
+        default: 'marketplace-card'
+      branding_preview_artifact_retention_days:
+        required: false
+        type: number
+        default: 14
+
+      # =====================================================================
+      # Guard stage inputs — forwarded to marketplace-repo-guard.yml.
+      # =====================================================================
+      check_pr_diff:
+        required: false
+        type: boolean
+        default: true
+      check_tree_state:
+        required: false
+        type: boolean
+        default: true
+      guard_require_action_yml:
+        description: 'Forwarded to guard stage as `require_action_yml`. Renamed here for symmetry with `action_yml_path` (CI stage).'
+        required: false
+        type: boolean
+        default: true
+      blocked_paths:
+        description: 'Newline-separated git pathspec patterns that may not be added/modified on the protected branch.'
+        required: false
+        type: string
+        default: '.github/workflows/'
+      required_paths:
+        description: >-
+          Newline-separated paths the protected branch MUST carry. The
+          `runtime_artifact_dir` is auto-appended; do not duplicate it
+          here. Defaults to the Marketplace minimum
+          (`action.yml`, `LICENSE`, `NOTICE`, `README.md`,
+          `.github/dependabot.yml`).
+        required: false
+        type: string
+        default: |
+          .github/dependabot.yml
+          action.yml
+          LICENSE
+          NOTICE
+          README.md
+      guard_checkout_ref:
+        description: 'Forwarded to guard stage as `checkout_ref`.'
+        required: false
+        type: string
+        default: ''
+
+      # =====================================================================
+      # Release stage inputs — forwarded to release-promote.yml.
+      # =====================================================================
+      source_branch:
+        required: false
+        type: string
+        default: 'dev'
+      target_branch:
+        required: false
+        type: string
+        default: 'main'
+      allowlist_paths:
+        description: >-
+          Newline-separated paths to promote from `source_branch` to
+          `target_branch`. The `runtime_artifact_dir` is auto-appended;
+          do not duplicate it here. Defaults to the Marketplace minimum
+          (`action.yml`, `LICENSE`, `NOTICE`, `README.md`).
+        required: false
+        type: string
+        default: |
+          action.yml
+          LICENSE
+          NOTICE
+          README.md
+      include_dependabot_config:
+        required: false
+        type: boolean
+        default: true
+      include_github_metadata:
+        required: false
+        type: boolean
+        default: true
+      extra_sync_paths:
+        required: false
+        type: string
+        default: ''
+      tag_name:
+        description: 'SemVer release tag (`vX.Y.Z[-suffix]`). Required for release runs; ignored for other events.'
+        required: false
+        type: string
+        default: ''
+      commit_message:
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        required: false
+        type: boolean
+        default: false
+      release_name:
+        required: false
+        type: string
+        default: ''
+      release_template_path:
+        required: false
+        type: string
+        default: ''
+      release_extra_context:
+        required: false
+        type: string
+        default: ''
+      release_draft:
+        required: false
+        type: boolean
+        default: false
+      release_prerelease:
+        required: false
+        type: string
+        default: ''
+      release_make_latest:
+        required: false
+        type: string
+        default: 'true'
+      release_generate_notes:
+        required: false
+        type: boolean
+        default: true
+      release_files:
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 1 — Marketplace Action CI (PR-time check + branding + name-check).
+  # Fires on:
+  #   * pull_request (base = dev)
+  #   * push (branch = dev) — post-merge re-verify
+  #   * workflow_dispatch + dispatched_mode == 'name-check' — one-shot probe
+  # ---------------------------------------------------------------------------
+  ci:
+    name: Marketplace CI
+    if: >-
+      inputs.event_name == 'pull_request'
+      || inputs.event_name == 'push'
+      || (inputs.event_name == 'workflow_dispatch' && inputs.dispatched_mode == 'name-check')
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/marketplace-action-ci.yml@main
+    with:
+      action_yml_path:                          ${{ inputs.action_yml_path }}
+      fail_on_warning:                          ${{ inputs.fail_on_warning }}
+      skip_checks:                              ${{ inputs.skip_checks }}
+      check_org_health:                         ${{ inputs.check_org_health }}
+      org_health_repo:                          ${{ inputs.org_health_repo }}
+      require_security:                         ${{ inputs.require_security }}
+      require_code_of_conduct:                  ${{ inputs.require_code_of_conduct }}
+      require_contributing:                     ${{ inputs.require_contributing }}
+      require_support:                          ${{ inputs.require_support }}
+      require_issue_templates:                  ${{ inputs.require_issue_templates }}
+      require_pr_template:                      ${{ inputs.require_pr_template }}
+      require_funding:                          ${{ inputs.require_funding }}
+      run_name_check:                           ${{ inputs.event_name == 'workflow_dispatch' && inputs.dispatched_mode == 'name-check' }}
+      proposed_name:                            ${{ inputs.proposed_name }}
+      name_check_fail_on_collision:             ${{ inputs.name_check_fail_on_collision }}
+      run_branding_preview:                     ${{ inputs.run_branding_preview }}
+      branding_preview_feather_ref:             ${{ inputs.branding_preview_feather_ref }}
+      branding_preview_artifact_name:           ${{ inputs.branding_preview_artifact_name }}
+      branding_preview_artifact_retention_days: ${{ inputs.branding_preview_artifact_retention_days }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 2 — Marketplace repo compliance guard.
+  # Fires on:
+  #   * pull_request_target (base = main) — PR-time block on workflow files
+  #     landing on `main` + required-files enforcement
+  #
+  # `runtime_artifact_dir` is auto-appended to `required_paths` so a single
+  # input drives both allowlist (release) and required (guard) protections.
+  # ---------------------------------------------------------------------------
+  guard:
+    name: Marketplace guard
+    if: inputs.event_name == 'pull_request_target'
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/marketplace-repo-guard.yml@main
+    with:
+      pr_base_sha:        ${{ inputs.pr_base_sha }}
+      pr_head_sha:        ${{ inputs.pr_head_sha }}
+      check_pr_diff:      ${{ inputs.check_pr_diff }}
+      check_tree_state:   ${{ inputs.check_tree_state }}
+      require_action_yml: ${{ inputs.guard_require_action_yml }}
+      blocked_paths:      ${{ inputs.blocked_paths }}
+      required_paths: |
+        ${{ inputs.required_paths }}
+        ${{ inputs.runtime_artifact_dir }}
+      checkout_ref:       ${{ inputs.guard_checkout_ref }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 3 — Marketplace-compliant release (dev → main promote + GH Release).
+  # Fires on:
+  #   * workflow_dispatch + dispatched_mode == 'release'
+  #
+  # `runtime_artifact_dir` is auto-appended to `allowlist_paths`. Anything on
+  # `target_branch` NOT in the merged allowlist is REMOVED on this commit —
+  # this is what keeps `.github/workflows/**` off the default branch (along
+  # with the hard-block in the underlying `promote` Action).
+  # ---------------------------------------------------------------------------
+  release:
+    name: Release ${{ inputs.tag_name }}
+    if: inputs.event_name == 'workflow_dispatch' && inputs.dispatched_mode == 'release'
+    permissions:
+      contents: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release-promote.yml@main
+    with:
+      source_branch: ${{ inputs.source_branch }}
+      target_branch: ${{ inputs.target_branch }}
+      allowlist_paths: |
+        ${{ inputs.allowlist_paths }}
+        ${{ inputs.runtime_artifact_dir }}
+      include_dependabot_config: ${{ inputs.include_dependabot_config }}
+      include_github_metadata:   ${{ inputs.include_github_metadata }}
+      extra_sync_paths:          ${{ inputs.extra_sync_paths }}
+      tag_name:                  ${{ inputs.tag_name }}
+      commit_message:            ${{ inputs.commit_message }}
+      dry_run:                   ${{ inputs.dry_run }}
+      release_name:              ${{ inputs.release_name }}
+      release_template_path:     ${{ inputs.release_template_path }}
+      release_extra_context:     ${{ inputs.release_extra_context }}
+      release_draft:             ${{ inputs.release_draft }}
+      release_prerelease:        ${{ inputs.release_prerelease }}
+      release_make_latest:       ${{ inputs.release_make_latest }}
+      release_generate_notes:    ${{ inputs.release_generate_notes }}
+      release_files:             ${{ inputs.release_files }}

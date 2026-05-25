@@ -98,7 +98,7 @@ Per-workflow requirements:
 | `docker-scout-scan.yml` | `RUNNER_X64` |
 | `lint.yml`, `monitor-upstream-release.yml` | _(pinned to `ubuntu-latest` by design)_ |
 | `sync-managed-files.yml` | _(uses caller-supplied `inputs.runs_on` directly)_ |
-| `bos-launchpad.yml` | _(pure delegator; each downstream workflow runs its own preflight)_ |
+| `bos-launchpad.yml`, `bos-marketplace-launchpad.yml` | _(pure delegator; each downstream workflow runs its own preflight)_ |
 
 Because preflight guarantees the variable is set and well-formed, the
 per-job `runs-on:` expressions no longer carry a `'ubuntu-latest'`
@@ -142,9 +142,10 @@ preflight on the source variable.
 | [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, `.github/dependabot.yml`), writes canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows in `.github/workflows/bos-launchpad.yml`), and initializes starter templates (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`) on first run only. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
 | [.github/actions/nginx-config-validate/action.yml](.github/actions/nginx-config-validate/action.yml) | Composite action | Spins up the official `nginx` image, renders the consumer repo's `*.conf.template` files via `envsubst`, and runs `nginx -t -c /etc/nginx/nginx.conf`. Used by `nginx-config-validate.yml`. Positional-key envsubst (only listed keys are substituted) so nginx-native variables like `$remote_addr` pass through unchanged. |
 | [.github/actions/shared/commit-and-push/action.yml](.github/actions/shared/commit-and-push/action.yml) | Composite action | Stage files, commit, and push to the current branch with rebase-retry on concurrent commits. Single-line message + author validation. Exits cleanly with `committed=false` when nothing is staged. Used by `monitor-upstream-release.yml` and `sync-managed-files.yml`. |
-| [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Caller example: [`marketplace-action-release.example.yaml`](examples/marketplace-action-release.example.yaml). |
-| [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Caller example: [`marketplace-action-guard.example.yaml`](examples/marketplace-action-guard.example.yaml). |
-| [.github/workflows/marketplace-action-ci.yml](.github/workflows/marketplace-action-ci.yml) | Reusable workflow | **Marketplace Action CI.** PR-time `check` (manifest + LICENSE + README + branding + community-health) + `branding-preview` (Marketplace card SVG, uploaded as artifact) + opt-in `name-check` (Marketplace name availability). Drives every PR into `dev` on a Marketplace Action repo. Caller example: [`marketplace-action-ci.example.yaml`](examples/marketplace-action-ci.example.yaml). |
+| [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Typically called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) (recommended) or directly via [`marketplace-action-release.example.yaml`](examples/marketplace-action-release.example.yaml). |
+| [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Typically called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) (recommended) or directly via [`marketplace-action-guard.example.yaml`](examples/marketplace-action-guard.example.yaml). |
+| [.github/workflows/marketplace-action-ci.yml](.github/workflows/marketplace-action-ci.yml) | Reusable workflow | **Marketplace Action CI.** PR-time `check` (manifest + LICENSE + README + branding + community-health) + `branding-preview` (Marketplace card SVG, uploaded as artifact) + opt-in `name-check` (Marketplace name availability). Drives every PR into `dev` on a Marketplace Action repo. Typically called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) (recommended) or directly via [`marketplace-action-ci.example.yaml`](examples/marketplace-action-ci.example.yaml). |
+| [.github/workflows/bos-marketplace-launchpad.yml](.github/workflows/bos-marketplace-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Marketplace Launchpad). Composes `marketplace-action-ci.yml` + `marketplace-repo-guard.yml` + `release-promote.yml` with internal event routing: PRs / pushes to `dev` → CI; PRs to `main` → guard; `workflow_dispatch` mode `release` → promote + GH Release; `workflow_dispatch` mode `name-check` → one-shot name probe. Consumers drop a ~60-line thin caller on their `dev` branch ([`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)); all orchestration logic lives here. Sibling to [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) for the container/site family. |
 | [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit) (external) | Marketplace Action | Source of the `check` / `guard` / `promote` / `name-check` / `branding-preview` composite primitives consumed by `marketplace-repo-guard.yml`, `release-promote.yml`, and `marketplace-action-ci.yml`. SHA-pinned to `v0.1.1`; Dependabot tracks bumps. |
 | [scripts/marketplace-repo/](scripts/marketplace-repo/) | Bootstrap scripts | One-time platform-setup scripts for Marketplace Action repos: org ruleset template + `gh api` bootstrap (`bootstrap-ruleset.sh`) for `file_path_restriction` enforcement, and a per-repo branch-protection fallback (`bootstrap-branch-protection.sh`). See [`scripts/marketplace-repo/README.md`](scripts/marketplace-repo/README.md). |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
@@ -2387,11 +2388,11 @@ services in `sync-managed-files` produce this layout for you on
 
 | Setup item                                              | Auto-setup-able? | How                                                                                  |
 |---------------------------------------------------------|------------------|--------------------------------------------------------------------------------------|
-| PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `marketplace-launchpad.example.yaml` on `dev` (the `guard` job), or `marketplace-action-guard.example.yaml` as `marketplace-guard.yml` for the legacy 3-file shape. |
-| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `marketplace-launchpad.example.yaml` on `dev` (the `ci` job), or `marketplace-action-ci.example.yaml` as `ci.yml` for the legacy 3-file shape. |
-| PR-time block on deletion of `.github/dependabot.yml` (or other required files) | **Yes** | Same guard job — populate `required_paths:` (default empty, opt-in). |
+| PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (guard stage auto-routes for `pull_request_target`), or `marketplace-action-guard.example.yaml` as `marketplace-guard.yml` for the legacy split shape. |
+| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (ci stage auto-routes for `pull_request`/`push`), or `marketplace-action-ci.example.yaml` as `ci.yml` for the legacy split shape. |
+| PR-time block on deletion of `.github/dependabot.yml` (or other required files) | **Yes** | Same launchpad guard stage — default `required_paths` covers action.yml/LICENSE/NOTICE/README.md/dependabot; override `required_paths` on the caller to extend or replace. |
 | Hard-block on workflow paths during `dev -> main` promotion | **Yes**       | Baked into the [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote) — cannot be disabled. |
-| `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `marketplace-launchpad.example.yaml` on `dev` (the `release` job), or `marketplace-action-release.example.yaml` as `release.yml` for the legacy 3-file shape. |
+| `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (release stage auto-routes for `workflow_dispatch` mode `release`), or `marketplace-action-release.example.yaml` as `release.yml` for the legacy split shape. |
 | Auto-sync of `.github/dependabot.yml` to `main`         | **Yes**          | `include_dependabot_config: true` on the release caller (default on).                |
 | Auto-sync of `.github/CODEOWNERS` / `FUNDING.yml` / `ISSUE_TEMPLATE/` / `PULL_REQUEST_TEMPLATE.md` / `SECURITY.md` / `CONTRIBUTING.md` to `main` | **Yes** | `include_github_metadata: true` on the release caller (default off). |
 | Removal of Marketplace-violating files from `main` during promote | **Yes** | Inherent to wipe-and-replay; surfaced via `removed_violations` workflow output and job summary. |
@@ -2403,51 +2404,48 @@ services in `sync-managed-files` produce this layout for you on
 
 #### Per-repo enrollment steps
 
-> **Naming note — two different "launchpads".** The hub ships two
-> files with `launchpad` in the name and they live at different
-> architectural layers; don't conflate them.
+> **Two `bos-*-launchpad` reusables, two different domains.** The hub
+> ships parallel meta-workflows for the org's two repo families:
 >
-> * [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) is a
->   **hub-side reusable meta-workflow** (`on: workflow_call`) that
->   composes the upstream-monitor / Docker / Balena / GitHub Release
->   / Cloudflare Pages stages for **container and static-site repos**
->   (the `docker-*` family and `blackoutsecure-site`). Consumers
->   drive it from a `.bos-launchpad.yaml` config + a thin caller
->   rendered by `sync-managed-files`.
-> * [`marketplace-launchpad.example.yaml`](examples/marketplace-launchpad.example.yaml)
->   is a **per-consumer caller** (`on: pull_request | push |
->   pull_request_target | workflow_dispatch`) that lives on the
->   `dev` branch of a **Marketplace Action repo** and routes each
->   event-type to the three single-purpose Marketplace reusables
->   (`marketplace-action-ci.yml`, `marketplace-repo-guard.yml`,
->   `release-promote.yml`). It is NOT a `workflow_call` reusable.
+> * [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) —
+>   **container / site** delivery (upstream monitor → Docker → Balena
+>   → GitHub Release; or Cloudflare Pages on push). Drives the
+>   `docker-*` family and `blackoutsecure-site`. Config-driven via
+>   `.bos-launchpad.yaml` + `sync-managed-files`-rendered caller.
+> * [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) —
+>   **Marketplace Action publishing** (CI + guard + release). Drives
+>   `bos-sitemap-generator`, `bos-upstream-watcher`,
+>   `bos-nginx-config-validator`. Driven by a ~60-line thin caller
+>   on the consumer's `dev` branch (see
+>   [`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)).
 >
-> Container/site delivery and Marketplace Action publishing share
-> no inputs, no stages, and no event model — they are deliberately
-> kept on separate orchestrators. Use `bos-launchpad.yml` for the
-> former and `marketplace-launchpad.yml` for the latter.
+> Both follow the same shape — hub-side reusable, thin consumer
+> caller, all orchestration logic in the hub. They share no inputs,
+> no stages, and no event model; use the one that matches your repo
+> family.
 
 1. **Set the default branch to `main`** (UI: Settings → Branches).
 2. **Push `dev`**: `git push origin main:dev`.
-3. **On `dev`**, add the consolidated launchpad workflow (recommended):
-   * `.github/workflows/marketplace-launchpad.yml` — copy from
-     [`examples/marketplace-launchpad.example.yaml`](examples/marketplace-launchpad.example.yaml).
-     Single file that routes each event-type to the right hub reusable:
-     `pull_request` / `push` (base = `dev`) → CI; `pull_request_target`
-     (base = `main`) → guard; `workflow_dispatch` mode `release` →
-     promote dev → main + GitHub Release; `workflow_dispatch` mode
-     `name-check` → one-shot Marketplace name availability probe.
-     Customize the `allowlist_paths:` and `required_paths:` to match
-     what the published Action consumer needs at runtime (typically
-     `action.yml`, `src`, `README.md`, `LICENSE`, `NOTICE`; swap `src`
-     for `dist` on JS Actions). Each job inherits only the permissions
-     it needs; concurrency is keyed by event-type so a release
-     in-flight is never cancelled by an incoming PR.
+3. **On `dev`**, add the thin Marketplace Launchpad caller (recommended):
+   * `.github/workflows/bos-marketplace-launchpad.yml` — copy from
+     [`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml).
+     ~60 lines: event triggers + concurrency + a single `uses:` job
+     forwarding event context to the hub-side
+     [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml)
+     reusable, which composes the three single-purpose Marketplace
+     reusables (`marketplace-action-ci.yml` + `marketplace-repo-guard.yml`
+     + `release-promote.yml`) and routes each event-type internally.
+     Per-repo customization happens via the `with:` block on that one
+     job — typically just `runtime_artifact_dir: 'dist'` (JS Actions)
+     or `'src'` (composite Actions). All other inputs default to the
+     Marketplace minimum (`action.yml`, `LICENSE`, `NOTICE`,
+     `README.md`, `.github/dependabot.yml`); see the hub reusable for
+     the full overridable input list.
 
-   *Alternative — three single-purpose files:* if you'd rather keep
-   workflows split (one trigger per file), drop the three legacy
-   examples instead. They're functionally equivalent to the
-   consolidated launchpad:
+   *Alternative — three single-purpose caller files (legacy split shape):*
+   if you'd rather wire each event to its own caller file directly,
+   drop the three legacy examples instead. They're functionally
+   equivalent but skip the hub orchestrator:
 
    * `.github/workflows/ci.yml` — from
      [`examples/marketplace-action-ci.example.yaml`](examples/marketplace-action-ci.example.yaml).
@@ -2460,10 +2458,11 @@ services in `sync-managed-files` produce this layout for you on
 5. **Apply platform-level enforcement** — once per org via
    `scripts/marketplace-repo/bootstrap-ruleset.sh`, OR once per repo
    via `scripts/marketplace-repo/bootstrap-branch-protection.sh`.
-6. **First release**: trigger `release.yml` from the Actions tab with
-   the tag (e.g. `v1.0.0`). The first time, also visit the Release in
-   the UI and tick "Publish to GitHub Marketplace". Subsequent
-   releases auto-publish.
+6. **First release**: trigger the `bos-marketplace-launchpad.yml`
+   workflow from the Actions tab with mode `release` and the tag
+   (e.g. `v1.0.0`). The first time, also visit the Release in the
+   UI and tick "Publish to GitHub Marketplace". Subsequent releases
+   auto-publish.
 
 #### Service sets
 
