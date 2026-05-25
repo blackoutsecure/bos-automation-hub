@@ -1,14 +1,20 @@
 # yaml-language-server: $schema=https://json.schemastore.org/none
 #
-# .bos-managed-files.yaml — per-repo placeholder values for the
+# bos-managed-files.yaml — per-repo placeholder values for the
 # bos-automation-hub `license`, `notice_apache2`, and `codeowners`
 # sync services.
 #
 # Consumed by: blackoutsecure/bos-automation-hub/.github/actions/
 #              sync-managed-files/sync.py
-# Docs:        bos-automation-hub README → "`.bos-managed-files.yaml` schema"
+# Docs:        bos-automation-hub README → "`bos-managed-files.yaml` schema"
 #
-# Place this file at the repo ROOT (sibling to `LICENSE` / `NOTICE`).
+# Place this file at the repo ROOT (sibling to `LICENSE` / `NOTICE`)
+# as `bos-managed-files.yaml` — a VISIBLE filename, NOT a dotfile, so
+# it shows up in `ls`, file pickers, and code reviews without needing
+# `ls -a`. The legacy dotfile name `.bos-managed-files.yaml` is still
+# honored for backward compatibility but emits a `::warning::` on
+# every sync until renamed.
+#
 # All keys are OPTIONAL — when this file is absent OR a key is
 # missing, the hub uses org-canonical defaults shown in parentheses.
 #

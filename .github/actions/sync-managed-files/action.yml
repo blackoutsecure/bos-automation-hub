@@ -20,7 +20,7 @@ description: >-
   committed verbatim so license-detection tools recognize them).
   Templated init services (`license`, `notice_apache2`, `codeowners`)
   render `{{KEY}}` placeholders from per-repo
-  `.bos-managed-files.yaml` at sync time. The `license` service
+  `bos-managed-files.yaml` at sync time. The `license` service
   additionally resolves its canonical text from `_LICENSE_REGISTRY`
   based on `license_type:` in that config file (apache-2.0 / mit /
   bsd-3-clause / isc). Disabled services are skipped entirely —
@@ -42,7 +42,7 @@ inputs:
       one `gha_lint_*` per repo — all three target the same
       `.github/workflows/lint.yml`), `license` (multi-license; picks
       from `_LICENSE_REGISTRY` by `license_type:` in
-      `.bos-managed-files.yaml`, supports apache-2.0 / mit /
+      `bos-managed-files.yaml`, supports apache-2.0 / mit /
       bsd-3-clause / isc), `license_apache2` (deprecated alias
       that always emits Apache 2.0; mutex with `license`),
       `notice_apache2` (Apache 2.0 NOTICE; requires `license_type:
@@ -51,7 +51,7 @@ inputs:
       license/notice/codeowners services render
       `{{COPYRIGHT_HOLDER}}` / `{{COPYRIGHT_YEAR_RANGE}}` /
       `{{MAINTAINERS_TEAM}}` / `{{REPO_NAME}}` / `{{REPO_OWNER}}`
-      placeholders from optional `.bos-managed-files.yaml` at the
+      placeholders from optional `bos-managed-files.yaml` at the
       repo root (all keys default to org-canonical values when
       absent). Unknown values fail the action.
     required: true

@@ -1836,10 +1836,10 @@ services are **not** removed — they're simply ignored on this run.
 | `gha_lint_node`        | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Node-based GitHub Action repos. Runs `actionlint` + `eslint` (`npm run lint`) + `prettier --check`. Mutually exclusive with `gha_lint_python` / `gha_lint_shell`. |
 | `gha_lint_python`      | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Python-based GitHub Action repos. Runs `actionlint` + `ruff check` + `pytest`. Mutually exclusive with `gha_lint_node` / `gha_lint_shell`. |
 | `gha_lint_shell`       | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for shell/bash-based GitHub Action repos. Runs `actionlint` + `shellcheck` + `bats`. Mutually exclusive with `gha_lint_node` / `gha_lint_python`. |
-| `license`              | init-if-missing  | `LICENSE`                                        | Multi-license: writes the canonical text for `license_type` in `.bos-managed-files.yaml` (one of `apache-2.0`, `mit`, `bsd-3-clause`, `isc`; default `apache-2.0`). MIT / BSD-3-Clause / ISC carry `{{COPYRIGHT_YEAR_RANGE}}` and `{{COPYRIGHT_HOLDER}}` inline; Apache 2.0 is verbatim (per Apache convention, copyright lives in NOTICE). Written WITHOUT the "Initialized by hub" header so license-detection tools (GitHub linguist, FOSSA, etc.) match the canonical SHA. The hub will NEVER overwrite an existing LICENSE — switching license type after the first sync requires `git rm LICENSE` followed by re-sync (deliberate legal decision). Mutex with `license_apache2`. |
+| `license`              | init-if-missing  | `LICENSE`                                        | Multi-license: writes the canonical text for `license_type` in `bos-managed-files.yaml` (one of `apache-2.0`, `mit`, `bsd-3-clause`, `isc`; default `apache-2.0`). MIT / BSD-3-Clause / ISC carry `{{COPYRIGHT_YEAR_RANGE}}` and `{{COPYRIGHT_HOLDER}}` inline; Apache 2.0 is verbatim (per Apache convention, copyright lives in NOTICE). Written WITHOUT the "Initialized by hub" header so license-detection tools (GitHub linguist, FOSSA, etc.) match the canonical SHA. The hub will NEVER overwrite an existing LICENSE — switching license type after the first sync requires `git rm LICENSE` followed by re-sync (deliberate legal decision). Mutex with `license_apache2`. |
 | `license_apache2`      | init-if-missing  | `LICENSE`                                        | **Deprecated alias** kept for back-compat. ALWAYS emits Apache 2.0 regardless of `license_type` in config. Use `license` + `license_type: apache-2.0` for new repos. Mutex with `license`. |
-| `notice_apache2`       | init-if-missing  | `NOTICE`                                         | Apache 2.0-style NOTICE with placeholders rendered from `.bos-managed-files.yaml` (schema below). Written WITHOUT the hub header (same reasoning as `license`). **Requires `license_type: apache-2.0` when used alongside `license`** — NOTICE files are an Apache 2.0 §4 distribution requirement and don't apply under MIT/BSD/ISC. The hub fails loud rather than silently producing a misleading NOTICE. |
-| `codeowners`           | init-if-missing  | `.github/CODEOWNERS`                             | Default CODEOWNERS with a catch-all `* @<team>` rule routing all PRs to the maintainers team. Placeholder rendered from `.bos-managed-files.yaml`. Once present, the hub leaves the file alone — consumers add per-path overrides below the catch-all (last-match-wins). CODEOWNERS does NOT inherit from the org `.github` repo; each repo curates its own. |
+| `notice_apache2`       | init-if-missing  | `NOTICE`                                         | Apache 2.0-style NOTICE with placeholders rendered from `bos-managed-files.yaml` (schema below). Written WITHOUT the hub header (same reasoning as `license`). **Requires `license_type: apache-2.0` when used alongside `license`** — NOTICE files are an Apache 2.0 §4 distribution requirement and don't apply under MIT/BSD/ISC. The hub fails loud rather than silently producing a misleading NOTICE. |
+| `codeowners`           | init-if-missing  | `.github/CODEOWNERS`                             | Default CODEOWNERS with a catch-all `* @<team>` rule routing all PRs to the maintainers team. Placeholder rendered from `bos-managed-files.yaml`. Once present, the hub leaves the file alone — consumers add per-path overrides below the catch-all (last-match-wins). CODEOWNERS does NOT inherit from the org `.github` repo; each repo curates its own. |
 
 ### `.bos-launchpad.yaml` schema (used by the `bos_launchpad_*` services)
 
@@ -2018,7 +2018,7 @@ hand-authored.
 > **Migration tip:** see [examples/](examples/) for a worked
 > `.bos-launchpad.yaml` for each kicker flavor (release + cf-pages).
 
-### `.bos-managed-files.yaml` schema (used by `license` / `notice_apache2` / `codeowners`)
+### `bos-managed-files.yaml` schema (used by `license` / `notice_apache2` / `codeowners`)
 
 Optional per-repo file at the repo root that supplies values for
 `{{KEY}}` placeholders rendered into the templated init-if-missing
@@ -2029,8 +2029,16 @@ are supported (no nesting, no lists, no multi-line scalars). Unknown
 keys, malformed lines, out-of-range years, and unknown `license_type`
 values fail the action.
 
+> **Visible filename (not a dotfile).** The config lives at
+> `bos-managed-files.yaml` — deliberately NOT `.bos-managed-files.yaml`
+> — so it shows up in `ls`, file pickers, and code reviews without
+> needing `ls -a`. The legacy dotfile name is still honored for
+> backward compatibility but emits a `::warning::` GitHub Actions
+> annotation on every sync until renamed; please rename it on first
+> touch.
+
 ```yaml
-# .bos-managed-files.yaml
+# bos-managed-files.yaml
 # All keys optional. Comment lines (#) and inline comments are stripped.
 
 # Copyright holder rendered into LICENSE (MIT/BSD/ISC only) AND NOTICE.
@@ -2084,7 +2092,7 @@ does NOT rewrite an existing `LICENSE` because re-licensing a
 distributed work is a legal decision that should be deliberate, not
 automated. To switch:
 
-1. Edit `.bos-managed-files.yaml` → set new `license_type`.
+1. Edit `bos-managed-files.yaml` → set new `license_type`.
 2. **STOP — first check whether your existing `LICENSE` is a
    composite/forked file** (multiple Copyright holders, separator
    lines, or significantly larger than canonical SPDX text). See the
@@ -2160,7 +2168,7 @@ deserve focused review on their own merits:
   overwrite mode) sharing the NOTICE path with the existing
   init-if-missing `notice_apache2`. Mutex per repo: pick one mode.
 - **CODEOWNERS team-rename propagation** — when `maintainers_team`
-  in `.bos-managed-files.yaml` changes, the catch-all rule should
+  in `bos-managed-files.yaml` changes, the catch-all rule should
   update without clobbering per-path overrides. Planned
   implementation: new `codeowners_managed` service using
   **section-mode** markers around just the catch-all line,

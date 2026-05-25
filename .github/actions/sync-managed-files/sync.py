@@ -1227,7 +1227,7 @@ jobs:
 # These three services are init-if-missing (the hub writes them ONLY when
 # the target file is absent and NEVER overwrites a hand-edited version).
 # They support `{{KEY}}` placeholder substitution from per-repo
-# `.bos-managed-files.yaml` config (see `_load_managed_config` below).
+# `bos-managed-files.yaml` config (see `_load_managed_config` below).
 #
 # Supported placeholders:
 #
@@ -1549,7 +1549,7 @@ PERFORMANCE OF THIS SOFTWARE.
 
 
 # SPDX-keyed registry. The `license` service (init-if-missing,
-# templated) reads `license_type` from `.bos-managed-files.yaml` and
+# templated) reads `license_type` from `bos-managed-files.yaml` and
 # resolves the rendered body from here at sync time. Keys MUST match
 # the lowercased SPDX short identifier so consumers can copy-paste
 # from spdx.org/licenses. Apache 2.0 has no placeholders by design
@@ -1589,7 +1589,7 @@ def _resolve_license_text(license_type: str) -> str:
 #     (see `_ALLOWED_CROSS_MODE_VARIANTS` design — TBD).
 #
 #   * CODEOWNERS team-rename propagation: when `maintainers_team` in
-#     `.bos-managed-files.yaml` changes, the catch-all rule should
+#     `bos-managed-files.yaml` changes, the catch-all rule should
 #     update without clobbering per-path overrides the consumer has
 #     added below. Cleanest implementation: SECTION mode (markers
 #     around just the catch-all line), reusing the existing
@@ -1640,7 +1640,7 @@ _CODEOWNERS_TEMPLATE = """\
 
 
 # --------------------------------------------------------------------------- #
-# Per-repo managed-files config (.bos-managed-files.yaml)                     #
+# Per-repo managed-files config (bos-managed-files.yaml)                      #
 # --------------------------------------------------------------------------- #
 #
 # Tiny flat-YAML reader for per-repo placeholder values consumed by the
@@ -1657,8 +1657,19 @@ _CODEOWNERS_TEMPLATE = """\
 # Comments (`#` whole-line and inline-after-value) are stripped. Values
 # may be unquoted, double-quoted, or single-quoted. Nesting, lists, and
 # multi-line scalars are NOT supported — the file is intentionally tiny.
+#
+# The config file is `bos-managed-files.yaml` at the repo root —
+# deliberately NOT a dotfile so it shows up in `ls`, file pickers, and
+# code reviews without needing `ls -a`. Consumers who created the
+# legacy dotfile `.bos-managed-files.yaml` are still supported (with a
+# loud one-time deprecation warning) so renames can be staged.
 
-MANAGED_FILES_CONFIG_FILENAME = ".bos-managed-files.yaml"
+MANAGED_FILES_CONFIG_FILENAME = "bos-managed-files.yaml"
+
+# Legacy dotfile name. Still honored (with a `::warning::` annotation
+# pointing the consumer at the rename) so existing repos keep working
+# during the cutover. Remove once all consumer repos are renamed.
+_MANAGED_FILES_CONFIG_FILENAME_LEGACY = ".bos-managed-files.yaml"
 
 _DEFAULT_MANAGED_CONFIG: Dict[str, str] = {
     "copyright_holder": "Blackout Secure",
@@ -1694,10 +1705,14 @@ _FLAT_YAML_LINE_RE = re.compile(
 )
 
 
-def _parse_flat_yaml(text: str) -> Dict[str, str]:
+def _parse_flat_yaml(text: str, filename: str = MANAGED_FILES_CONFIG_FILENAME) -> Dict[str, str]:
     """Parse a tiny subset of YAML: flat key/value pairs, optional quoting,
     `#` comments, blank lines. Unknown keys are rejected with `die()` so
     typos fail fast rather than silently fall through to defaults.
+
+    `filename` is purely for error messages — pass the actual filename
+    that was opened (e.g. the legacy dotfile) so the consumer sees the
+    correct path in errors.
 
     Returns a dict of {key: value}. Caller merges with defaults.
     """
@@ -1709,7 +1724,7 @@ def _parse_flat_yaml(text: str) -> Dict[str, str]:
         m = _FLAT_YAML_LINE_RE.match(raw)
         if not m:
             die(
-                f"{MANAGED_FILES_CONFIG_FILENAME}:{lineno}: cannot parse line: "
+                f"{filename}:{lineno}: cannot parse line: "
                 f"{raw!r}. Expected `key: value` or `key: \"value\"`."
             )
         key = m.group(1)
@@ -1720,7 +1735,7 @@ def _parse_flat_yaml(text: str) -> Dict[str, str]:
         value = value.strip()
         if key not in _KNOWN_CONFIG_KEYS:
             die(
-                f"{MANAGED_FILES_CONFIG_FILENAME}:{lineno}: unknown key "
+                f"{filename}:{lineno}: unknown key "
                 f"'{key}'. Known: {', '.join(sorted(_KNOWN_CONFIG_KEYS))}."
             )
         result[key] = value
@@ -1728,15 +1743,60 @@ def _parse_flat_yaml(text: str) -> Dict[str, str]:
 
 
 def _load_managed_config(root: str) -> Dict[str, str]:
-    """Read `.bos-managed-files.yaml` if present at `root`; return the
+    """Read `bos-managed-files.yaml` if present at `root`; return the
     parsed config merged over the defaults. Missing file is fine —
-    defaults are used."""
+    defaults are used.
+
+    Backward-compat: if the visible-named file is absent but the legacy
+    dotfile `.bos-managed-files.yaml` exists, fall back to it and emit
+    a `::warning::` GHA annotation telling the consumer to rename. If
+    BOTH exist (consumer mid-migration), the visible name wins and the
+    legacy file is flagged for removal — never silently merged.
+    """
     config_path = os.path.join(root, MANAGED_FILES_CONFIG_FILENAME)
+    legacy_path = os.path.join(root, _MANAGED_FILES_CONFIG_FILENAME_LEGACY)
     merged = dict(_DEFAULT_MANAGED_CONFIG)
-    if not os.path.exists(config_path):
+
+    visible_exists = os.path.exists(config_path)
+    legacy_exists = os.path.exists(legacy_path)
+
+    if visible_exists and legacy_exists:
+        # Consumer is mid-rename. Use the visible file (the intended
+        # new name) and warn loudly so they delete the dotfile rather
+        # than leaving a stale shadow config that future maintainers
+        # might mistakenly edit.
+        sys.stderr.write(
+            "::warning file={legacy}::Both '{new}' and '{legacy}' exist; "
+            "ignoring legacy dotfile. Delete '{legacy}' to silence this "
+            "warning.\n".format(
+                new=MANAGED_FILES_CONFIG_FILENAME,
+                legacy=_MANAGED_FILES_CONFIG_FILENAME_LEGACY,
+            )
+        )
+        active_path = config_path
+        active_name = MANAGED_FILES_CONFIG_FILENAME
+    elif visible_exists:
+        active_path = config_path
+        active_name = MANAGED_FILES_CONFIG_FILENAME
+    elif legacy_exists:
+        # Pure-legacy consumer. Honor the file but warn about the
+        # rename so they migrate before we drop support.
+        sys.stderr.write(
+            "::warning file={legacy}::'{legacy}' is deprecated; rename to "
+            "'{new}' (visible filename, no leading dot). The legacy name "
+            "still works but will be removed in a future hub release.\n"
+            .format(
+                new=MANAGED_FILES_CONFIG_FILENAME,
+                legacy=_MANAGED_FILES_CONFIG_FILENAME_LEGACY,
+            )
+        )
+        active_path = legacy_path
+        active_name = _MANAGED_FILES_CONFIG_FILENAME_LEGACY
+    else:
         return merged
-    with open(config_path, "r", encoding="utf-8") as fh:
-        parsed = _parse_flat_yaml(fh.read())
+
+    with open(active_path, "r", encoding="utf-8") as fh:
+        parsed = _parse_flat_yaml(fh.read(), filename=active_name)
     merged.update(parsed)
 
     # Validate license_type eagerly so an unknown SPDX ID fails fast
@@ -1745,7 +1805,7 @@ def _load_managed_config(root: str) -> Dict[str, str]:
     license_type = merged.get("license_type", "").strip().lower()
     if license_type and license_type not in _LICENSE_REGISTRY:
         die(
-            f"{MANAGED_FILES_CONFIG_FILENAME}: 'license_type' "
+            f"{active_name}: 'license_type' "
             f"({license_type!r}) is not a supported SPDX identifier. "
             f"Supported: {', '.join(sorted(_LICENSE_REGISTRY))}."
         )
@@ -1854,7 +1914,7 @@ _TEMPLATED_INIT_SERVICES = frozenset({
 })
 
 # Init-if-missing services whose body is RESOLVED at sync time from
-# `_LICENSE_REGISTRY` based on `license_type` in `.bos-managed-files.yaml`.
+# `_LICENSE_REGISTRY` based on `license_type` in `bos-managed-files.yaml`.
 # The body registered in `SERVICE_INIT_FILES` for these services is
 # a fallback placeholder; the init-loop swaps it for the right canonical
 # text BEFORE placeholder rendering. The `license_apache2` alias is
@@ -1972,7 +2032,7 @@ SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
         ".github/workflows/lint.yml": _GHA_LINT_SHELL_YML,
     },
     # Templated whole-file content (init-if-missing). Values for
-    # `{{KEY}}` placeholders come from `.bos-managed-files.yaml` at
+    # `{{KEY}}` placeholders come from `bos-managed-files.yaml` at
     # the consumer repo root (see `_load_managed_config`).
     #
     # `license` resolves its body DYNAMICALLY at sync time by looking
@@ -1985,7 +2045,7 @@ SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
     # emits Apache 2.0, ignoring `license_type` in config. Existing
     # consumers using `license_apache2` continue to work unchanged;
     # new consumers should use `license` + set `license_type` in
-    # `.bos-managed-files.yaml`. Both target `LICENSE` and are
+    # `bos-managed-files.yaml`. Both target `LICENSE` and are
     # mutually exclusive per repo (enforced at parse time).
     "license": {
         "LICENSE": _LICENSE_APACHE2,
@@ -2469,7 +2529,7 @@ def sync_files(
     # only `drift` entries, so existing files are never touched.
     #
     # Templated services (`_TEMPLATED_INIT_SERVICES`) get their
-    # `{{KEY}}` placeholders rendered from `.bos-managed-files.yaml`
+    # `{{KEY}}` placeholders rendered from `bos-managed-files.yaml`
     # (or defaults). License/NOTICE (`_NO_HEADER_INIT_SERVICES`) skip
     # the "Initialized by ..." header injection so license-detection
     # tools still match the canonical text.

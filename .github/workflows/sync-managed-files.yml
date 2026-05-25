@@ -10,7 +10,7 @@ name: Sync managed dotfiles
 # `lint.yml`, `LICENSE`, `NOTICE`, `.github/CODEOWNERS`) on first run
 # for init-if-missing services. Templated init services
 # (`notice_apache2`, `codeowners`) render `{{KEY}}` placeholders from
-# per-repo `.bos-managed-files.yaml` at sync time.
+# per-repo `bos-managed-files.yaml` at sync time.
 #
 # Modes:
 #   commit  (default) — write changes and push back to the calling
@@ -45,14 +45,14 @@ on:
           one `gha_lint_*` per repo — they all target the same
           `.github/workflows/lint.yml`), `license` (multi-license;
           picks from `_LICENSE_REGISTRY` by `license_type:` in
-          `.bos-managed-files.yaml`, supports apache-2.0 / mit /
+          `bos-managed-files.yaml`, supports apache-2.0 / mit /
           bsd-3-clause / isc), `license_apache2` (deprecated alias
           that always emits Apache 2.0; mutex with `license`),
           `notice_apache2` (Apache 2.0 NOTICE; requires
           `license_type: apache-2.0` when used with `license`),
           `codeowners` (`.github/CODEOWNERS` with a catch-all rule).
           The license / notice / codeowners services read per-repo
-          placeholder values from optional `.bos-managed-files.yaml`
+          placeholder values from optional `bos-managed-files.yaml`
           at the repo root (all keys default to org-canonical
           values).
         required: true
