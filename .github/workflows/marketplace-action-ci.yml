@@ -222,10 +222,10 @@ jobs:
 
       - name: Marketplace pre-publish check
         id: check
-        # Kit `check` composite. SHA-pinned to v0.1.0 per the hub
-        # GHA pin policy. Dependabot bumps in lockstep with the
-        # guard + promote pins.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@7dbcdc3d94b02ccd4027510f57ac4727743f2818 # v0.1.0
+        # Kit `check` composite. SHA-pinned per the hub GHA pin
+        # policy. Dependabot bumps in lockstep with the guard +
+        # promote pins.
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@b068c7a101b9364eeb0c0b172b9d22a724388df7 # v0.1.1
         with:
           action_yml_path:        ${{ inputs.action_yml_path }}
           fail_on_warning:        ${{ inputs.fail_on_warning }}
@@ -294,7 +294,7 @@ jobs:
 
       - name: Marketplace name check
         id: name
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/name-check@7dbcdc3d94b02ccd4027510f57ac4727743f2818 # v0.1.0
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/name-check@b068c7a101b9364eeb0c0b172b9d22a724388df7 # v0.1.1
         with:
           proposed_name:     ${{ steps.resolve.outputs.name }}
           fail_on_collision: ${{ inputs.name_check_fail_on_collision }}
@@ -318,7 +318,7 @@ jobs:
 
       - name: Render branding preview
         id: render
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/branding-preview@7dbcdc3d94b02ccd4027510f57ac4727743f2818 # v0.1.0
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/branding-preview@b068c7a101b9364eeb0c0b172b9d22a724388df7 # v0.1.1
         with:
           action_yml_path: ${{ inputs.action_yml_path }}
           feather_ref:     ${{ inputs.branding_preview_feather_ref }}

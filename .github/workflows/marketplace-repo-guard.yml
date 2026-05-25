@@ -176,7 +176,7 @@ jobs:
         # `bos-marketplace-kit` Action. SHA-pinned per the hub's
         # GHA pin policy (org/repo@<sha> # vX.Y.Z). Dependabot bumps
         # both halves in lockstep.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/guard@7dbcdc3d94b02ccd4027510f57ac4727743f2818 # v0.1.0
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/guard@b068c7a101b9364eeb0c0b172b9d22a724388df7 # v0.1.1
         with:
           pr_base_sha:        ${{ inputs.pr_base_sha }}
           pr_head_sha:        ${{ inputs.pr_head_sha }}

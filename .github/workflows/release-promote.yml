@@ -6,7 +6,7 @@
 # https://docs.github.com/en/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace).
 #
 # Pipeline (two stages):
-#   1. promote   — `bos-marketplace-kit/.github/actions/promote@v0.1.0`
+#   1. promote   — `bos-marketplace-kit/.github/actions/promote@v0.1.1`
 #                  copies an allowlisted set of paths from
 #                  `source_branch` to `target_branch`, tags
 #                  `target_branch`.
@@ -339,7 +339,7 @@ jobs:
         # `bos-marketplace-kit` Action. SHA-pinned per the hub's
         # GHA pin policy (org/repo@<sha> # vX.Y.Z). Dependabot bumps
         # both halves in lockstep.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@7dbcdc3d94b02ccd4027510f57ac4727743f2818 # v0.1.0
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@b068c7a101b9364eeb0c0b172b9d22a724388df7 # v0.1.1
         with:
           source_branch:         ${{ inputs.source_branch }}
           target_branch:         ${{ inputs.target_branch }}
