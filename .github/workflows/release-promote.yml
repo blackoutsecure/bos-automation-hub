@@ -18,12 +18,14 @@
 # Action. This workflow is the ergonomic layer (toggles for
 # Dependabot / metadata auto-sync, GitHub Release chaining) around
 # it.
-# Trigger model: this workflow is intended to be called from a thin
-# caller on the SOURCE branch (typically `dev`) — see
-# `examples/marketplace-action-release.example.yml`. Triggers normally
-# include `workflow_dispatch` (operator types the version) and may
-# include `push: tags: ['v*']` when the operator prefers to tag on dev
-# first.
+# Trigger model: this workflow is intended to be called from the hub
+# meta-workflow [`bos-marketplace-launchpad.yml`](./bos-marketplace-launchpad.yml),
+# which is itself called from a thin caller on the SOURCE branch
+# (typically `dev`) — see
+# [`examples/bos-marketplace-launchpad.example.yaml`](../../examples/bos-marketplace-launchpad.example.yaml).
+# Triggers normally include `workflow_dispatch` (operator types the
+# version) and may include `push: tags: ['v*']` when the operator
+# prefers to tag on dev first.
 #
 # Hard constraints enforced by the underlying composite:
 #   * `.github/workflows/**` paths in the allowlist are rejected.

@@ -95,7 +95,6 @@ Per-workflow requirements:
 | `release.yml`, `github-release.yml`, `openwrt-readsb-wiedehopf-bump.yml`, `deploy-cloudflare-pages.yml` | `DEFAULT_RUNNER` |
 | `balena-block-publish.yml`, `balena-fleet-deploy.yml` | `DEFAULT_RUNNER` + `RUNNER_X64` |
 | `docker-build-push.yml` | `DEFAULT_RUNNER` + `RUNNER_X64` + `RUNNER_ARM64` |
-| `docker-scout-scan.yml` | `RUNNER_X64` |
 | `lint.yml`, `monitor-upstream-release.yml` | _(pinned to `ubuntu-latest` by design)_ |
 | `sync-managed-files.yml` | _(uses caller-supplied `inputs.runs_on` directly)_ |
 | `bos-launchpad.yml`, `bos-marketplace-launchpad.yml` | _(pure delegator; each downstream workflow runs its own preflight)_ |
@@ -107,11 +106,10 @@ fallback or a `vars-…-not-set` sentinel — a job that reaches the
 
 **Per-call overrides:** workflows that ship a deploy-style step expose
 a `runs_on` input (currently `deploy-cloudflare-pages.yml`,
-`balena-block-publish.yml`, `balena-fleet-deploy.yml`,
-`docker-scout-scan.yml`). Pass a literal label or JSON-array string to
-override the resolved variable for that one job; leave it empty to
-inherit. The shape rule is identical and is also validated by
-preflight on the source variable.
+`balena-block-publish.yml`, `balena-fleet-deploy.yml`). Pass a literal
+label or JSON-array string to override the resolved variable for that
+one job; leave it empty to inherit. The shape rule is identical and
+is also validated by preflight on the source variable.
 
 ---
 
@@ -120,7 +118,6 @@ preflight on the source variable.
 | Path | Kind | Purpose |
 |------|------|---------|
 | [.github/workflows/docker-build-push.yml](.github/workflows/docker-build-push.yml) | Reusable workflow | Multi-arch Docker build, push-by-digest, and single-manifest publish to Docker Hub. Includes default-on Docker Scout CVE scanning (PR comment + SARIF upload to code scanning). |
-| [.github/workflows/docker-scout-scan.yml](.github/workflows/docker-scout-scan.yml) | Reusable workflow | Standalone Docker Scout scan of an already-published image (e.g. scheduled re-scan of `:latest`). Uploads SARIF to code scanning. |
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/workflows/balena-fleet-deploy.yml](.github/workflows/balena-fleet-deploy.yml) | Reusable workflow | Render a per-fleet `balena.yml` from inputs and deploy the same block to one or more balenaCloud fleets in a matrix. |
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
@@ -136,15 +133,15 @@ preflight on the source variable.
 | [.github/actions/shared/docker-multiarch-manifest/action.yml](.github/actions/shared/docker-multiarch-manifest/action.yml) | Composite action | Assembles a multi-arch Docker manifest from per-arch digest artifacts and pushes it under one or more tags, with retry on transient registry failures. |
 | [.github/actions/sync-dockerhub-description/action.yml](.github/actions/sync-dockerhub-description/action.yml) | Composite action | Validates inputs and pushes a repo's README + short description to Docker Hub via `peter-evans/dockerhub-description`. |
 | [.github/actions/docker-scout-enable-repo/action.yml](.github/actions/docker-scout-enable-repo/action.yml) | Composite action | Idempotently enrolls a Docker Hub repository in Docker Scout's continuous-monitoring service. Validates credentials, logs in to Docker Hub, installs the Scout CLI, and calls `docker scout repo enable`. |
-| [.github/actions/shared/docker-scout-scan/action.yml](.github/actions/shared/docker-scout-scan/action.yml) | Composite action | Wraps `docker/scout-action` with input validation, Docker Hub login, and optional SARIF upload to GitHub code scanning. Used by both the embedded scan in `docker-build-push.yml` and the standalone `docker-scout-scan.yml`. |
+| [.github/actions/shared/docker-scout-scan/action.yml](.github/actions/shared/docker-scout-scan/action.yml) | Composite action | Wraps `docker/scout-action` with input validation, Docker Hub login, and optional SARIF upload to GitHub code scanning. Used by the embedded scan in `docker-build-push.yml`; reach for it directly to weave Scout into custom job topologies (ad-hoc / scheduled re-scans of an already-published image). |
 | [.github/actions/shared/render-balena-yml/action.yml](.github/actions/shared/render-balena-yml/action.yml) | Composite action | Renders `balena.yml` from scalar inputs (PyYAML `safe_dump`, path-traversal + HTTPS-URL + default-vs-supported-device-type validation, defensive re-parse). Shared by `balena-block-publish.yml` (default `type: sw.block`) and `balena-fleet-deploy.yml` (default `type: sw.application`, `emit_assets: false` for the legacy per-target omit-assets behavior). |
 | [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
 | [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, `.github/dependabot.yml`), writes canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows in `.github/workflows/bos-launchpad.yml`), and initializes starter templates (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`) on first run only. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
 | [.github/actions/nginx-config-validate/action.yml](.github/actions/nginx-config-validate/action.yml) | Composite action | Spins up the official `nginx` image, renders the consumer repo's `*.conf.template` files via `envsubst`, and runs `nginx -t -c /etc/nginx/nginx.conf`. Used by `nginx-config-validate.yml`. Positional-key envsubst (only listed keys are substituted) so nginx-native variables like `$remote_addr` pass through unchanged. |
 | [.github/actions/shared/commit-and-push/action.yml](.github/actions/shared/commit-and-push/action.yml) | Composite action | Stage files, commit, and push to the current branch with rebase-retry on concurrent commits. Single-line message + author validation. Exits cleanly with `committed=false` when nothing is staged. Used by `monitor-upstream-release.yml` and `sync-managed-files.yml`. |
-| [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Typically called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) (recommended) or directly via [`marketplace-action-release.example.yaml`](examples/marketplace-action-release.example.yaml). |
-| [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Typically called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) (recommended) or directly via [`marketplace-action-guard.example.yaml`](examples/marketplace-action-guard.example.yaml). |
-| [.github/workflows/marketplace-action-ci.yml](.github/workflows/marketplace-action-ci.yml) | Reusable workflow | **Marketplace Action CI.** PR-time `check` (manifest + LICENSE + README + branding + community-health) + `branding-preview` (Marketplace card SVG, uploaded as artifact) + opt-in `name-check` (Marketplace name availability). Drives every PR into `dev` on a Marketplace Action repo. Typically called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) (recommended) or directly via [`marketplace-action-ci.example.yaml`](examples/marketplace-action-ci.example.yaml). |
+| [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml). |
+| [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml). |
+| [.github/workflows/marketplace-action-ci.yml](.github/workflows/marketplace-action-ci.yml) | Reusable workflow | **Marketplace Action CI.** PR-time `check` (manifest + LICENSE + README + branding + community-health) + `branding-preview` (Marketplace card SVG, uploaded as artifact) + opt-in `name-check` (Marketplace name availability). Drives every PR into `dev` on a Marketplace Action repo. Called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml). |
 | [.github/workflows/bos-marketplace-launchpad.yml](.github/workflows/bos-marketplace-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Marketplace Launchpad). Composes `marketplace-action-ci.yml` + `marketplace-repo-guard.yml` + `release-promote.yml` with internal event routing: PRs / pushes to `dev` → CI; PRs to `main` → guard; `workflow_dispatch` mode `release` → promote + GH Release; `workflow_dispatch` mode `name-check` → one-shot name probe. Consumers drop a ~60-line thin caller on their `dev` branch ([`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)); all orchestration logic lives here. Sibling to [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) for the container/site family. |
 | [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit) (external) | Marketplace Action | Source of the `check` / `guard` / `promote` / `name-check` / `branding-preview` composite primitives consumed by `marketplace-repo-guard.yml`, `release-promote.yml`, and `marketplace-action-ci.yml`. SHA-pinned to `v0.1.1`; Dependabot tracks bumps. |
 | [scripts/marketplace-repo/](scripts/marketplace-repo/) | Bootstrap scripts | One-time platform-setup scripts for Marketplace Action repos: org ruleset template + `gh api` bootstrap (`bootstrap-ruleset.sh`) for `file_path_restriction` enforcement, and a per-repo branch-protection fallback (`bootstrap-branch-protection.sh`). See [`scripts/marketplace-repo/README.md`](scripts/marketplace-repo/README.md). |
@@ -367,57 +364,7 @@ providers by changing `source:` and the matching input:
 | `pypi`                  | `package_name`                                   | `pypi.org/pypi/<pkg>/json`. |
 | `generic_url`           | `version_url`, `version_regex` (1 capture group) | Stdlib-only HTTP, no auth. |
 
-### 3. Scheduled Docker Scout re-scan
-
-Calls the [`docker-scout-scan.yml`](#docker-scout-scanyml--reusable-workflow)
-reusable workflow daily so newly disclosed CVEs in already-published
-images surface in the **Security** tab even when no commits land.
-
-Required `vars`: `IMAGE_NAME`, `DOCKERHUB_NAMESPACE`.
-Required `secrets`: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
-
-```yaml
-# .github/workflows/docker-scout.yml
-name: Docker Scout (scheduled)
-
-on:
-  schedule:
-    - cron: '0 6 * * *'   # 06:00 UTC daily
-  workflow_dispatch:
-    inputs:
-      image_tag:
-        description: 'Tag to scan (default: latest).'
-        required: false
-        type: string
-        default: 'latest'
-
-permissions:
-  contents: read
-
-concurrency:
-  group: docker-scout-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
-jobs:
-  scout:
-    permissions:
-      contents: read
-      security-events: write
-      pull-requests: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/docker-scout-scan.yml@main
-    with:
-      image: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.IMAGE_NAME }}:${{ inputs.image_tag || 'latest' }}
-      command: cves
-      severities: critical,high
-      sarif: true
-      sarif_upload: true
-      summary: true
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
-```
-
-### 4. Monitor upstream and dispatch other workflows in this repo
+### 3. Monitor upstream and dispatch other workflows in this repo
 
 Use this when the consumer repo *isn't* a Docker/Balena/Release product
 and you just want to fan out to one or more existing local workflows
@@ -462,14 +409,14 @@ jobs:
       force_dispatch: ${{ github.event_name == 'workflow_dispatch' && inputs.force_dispatch && 'true' || 'false' }}
 ```
 
-### 5. Multi-arch Docker build only
+### 4. Multi-arch Docker build only
 
 For a repo that just builds and pushes a Docker image (no Balena, no
 GitHub Release), call [`docker-build-push.yml`](#docker-build-pushyml--reusable-workflow)
 directly — see the [Minimal caller](#minimal-caller) example in that
 section.
 
-### 6. Multi-fleet balenaBlock deploy
+### 5. Multi-fleet balenaBlock deploy
 
 For a block deployed to multiple fleets that differ only by device
 type, use [`balena-fleet-deploy.yml`](#balena-fleet-deployyml--reusable-workflow)
@@ -477,7 +424,7 @@ type, use [`balena-fleet-deploy.yml`](#balena-fleet-deployyml--reusable-workflow
 section. (This is a different topology from `balena-block-publish.yml`
 and is **not** part of the `release.yml` pipeline.)
 
-### 7. Cloudflare Pages deploy (static-site launchpad)
+### 6. Cloudflare Pages deploy (static-site launchpad)
 
 For static-site repos, drive the deploy through the
 [`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow)
@@ -811,9 +758,8 @@ just on PRs, leave `enable_scout: true` and set
 `scout_write_comment: false` and `scout_sarif_upload: false`.
 
 For ad-hoc / scheduled scans of an image not produced by this
-workflow, use the standalone
-[`docker-scout-scan.yml`](.github/workflows/docker-scout-scan.yml)
-reusable workflow.
+workflow, use the [`docker-scout-scan`](.github/actions/shared/docker-scout-scan/action.yml)
+composite action directly in a custom job.
 
 #### Permissions
 
@@ -976,92 +922,16 @@ for full details.
 
 ---
 
-## `docker-scout-scan.yml` — reusable workflow
-
-Standalone Docker Scout scan of an already-published image. Use it
-when the build-time scan in [`docker-build-push.yml`](.github/workflows/docker-build-push.yml)
-isn't enough — most commonly:
-
-- **Scheduled re-scans** of `:latest` (or any other long-lived tag) so
-  newly disclosed CVEs surface in GitHub code scanning even when no
-  commits land. See [Quick start](#quick-start--caller-wiring) for a
-  copy-paste daily-cron caller.
-- **Out-of-band** scans of an image not built by this org's pipeline
-  (e.g. a third-party base image you depend on).
-- Recording an image into a Scout `environment` from a deploy job
-  that lives outside `docker-build-push.yml`.
-
-This workflow does **not** build anything — for build → push → scan
-wire-up, use `docker-build-push.yml`, which embeds the same scan
-inline so the PR comment renders against the exact image the matrix
-build produced.
-
-### Minimal usage
-
-```yaml
-jobs:
-  scout:
-    permissions:
-      contents: read
-      security-events: write   # SARIF upload
-      pull-requests: write     # PR comment (if invoked from a PR)
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/docker-scout-scan.yml@main
-    with:
-      image: docker.io/acme/widget:latest
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
-```
-
-### Inputs (selected — see the workflow file for the full list)
-
-- `image` (**required**) — image reference to scan. Accepts an
-  optional Scout prefix (`registry://`, `local://`, `oci-dir://`,
-  `archive://`, `fs://`, `sbom://`).
-- `command` — `quickview`, `cves` (default), `compare`,
-  `recommendations`, `sbom`, or `environment`. Comma-separate to
-  chain commands.
-- `severities` — comma-separated severities to keep. Default
-  `critical,high`.
-- `only_fixed`, `only_unfixed`, `only_cisa_kev`, `ignore_base`,
-  `ignore_unchanged` — standard Scout filters.
-- `to`, `to_env`, `to_latest`, `organization` — `compare`-mode
-  targets. Mutually exclusive (validated in preflight).
-- `environment`, `organization` — `environment`-mode targets.
-- `sarif`, `sarif_upload`, `sarif_category` — control SARIF
-  generation and upload to GitHub code scanning.
-- `summary`, `write_comment`, `keep_previous_comments` — control how
-  results are surfaced.
-- `exit_code`, `exit_on` — control whether the job fails on findings.
-- `registry` — non–Docker Hub registry to additionally log in to
-  (paired with `secrets.REGISTRY_USERNAME` / `REGISTRY_PASSWORD`).
-- `runs_on`, `timeout_minutes` — runner / timeout overrides.
-
-### Required secrets
-
-- `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` — Scout's vulnerability API
-  is gated behind Docker Hub auth even for local image scans.
-
-### Permissions
-
-The caller job needs:
-
-- `contents: read`
-- `security-events: write` if `sarif_upload: true` (default).
-- `pull-requests: write` if `write_comment: true` (default) and the
-  workflow is invoked from a PR.
-
----
-
 ## `docker-scout-scan` — composite action
 
 Direct wrapper around
 [`docker/scout-action`](https://github.com/docker/scout-action) used
-by both `docker-scout-scan.yml` and the embedded scan jobs in
-`docker-build-push.yml`. Reach for it directly when you need to weave
-Scout into a custom job topology — e.g. scanning an image you've
-already built and loaded earlier in the same job, or running multiple
-Scout commands sharing a single login.
+by the embedded scan jobs in `docker-build-push.yml`. Reach for it
+directly when you need to weave Scout into a custom job topology —
+e.g. scanning an image you've already built and loaded earlier in
+the same job, running multiple Scout commands sharing a single login,
+or running ad-hoc / scheduled re-scans of an already-published image
+outside the build pipeline.
 
 ```yaml
 - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/docker-scout-scan@main
@@ -1148,9 +1018,10 @@ sync the version back into `balena.yml`, and publish to balenaCloud via
 > [`docker-build-push.yml`](.github/workflows/docker-build-push.yml)
 > first (Scout runs there by default), then call the Balena workflow
 > as the second stage of [`release.yml`](.github/workflows/release.yml).
-> If you only ship via balenaCloud, schedule a periodic
-> [`docker-scout-scan.yml`](.github/workflows/docker-scout-scan.yml)
-> against the published Hub image to keep code-scanning alerts current.
+> If you only ship via balenaCloud, run a scheduled job that calls the
+> [`docker-scout-scan`](.github/actions/shared/docker-scout-scan/action.yml)
+> composite action against the published Hub image to keep code-scanning
+> alerts current.
 
 ### Required configuration on the caller repo
 
@@ -2335,8 +2206,8 @@ alongside the existing `violations` output, and surfaces all three
 in the job summary with per-failure remediation hints. Together with
 `blocked_paths`, this gives the guard a fully symmetric MUST-NOT-EXIST
 plus MUST-EXIST policy surface for the protected branch. See the
-updated [`marketplace-action-guard.example.yaml`](examples/marketplace-action-guard.example.yaml)
-for a recommended baseline.
+[`bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)
+caller for a recommended baseline.
 
 #### Auto-sync of `.github/*` files to `main`
 
@@ -2388,11 +2259,11 @@ services in `sync-managed-files` produce this layout for you on
 
 | Setup item                                              | Auto-setup-able? | How                                                                                  |
 |---------------------------------------------------------|------------------|--------------------------------------------------------------------------------------|
-| PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (guard stage auto-routes for `pull_request_target`), or `marketplace-action-guard.example.yaml` as `marketplace-guard.yml` for the legacy split shape. |
-| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (ci stage auto-routes for `pull_request`/`push`), or `marketplace-action-ci.example.yaml` as `ci.yml` for the legacy split shape. |
+| PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (guard stage auto-routes for `pull_request_target`). |
+| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (ci stage auto-routes for `pull_request`/`push`). |
 | PR-time block on deletion of `.github/dependabot.yml` (or other required files) | **Yes** | Same launchpad guard stage — default `required_paths` covers action.yml/LICENSE/NOTICE/README.md/dependabot; override `required_paths` on the caller to extend or replace. |
 | Hard-block on workflow paths during `dev -> main` promotion | **Yes**       | Baked into the [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote) — cannot be disabled. |
-| `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (release stage auto-routes for `workflow_dispatch` mode `release`), or `marketplace-action-release.example.yaml` as `release.yml` for the legacy split shape. |
+| `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (release stage auto-routes for `workflow_dispatch` mode `release`). |
 | Auto-sync of `.github/dependabot.yml` to `main`         | **Yes**          | `include_dependabot_config: true` on the release caller (default on).                |
 | Auto-sync of `.github/CODEOWNERS` / `FUNDING.yml` / `ISSUE_TEMPLATE/` / `PULL_REQUEST_TEMPLATE.md` / `SECURITY.md` / `CONTRIBUTING.md` to `main` | **Yes** | `include_github_metadata: true` on the release caller (default off). |
 | Removal of Marketplace-violating files from `main` during promote | **Yes** | Inherent to wipe-and-replay; surfaced via `removed_violations` workflow output and job summary. |
@@ -2426,7 +2297,7 @@ services in `sync-managed-files` produce this layout for you on
 
 1. **Set the default branch to `main`** (UI: Settings → Branches).
 2. **Push `dev`**: `git push origin main:dev`.
-3. **On `dev`**, add the thin Marketplace Launchpad caller (recommended):
+3. **On `dev`**, add the thin Marketplace Launchpad caller:
    * `.github/workflows/bos-marketplace-launchpad.yml` — copy from
      [`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml).
      ~60 lines: event triggers + concurrency + a single `uses:` job
@@ -2441,18 +2312,6 @@ services in `sync-managed-files` produce this layout for you on
      Marketplace minimum (`action.yml`, `LICENSE`, `NOTICE`,
      `README.md`, `.github/dependabot.yml`); see the hub reusable for
      the full overridable input list.
-
-   *Alternative — three single-purpose caller files (legacy split shape):*
-   if you'd rather wire each event to its own caller file directly,
-   drop the three legacy examples instead. They're functionally
-   equivalent but skip the hub orchestrator:
-
-   * `.github/workflows/ci.yml` — from
-     [`examples/marketplace-action-ci.example.yaml`](examples/marketplace-action-ci.example.yaml).
-   * `.github/workflows/release.yml` — from
-     [`examples/marketplace-action-release.example.yaml`](examples/marketplace-action-release.example.yaml).
-   * `.github/workflows/marketplace-guard.yml` — from
-     [`examples/marketplace-action-guard.example.yaml`](examples/marketplace-action-guard.example.yaml).
 4. **Enroll a sync-managed-files caller on `dev`** (NOT on `main`)
    with the service set from the table below.
 5. **Apply platform-level enforcement** — once per org via

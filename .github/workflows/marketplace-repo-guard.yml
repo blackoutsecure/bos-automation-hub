@@ -17,9 +17,12 @@
 #     before reviewers waste cycles, instead of discovering it at the
 #     merge button.
 #
-# Trigger model: call from a thin caller on the **source branch**
+# Trigger model: called from the hub meta-workflow
+# [`bos-marketplace-launchpad.yml`](./bos-marketplace-launchpad.yml),
+# which is itself called from a thin caller on the **source branch**
 # (`dev`) that fires on `pull_request_target` for PRs targeting the
-# default branch — see `examples/marketplace-action-guard.example.yml`.
+# default branch — see
+# [`examples/bos-marketplace-launchpad.example.yaml`](../../examples/bos-marketplace-launchpad.example.yaml).
 # `pull_request_target` (not `pull_request`) is required because the
 # workflow file lives on the source branch (`dev`); PR-base reads
 # would otherwise look for the workflow on the PR's BASE branch, which
