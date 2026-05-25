@@ -53,7 +53,13 @@ inputs:
       `{{MAINTAINERS_TEAM}}` / `{{REPO_NAME}}` / `{{REPO_OWNER}}`
       placeholders from optional `bos-managed-files.yaml` at the
       repo root (all keys default to org-canonical values when
-      absent). Unknown values fail the action.
+      absent). The `dependabot_*` section services additionally
+      consume an optional `dependabot_target_branch:` knob from
+      the same config file — when set (e.g. to `dev` for
+      Marketplace Action repos using the dev/main split), every
+      enabled ecosystem block gets a `target-branch:` override so
+      Dependabot opens PRs against that branch instead of the
+      repo default. Unknown values fail the action.
     required: true
   dry_run:
     description: >-

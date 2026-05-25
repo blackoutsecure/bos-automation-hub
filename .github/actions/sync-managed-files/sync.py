@@ -389,9 +389,23 @@ log_pipe_cmd() {
 # accepts `#` comments inside a sequence, so the marker pair lives
 # between items without breaking parsing.
 
+# The `{{DEPENDABOT_TARGET_BRANCH_LINE}}` token (sits at end of the
+# `directory: /` line) is rendered at sync time from
+# `dependabot_target_branch:` in `bos-managed-files.yaml`. When that
+# config key is empty (the default), the placeholder resolves to the
+# empty string and the block stays one line shorter. When set (e.g.
+# `dependabot_target_branch: dev` for Marketplace Action repos using
+# the dev/main split), the placeholder expands to
+# `\n    target-branch: <branch>` so Dependabot opens its PRs against
+# the named branch instead of the default branch. Dependabot reads
+# this config only from the default branch, so the dev/main split
+# pattern relies on this override to keep PRs landing on `dev`
+# (where the CI workflows live) even though the config itself is
+# committed to `main` by the promote pipeline.
+
 _DEPENDABOT_ACTIONS = """\
   - package-ecosystem: github-actions
-    directory: /
+    directory: /{{DEPENDABOT_TARGET_BRANCH_LINE}}
     schedule:
       interval: weekly
       day: monday
@@ -415,7 +429,7 @@ _DEPENDABOT_ACTIONS = """\
 
 _DEPENDABOT_NPM = """\
   - package-ecosystem: npm
-    directory: /
+    directory: /{{DEPENDABOT_TARGET_BRANCH_LINE}}
     schedule:
       interval: weekly
       day: monday
@@ -440,7 +454,7 @@ _DEPENDABOT_NPM = """\
 
 _DEPENDABOT_PIP = """\
   - package-ecosystem: pip
-    directory: /
+    directory: /{{DEPENDABOT_TARGET_BRANCH_LINE}}
     schedule:
       interval: weekly
       day: monday
@@ -1653,6 +1667,15 @@ _CODEOWNERS_TEMPLATE = """\
 #     copyright_holder: Blackout Secure
 #     copyright_year_start: 2024
 #     maintainers_team: "@blackoutsecure/maintainers"
+#     license_type: apache-2.0
+#     dependabot_target_branch: dev   # optional; for dev/main split repos
+#
+# `dependabot_target_branch` adds a `target-branch:` knob to EVERY
+# enabled `dependabot_*` ecosystem block, so Dependabot PRs land on
+# the named branch instead of the default branch. Use this on
+# Marketplace Action repos that follow the dev/main split (CI
+# workflows live on `dev`, Marketplace artifact lives on `main`).
+# Leave empty (or omit the key) for the standard same-branch flow.
 #
 # Comments (`#` whole-line and inline-after-value) are stripped. Values
 # may be unquoted, double-quoted, or single-quoted. Nesting, lists, and
@@ -1675,6 +1698,13 @@ _DEFAULT_MANAGED_CONFIG: Dict[str, str] = {
     # Apache 2.0 — useful when a repo wants to keep its existing
     # license while the org default shifts.
     "license_type": "apache-2.0",
+    # Optional `target-branch:` override applied to every enabled
+    # `dependabot_*` ecosystem block. Leave empty for the default
+    # same-branch flow (Dependabot opens PRs against the repo's
+    # default branch). Set to a branch name (e.g. "dev") for repos
+    # using the dev/main split publishing pattern where the
+    # workflow files live on `dev` and `main` is a curated artifact.
+    "dependabot_target_branch": "",
 }
 
 _KNOWN_CONFIG_KEYS = frozenset(_DEFAULT_MANAGED_CONFIG.keys())
@@ -1685,9 +1715,24 @@ _KNOWN_PLACEHOLDERS = frozenset({
     "MAINTAINERS_TEAM",
     "REPO_NAME",
     "REPO_OWNER",
+    # Resolves to either "" (no override) or "\n    target-branch:
+    # <name>" — the leading newline + 4-space indent are part of the
+    # substitution because the placeholder sits at the END of the
+    # `directory: /` line inside the `_DEPENDABOT_*` block bodies.
+    # See `_DEFAULT_MANAGED_CONFIG["dependabot_target_branch"]` for
+    # the user-facing knob.
+    "DEPENDABOT_TARGET_BRANCH_LINE",
 })
 
 _PLACEHOLDER_RE = re.compile(r"\{\{([A-Z_][A-Z0-9_]*)\}\}")
+
+# Git branch names allowed for `dependabot_target_branch`. Permissive
+# but rejects whitespace, control chars, leading dash, and other
+# garbage that would crash Dependabot at parse time. Full Git
+# branch-name validation is intentionally out of scope — anything
+# pathological that slips through here will fail loudly on the
+# Dependabot side, not silently.
+_DEPENDABOT_BRANCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{0,99}$")
 
 # Flat-YAML line: `key: value` or `key: "value"` or `key: 'value'`.
 # Anchored to allow leading whitespace (tolerated even though flat YAML
@@ -1755,6 +1800,24 @@ def _load_managed_config(root: str) -> Dict[str, str]:
         )
     merged["license_type"] = license_type or _DEFAULT_MANAGED_CONFIG["license_type"]
 
+    # Validate dependabot_target_branch eagerly. Empty is fine (means
+    # "use Dependabot's default = the repo's default branch"). Any
+    # non-empty value MUST match the permissive Git branch-name
+    # regex — otherwise the resulting `.github/dependabot.yml` would
+    # be syntactically valid YAML but reject by Dependabot's own
+    # branch resolver.
+    dep_branch = merged.get("dependabot_target_branch", "").strip()
+    if dep_branch and not _DEPENDABOT_BRANCH_NAME_RE.match(dep_branch):
+        die(
+            f"{MANAGED_FILES_CONFIG_FILENAME}: "
+            f"'dependabot_target_branch' ({dep_branch!r}) is not a "
+            f"valid Git branch name. Allowed: starts with an "
+            f"alphanumeric, then alphanumerics / `.` / `_` / `/` / "
+            f"`-` (max 100 chars). Common values: 'dev', 'main', "
+            f"'develop'."
+        )
+    merged["dependabot_target_branch"] = dep_branch
+
     return merged
 
 
@@ -1803,12 +1866,24 @@ def _resolve_placeholders(
         year_range = f"{current_year}"
 
     owner, _, repo = repo_full_name.partition("/")
+
+    # Render `dependabot_target_branch` into a ready-to-splice line
+    # fragment. Empty config value → empty substitution (block stays
+    # unchanged). Non-empty → leading `\n` + 4-space indent so the
+    # token sitting at the end of `directory: /` opens a new YAML
+    # line at the correct indent for the surrounding list item.
+    dep_branch = (config.get("dependabot_target_branch") or "").strip()
+    dep_branch_line = (
+        f"\n    target-branch: {dep_branch}" if dep_branch else ""
+    )
+
     return {
         "COPYRIGHT_HOLDER": config["copyright_holder"],
         "COPYRIGHT_YEAR_RANGE": year_range,
         "MAINTAINERS_TEAM": config["maintainers_team"],
         "REPO_NAME": repo or "repo",
         "REPO_OWNER": owner or "blackoutsecure",
+        "DEPENDABOT_TARGET_BRANCH_LINE": dep_branch_line,
     }
 
 
@@ -1865,6 +1940,24 @@ _TEMPLATED_INIT_SERVICES = frozenset({
 # intentionally NOT here — it always emits Apache 2.0 regardless of
 # config, preserving backward compatibility for early adopters.
 _DYNAMIC_LICENSE_INIT_SERVICES = frozenset({"license"})
+
+# Section-mode services whose body contains `{{KEY}}` placeholders
+# that must be rendered at sync time (not registry time, since values
+# vary per-repo). Currently only the `dependabot_*` services carry a
+# placeholder — the `{{DEPENDABOT_TARGET_BRANCH_LINE}}` token that
+# expands to either empty (default) or `\n    target-branch: <name>`
+# when the consumer's `bos-managed-files.yaml` sets the
+# `dependabot_target_branch` knob.
+#
+# Same registry-time validation as `_TEMPLATED_INIT_SERVICES`: every
+# `{{...}}` reference inside a templated section body MUST be in
+# `_KNOWN_PLACEHOLDERS`; an unknown placeholder would silently slip
+# into the consumer's `.github/dependabot.yml`.
+_TEMPLATED_SECTION_SERVICES = frozenset({
+    "dependabot_actions",
+    "dependabot_npm",
+    "dependabot_pip",
+})
 
 
 # --------------------------------------------------------------------------- #
@@ -2092,6 +2185,27 @@ for _svc in _DYNAMIC_LICENSE_INIT_SERVICES:
             if _ph not in _KNOWN_PLACEHOLDERS:
                 raise RuntimeError(
                     f"sync.py: _LICENSE_REGISTRY[{_lic_type!r}] "
+                    f"references unknown placeholder '{{{{{_ph}}}}}'. "
+                    f"Known: {sorted(_KNOWN_PLACEHOLDERS)}."
+                )
+
+# Templated section services must reference only known placeholders.
+# Mirror of the `_TEMPLATED_INIT_SERVICES` check above. An unknown
+# `{{X}}` reference inside a `_DEPENDABOT_*` body would be silently
+# passed through by `_render_placeholders` and land verbatim in the
+# consumer's `.github/dependabot.yml`, breaking the YAML.
+for _svc in _TEMPLATED_SECTION_SERVICES:
+    if _svc not in SERVICE_BLOCKS:
+        raise RuntimeError(
+            f"sync.py registry conflict: '{_svc}' is listed in "
+            f"_TEMPLATED_SECTION_SERVICES but missing from SERVICE_BLOCKS."
+        )
+    for _path, _body in SERVICE_BLOCKS[_svc].items():
+        for _ph_match in _PLACEHOLDER_RE.finditer(_body):
+            _ph = _ph_match.group(1)
+            if _ph not in _KNOWN_PLACEHOLDERS:
+                raise RuntimeError(
+                    f"sync.py: service '{_svc}' body for '{_path}' "
                     f"references unknown placeholder '{{{{{_ph}}}}}'. "
                     f"Known: {sorted(_KNOWN_PLACEHOLDERS)}."
                 )
@@ -2416,6 +2530,53 @@ def sync_files(
     file is created with the rendered body. The hub never overwrites
     a file once present — that's the whole point of the mode.
     """
+    # ------- Per-repo config -------
+    # Load `bos-managed-files.yaml` ONCE per sync run if ANY enabled
+    # service is templated (section OR init-if-missing). Values are
+    # the same across all services in a run, and a missing config
+    # file is cheap (one stat + dict copy).
+    #
+    # Section-templated services (`_TEMPLATED_SECTION_SERVICES`) need
+    # the substitutions before `apply_block()` runs below;
+    # init-templated services (`_TEMPLATED_INIT_SERVICES`) need them
+    # later in the init-if-missing loop. Sharing the config load
+    # keeps the two paths in lockstep — there is no scenario where
+    # section and init would see different `bos-managed-files.yaml`
+    # state within a single run.
+    _needs_config = any(
+        svc in _TEMPLATED_INIT_SERVICES
+        or svc in _TEMPLATED_SECTION_SERVICES
+        for svc in services
+    )
+    if _needs_config:
+        _managed_config = _load_managed_config(root)
+        _placeholder_subs = _resolve_placeholders(
+            _managed_config, _resolve_repo_full_name(root)
+        )
+        # NOTICE files are an Apache 2.0 §4 distribution requirement —
+        # they don't apply under MIT/BSD/ISC and would mislead downstream
+        # consumers about the project's licensing terms. Fail loud rather
+        # than silently produce a NOTICE under a non-Apache license.
+        # The `license_apache2` alias is treated as implicit
+        # `license_type: apache-2.0` (which it always is). When `license`
+        # is enabled with a non-Apache `license_type`, `notice_apache2`
+        # must NOT be in the services list.
+        if "notice_apache2" in services and "license_apache2" not in services:
+            _lic_type = _managed_config.get("license_type", "apache-2.0")
+            if _lic_type != "apache-2.0":
+                die(
+                    f"service 'notice_apache2' requires "
+                    f"license_type='apache-2.0' (got: {_lic_type!r}). "
+                    f"NOTICE files are an Apache 2.0 §4 distribution "
+                    f"requirement and don't apply under {_lic_type}. "
+                    f"Either change 'license_type' in "
+                    f"{MANAGED_FILES_CONFIG_FILENAME} to 'apache-2.0', "
+                    f"or remove 'notice_apache2' from the services list."
+                )
+    else:
+        _managed_config = dict(_DEFAULT_MANAGED_CONFIG)
+        _placeholder_subs = {}
+
     # ------- Section mode -------
     # Group by file so we apply all enabled services for a file in one pass
     # and write only once. Preserve service input order so the order of
@@ -2447,6 +2608,18 @@ def sync_files(
             after = before
         for svc in svcs:
             body = SERVICE_BLOCKS[svc][rel_path]
+            # Templated section services (currently the `dependabot_*`
+            # trio) carry `{{KEY}}` placeholders rendered from
+            # `bos-managed-files.yaml`. Pass-through is safe for
+            # non-templated services — `_render_placeholders` is a
+            # no-op when the body has no `{{KEY}}` tokens — but we
+            # gate on the explicit set anyway to keep the contract
+            # documented: ONLY services listed in
+            # `_TEMPLATED_SECTION_SERVICES` may carry placeholders,
+            # and the import-time validation enforces that every
+            # `{{KEY}}` they reference is in `_KNOWN_PLACEHOLDERS`.
+            if svc in _TEMPLATED_SECTION_SERVICES:
+                body = _render_placeholders(body, _placeholder_subs)
             after = apply_block(after, svc, body)
         all_changes.append(FileChange(path=rel_path, before=before, after=after))
 
@@ -2478,39 +2651,9 @@ def sync_files(
     # the "Initialized by ..." header injection so license-detection
     # tools still match the canonical text.
     #
-    # Config is loaded ONCE per sync run (not per service) — values are
-    # the same across services, and a missing config file is cheap.
-    _needs_config = any(
-        svc in _TEMPLATED_INIT_SERVICES for svc in services
-    )
-    if _needs_config:
-        _managed_config = _load_managed_config(root)
-        _placeholder_subs = _resolve_placeholders(
-            _managed_config, _resolve_repo_full_name(root)
-        )
-        # NOTICE files are an Apache 2.0 §4 distribution requirement —
-        # they don't apply under MIT/BSD/ISC and would mislead downstream
-        # consumers about the project's licensing terms. Fail loud rather
-        # than silently produce a NOTICE under a non-Apache license.
-        # The `license_apache2` alias is treated as implicit
-        # `license_type: apache-2.0` (which it always is). When `license`
-        # is enabled with a non-Apache `license_type`, `notice_apache2`
-        # must NOT be in the services list.
-        if "notice_apache2" in services and "license_apache2" not in services:
-            _lic_type = _managed_config.get("license_type", "apache-2.0")
-            if _lic_type != "apache-2.0":
-                die(
-                    f"service 'notice_apache2' requires "
-                    f"license_type='apache-2.0' (got: {_lic_type!r}). "
-                    f"NOTICE files are an Apache 2.0 §4 distribution "
-                    f"requirement and don't apply under {_lic_type}. "
-                    f"Either change 'license_type' in "
-                    f"{MANAGED_FILES_CONFIG_FILENAME} to 'apache-2.0', "
-                    f"or remove 'notice_apache2' from the services list."
-                )
-    else:
-        _managed_config = dict(_DEFAULT_MANAGED_CONFIG)
-        _placeholder_subs = {}
+    # Config has already been loaded at the top of `sync_files()` so
+    # both section and init modes see the same `_managed_config` /
+    # `_placeholder_subs`.
 
     # Composite-LICENSE heads-up. Runs unconditionally (cheap), only
     # emits when `license`/`license_apache2` is enabled AND existing

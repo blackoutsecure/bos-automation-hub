@@ -1824,9 +1824,9 @@ services are **not** removed — they're simply ignored on this run.
 | `node`                 | section          | `.gitignore`, `.dockerignore`                    | `node_modules/`, `npm-debug.log*`, etc. Don't enable for Marketplace Action repos — those have no Dockerfile and the `.dockerignore` becomes an orphan. |
 | `python`               | section          | `.gitignore`, `.dockerignore`                    | `__pycache__/`, `.venv/`, `.pytest_cache/`, etc. Same caveat as `node` re: orphan `.dockerignore` in non-Docker repos. |
 | `lf_line_endings`      | section          | `.gitattributes`                                 | `* text=auto eol=lf` + binary-type marks. Opt-in (some repos legitimately need CRLF for Windows scripts). |
-| `dependabot_actions`   | section          | `.github/dependabot.yml`                         | `package-ecosystem: github-actions` weekly schedule, grouped for `docker/*` and `actions/*` patterns. Recommended for every repo that uses GitHub Actions. |
-| `dependabot_npm`       | section          | `.github/dependabot.yml`                         | `package-ecosystem: npm` weekly schedule, grouped by `dev-dependencies` / `prod-dependencies`. Enable for Node Marketplace Action repos. |
-| `dependabot_pip`       | section          | `.github/dependabot.yml`                         | `package-ecosystem: pip` weekly schedule. Enable for Python Marketplace Action repos. |
+| `dependabot_actions`   | section          | `.github/dependabot.yml`                         | `package-ecosystem: github-actions` weekly schedule, grouped for `docker/*` and `actions/*` patterns. Recommended for every repo that uses GitHub Actions. Honors `dependabot_target_branch:` in `bos-managed-files.yaml` (see *Per-repo `bos-managed-files.yaml` config* below). |
+| `dependabot_npm`       | section          | `.github/dependabot.yml`                         | `package-ecosystem: npm` weekly schedule, grouped by `dev-dependencies` / `prod-dependencies`. Enable for Node Marketplace Action repos. Honors `dependabot_target_branch:`. |
+| `dependabot_pip`       | section          | `.github/dependabot.yml`                         | `package-ecosystem: pip` weekly schedule. Enable for Python Marketplace Action repos. Honors `dependabot_target_branch:`. |
 | `prettier`             | whole-file       | `.prettierrc.yaml`                               | Canonical Prettier config (semi, single-quote, trailing-comma, 100-char width, LF). YAML-flavored so the file can carry the "Managed by" header comment. |
 | `logger`               | whole-file       | `root/usr/local/bin/log-functions.sh`            | Canonical shared logging library for s6-overlay init / svc scripts. Emits `<RFC3339 UTC> <tag>[<level>]: <msg>`. Supports both `log_info "x"` (function-per-level, `SVC_NAME`) and `log info "x"` (generic dispatcher, `LOG_TAG`) APIs so existing consumers keep working unchanged. Includes `LOG_LEVEL` gating, `log_kv`, and `log_pipe_cmd`. |
 | `bos_launchpad_release` | whole-file      | `.github/workflows/bos-launchpad.yml`            | Hub-managed thin kicker for **container / Balena / GitHub-Release** workloads. Calls `bos-launchpad.yml@main` on a 6-hour cron + `main` push (paths-filtered) + `workflow_dispatch`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (schema below). Mutually exclusive with `bos_launchpad_cf_pages` — both target the same path. |
@@ -2018,16 +2018,16 @@ hand-authored.
 > **Migration tip:** see [examples/](examples/) for a worked
 > `.bos-launchpad.yaml` for each kicker flavor (release + cf-pages).
 
-### `bos-managed-files.yaml` schema (used by `license` / `notice_apache2` / `codeowners`)
+### `bos-managed-files.yaml` schema (used by `license` / `notice_apache2` / `codeowners` / `dependabot_*`)
 
 Optional per-repo file at the repo root that supplies values for
-`{{KEY}}` placeholders rendered into the templated init-if-missing
-services. All keys are optional — when the file is absent OR a key is
-missing the hub falls back to org-canonical defaults. The file is
-parsed by a tiny stdlib-only flat-YAML reader: only `key: value` pairs
-are supported (no nesting, no lists, no multi-line scalars). Unknown
-keys, malformed lines, out-of-range years, and unknown `license_type`
-values fail the action.
+`{{KEY}}` placeholders rendered into the templated services. All
+keys are optional — when the file is absent OR a key is missing the
+hub falls back to org-canonical defaults. The file is parsed by a
+tiny stdlib-only flat-YAML reader: only `key: value` pairs are
+supported (no nesting, no lists, no multi-line scalars). Unknown
+keys, malformed lines, out-of-range years, unknown `license_type`,
+and invalid Git branch names fail the action.
 
 > **Visible filename (not a dotfile).** The config lives at
 > `bos-managed-files.yaml` — deliberately NOT a dotfile — so it shows
@@ -2062,6 +2062,21 @@ maintainers_team: "@blackoutsecure/maintainers"
 # `git rm LICENSE && <resync>` (deliberate legal decision).
 # Default: "apache-2.0"
 license_type: apache-2.0
+
+# Optional Dependabot target-branch override for ALL enabled
+# `dependabot_*` section services. When set, every ecosystem block
+# in `.github/dependabot.yml` gets a `target-branch: <value>` line
+# so Dependabot opens PRs against that branch instead of the repo
+# default. Useful for Marketplace Action repos that use the
+# dev/main split pattern (workflows + ongoing work live on `dev`;
+# `main` is the curated Marketplace artifact) — Dependabot itself
+# reads its config only from the default branch (`main`), so this
+# knob is the supported way to point PRs at `dev` without keeping
+# `dependabot.yml` on `main`.
+# Validated against `^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`.
+# Default: "" (no `target-branch:` line — Dependabot uses the
+# repo default branch).
+dependabot_target_branch: dev
 ```
 
 **Placeholder reference**
@@ -2073,6 +2088,7 @@ license_type: apache-2.0
 | `{{MAINTAINERS_TEAM}}`   | `maintainers_team` (default: `@blackoutsecure/maintainers`) | `@blackoutsecure/maintainers` |
 | `{{REPO_NAME}}`          | `GITHUB_REPOSITORY` (after the slash), else workspace basename | `docker-tar1090`           |
 | `{{REPO_OWNER}}`         | `GITHUB_REPOSITORY` (before the slash), else `blackoutsecure` | `blackoutsecure`              |
+| `{{DEPENDABOT_TARGET_BRANCH_LINE}}` | `dependabot_target_branch` (default: `""`) | `""` or `\n    target-branch: dev` |
 
 `{{KEY}}` markers in the canonical bodies are validated at module
 import time — an unknown placeholder name in any templated service
