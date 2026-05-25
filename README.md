@@ -596,10 +596,15 @@ macos/
 4. Update the parent category `README.md` table so the new target is
    discoverable.
 
-`shellcheck` runs against every shell script via the `actionlint` job
-in [.github/workflows/lint.yml](.github/workflows/lint.yml) (the
-`raven-actions/actionlint` action invokes `shellcheck` on `run:` blocks
-and adjacent shell files). Keep new scripts shellcheck-clean.
+`shellcheck` runs against every `.sh` file via the `extra-lint` job
+in [.github/workflows/lint.yml](.github/workflows/lint.yml), which
+invokes the [`blackoutsecure/bos-marketplace-kit`](https://github.com/blackoutsecure/bos-marketplace-kit)
+`lint` composite (markdown + YAML + shell). This job is currently
+**advisory** (`severity: warn`) — findings are annotated in the job
+summary but do not block CI; the companion `actionlint` job (strict)
+covers workflow YAML and shell snippets embedded in `run:` blocks.
+Keep new scripts shellcheck-clean so the `extra-lint` job can be
+flipped to strict in the future.
 
 ---
 

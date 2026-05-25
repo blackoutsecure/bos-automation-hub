@@ -1,18 +1,39 @@
-# Lint reusable workflows + composite actions on PR / push.
-name: Lint workflows
+# Lint workflows, composite actions, markdown, YAML, and shell scripts
+# via the bos-marketplace-kit lint composite. The composite is a
+# multi-language orchestrator that auto-detects file types, installs
+# linters on demand into ephemeral cache locations, and emits a single
+# annotated job summary per run.
+#
+# Layout:
+#
+#   * `actionlint`   — strict (severity=fail). Same coverage as the
+#                      previous raven-actions/actionlint invocation;
+#                      job name is preserved so any branch-protection
+#                      status check named `actionlint` keeps matching.
+#   * `extra-lint`   — advisory (severity=warn). New markdown / YAML /
+#                      shell coverage; findings appear in the job
+#                      summary but do not block the workflow. Flip to
+#                      `fail` once findings are addressed (and,
+#                      optionally, the linter config files described
+#                      in the kit composite are added).
+name: Lint
 
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/**'
-      - '.github/actions/**'
-      - '.github/actionlint.yaml'
+      - '**/*.md'
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '**/*.sh'
+      - '.shellcheckrc'
   pull_request:
     paths:
-      - '.github/workflows/**'
-      - '.github/actions/**'
-      - '.github/actionlint.yaml'
+      - '**/*.md'
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '**/*.sh'
+      - '.shellcheckrc'
   workflow_dispatch:
 
 permissions:
@@ -26,18 +47,14 @@ jobs:
   actionlint:
     name: actionlint
     # Pinned to ubuntu-latest intentionally — do NOT route this through
-    # vars.DEFAULT_RUNNER. raven-actions/actionlint pulls in a stack of
-    # CI helpers at runtime (npm for @actions/tool-cache, pipx for
-    # shellcheck-py if shellcheck isn't already on PATH, etc.) that
-    # ubuntu-latest maintains as a baseline but the minimal
-    # docker-github-runner image does not. Lint is ~30 s of work with
-    # no specialized hardware / local-secret / latency needs, so it
-    # gains nothing from self-hosted; the gain is on the deploy /
-    # multi-arch build side, which IS routed through vars.DEFAULT_RUNNER.
-    # If you want lint on self-hosted later, add nodejs, npm, shellcheck,
-    # and pipx to docker-github-runner/Dockerfile (apt-get install) and
-    # replace this line with the vars.DEFAULT_RUNNER expression used by
-    # other jobs (see monitor-upstream-release.yml for the canonical form).
+    # vars.DEFAULT_RUNNER. The kit lint composite installs npm
+    # (markdownlint), python3+pip (yamllint), curl + the actionlint
+    # binary, and may shell out to shellcheck — a baseline toolchain
+    # that ubuntu-latest maintains and the minimal docker-github-runner
+    # image does not. Lint is ~30 s of work with no specialized
+    # hardware / local-secret / latency needs, so it gains nothing
+    # from self-hosted; the gain is on the deploy / multi-arch build
+    # side, which IS routed through vars.DEFAULT_RUNNER.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -45,9 +62,40 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run actionlint
-        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
+      - name: Run actionlint via kit composite
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@b068c7a101b9364eeb0c0b172b9d22a724388df7 # v0.1.1
         with:
-          matcher: true
-          fail-on-error: true
-          shellcheck: true
+          run_markdownlint: 'false'
+          run_yamllint: 'false'
+          run_shellcheck: 'false'
+          run_actionlint: 'true'
+          severity: 'fail'
+
+  extra-lint:
+    name: markdown + yaml + shell (advisory)
+    # See note on the `actionlint` job above re: ubuntu-latest pin.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Run markdownlint / yamllint / shellcheck via kit composite
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@b068c7a101b9364eeb0c0b172b9d22a724388df7 # v0.1.1
+        with:
+          run_markdownlint: 'true'
+          run_yamllint: 'true'
+          run_shellcheck: 'true'
+          run_actionlint: 'false'
+          # ADVISORY mode — findings annotate the job summary but do
+          # NOT fail the workflow. Flip to `fail` after:
+          #   1. Addressing the initial findings surfaced on first run
+          #      (hub has ~26 .md / 39 .yml+.yaml / 13 .sh files that
+          #      have never been linted before this composite landed).
+          #   2. Optionally adding the linter config files the kit
+          #      composite reads automatically when present:
+          #        .markdownlint.yaml   (markdownlint-cli2)
+          #        .yamllint.yml        (yamllint)
+          #        .shellcheckrc        (shellcheck)
+          severity: 'warn'
