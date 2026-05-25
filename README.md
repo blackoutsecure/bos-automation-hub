@@ -2085,14 +2085,55 @@ distributed work is a legal decision that should be deliberate, not
 automated. To switch:
 
 1. Edit `.bos-managed-files.yaml` → set new `license_type`.
-2. `git rm LICENSE` (and `NOTICE` if dropping Apache 2.0).
-3. If dropping Apache, also remove `notice_apache2` from your
+2. **STOP — first check whether your existing `LICENSE` is a
+   composite/forked file** (multiple Copyright holders, separator
+   lines, or significantly larger than canonical SPDX text). See the
+   "Composite LICENSE warning" section directly below. If yes, the
+   hub will emit a `::notice file=LICENSE::` annotation on every sync
+   when `license` is enabled — read it.
+3. `git rm LICENSE` (and `NOTICE` if dropping Apache 2.0).
+4. If dropping Apache, also remove `notice_apache2` from your
    `services:` list (the hub will refuse to render NOTICE under
    non-Apache `license_type`).
-4. Re-run the sync. The hub writes the new LICENSE; commit it.
-5. Update package metadata: `package.json` `"license"`,
+5. Re-run the sync. The hub writes the new LICENSE; commit it.
+6. Update package metadata: `package.json` `"license"`,
    `pyproject.toml` `[project] license`, etc. — these are NOT
    managed by the hub.
+
+**Composite LICENSE warning (sub-licenses / forks / bundled upstream)**
+
+Many repos in the org carry **composite LICENSE files** — the
+maintainer's own license text PLUS appended sub-license sections for
+bundled upstream code or sub-components. Examples in this org:
+
+| Repo                | Top-level license  | Appended sub-licenses                       |
+|---------------------|--------------------|---------------------------------------------|
+| `docker-readsb`     | GPL-3.0+ (Docker packaging) | dump1090 (BSD-style, FlightAware), original dump1090 (Sanfilippo BSD) |
+| `docker-dump978`    | MIT (Docker packaging)      | dump978-fa (BSD-2-Clause, FlightAware)      |
+| `docker-graphs1090` | MIT (Docker packaging)      | graphs1090 upstream (MIT, wiedehopf)        |
+| `docker-tar1090`    | GPL-2.0+ (composite of tar1090 + dump1090 + Docker packaging) | (single composite file, no separators) |
+
+The `license` service is **safe by design** for these repos — the
+init-if-missing contract means the hub will NEVER overwrite an
+existing `LICENSE`. But two pitfalls remain:
+
+1. **Don't blindly `git rm LICENSE && resync` to switch
+   `license_type`** — the appended sub-licenses will be LOST,
+   replaced with just the canonical text for the new SPDX ID. Always
+   preserve the appended sections manually first (`grep -nE
+   '^Copyright|^-{20,}$' LICENSE` to find them).
+2. **Don't blindly enable `license` thinking the hub will manage
+   sub-licenses for you** — it won't. The hub only knows the four
+   single-license SPDX templates listed above. Sub-license content
+   stays in-repo and is the maintainer's responsibility.
+
+The hub detects composite LICENSE files via three heuristics
+(multiple distinct `Copyright (c) ...` lines, presence of
+`^-{20,}$` separator lines, or file size > 13000 bytes) and emits
+a `::notice file=LICENSE::` GitHub Actions annotation when `license`
+or `license_apache2` is enabled on such a repo. The notice fires on
+every sync run as a continuous heads-up. Behavior is unchanged —
+the file is never modified.
 
 **Why these three services don't inherit from `.github`**
 

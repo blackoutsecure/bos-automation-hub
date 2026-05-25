@@ -56,6 +56,18 @@ maintainers_team: "@blackoutsecure/maintainers"
 # fact requires `git rm LICENSE` followed by re-sync (deliberate
 # action; legal change requires human decision).
 #
+# COMPOSITE LICENSE WARNING: if your repo's existing LICENSE bundles
+# sub-licenses for upstream/forked code (multiple Copyright lines,
+# separator-of-dashes between sections, or notably larger than ~11KB
+# canonical), the hub detects this and emits a
+# `::notice file=LICENSE::` annotation on every sync. The file is
+# NEVER overwritten by the hub, BUT a careless `git rm LICENSE`
+# would lose the appended sub-licenses — preserve them manually
+# before deleting. Examples in this org: docker-readsb (GPL +
+# dump1090 BSD), docker-dump978 (MIT + FlightAware BSD-2),
+# docker-graphs1090 (MIT + upstream MIT), docker-tar1090
+# (composite GPL-2.0+).
+#
 # NOTE: the legacy `license_apache2` service IGNORES this setting and
 # always emits Apache 2.0 (back-compat for early adopters). New
 # consumers should use `license` + this key instead.

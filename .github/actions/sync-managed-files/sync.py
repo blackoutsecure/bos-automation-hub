@@ -2329,6 +2329,72 @@ class FileChange:
         return f"FileChange(path={self.path!r}, changed={self.changed})"
 
 
+def _emit_composite_license_notice(root: str, services: List[str]) -> None:
+    """Warn (via `::notice::`) when a consumer enables `license` /
+    `license_apache2` on a repo whose existing `LICENSE` looks like
+    a composite or forked work (multiple distinct copyright holders,
+    separator lines between sections, or significantly larger than
+    canonical SPDX text).
+
+    The hub does NOT modify existing LICENSE files — init-if-missing
+    semantics short-circuit before any write. This function is purely
+    a heads-up: maintainers who don't realize their LICENSE has
+    appended upstream/sub-licenses could destroy that content by
+    doing `git rm LICENSE && <resync>` to switch `license_type`.
+
+    Real-world examples in the Blackout Secure org:
+      * docker-readsb     — GPL-3.0+ Docker packaging + dump1090 BSD
+      * docker-dump978    — MIT Docker packaging + FlightAware BSD-2
+      * docker-graphs1090 — MIT Docker packaging + upstream MIT
+      * docker-tar1090    — GPL-2.0+ Docker packaging + upstream
+
+    None of those repos currently enable the `license` service, but
+    this guard ensures they get a loud notice if anyone ever does.
+    """
+    if "license" not in services and "license_apache2" not in services:
+        return
+    license_path = os.path.join(root, "LICENSE")
+    if not os.path.exists(license_path):
+        return  # init-if-missing path; no existing file to protect
+    try:
+        with open(license_path, "r", encoding="utf-8") as fh:
+            existing = fh.read()
+    except OSError:
+        return  # unreadable; let the normal flow handle it
+
+    size = len(existing)
+    copyrights = re.findall(
+        r"^Copyright\s+\([cC]\)\s+.+$", existing, re.MULTILINE
+    )
+    distinct_copyrights = {c.strip() for c in copyrights}
+    has_separator = bool(re.search(r"^-{20,}$", existing, re.MULTILINE))
+
+    signals = []
+    if len(distinct_copyrights) >= 2:
+        signals.append(
+            f"{len(distinct_copyrights)} distinct Copyright lines"
+        )
+    if has_separator:
+        signals.append("section-separator lines")
+    # Canonical Apache 2.0 is the largest text in `_LICENSE_REGISTRY`
+    # at ~11357 bytes. Anything notably larger is almost certainly
+    # composite (appended upstream / sub-licenses).
+    if size > 13000:
+        signals.append(f"large file ({size} bytes)")
+
+    if not signals:
+        return  # looks like a single-license file; stay silent
+
+    sys.stderr.write(
+        f"::notice file=LICENSE::Existing LICENSE looks like a "
+        f"composite/forked license ({'; '.join(signals)}). The hub "
+        f"will NOT modify it (init-if-missing contract). If you "
+        f"intend to switch license_type, do NOT just `git rm LICENSE` "
+        f"and re-sync — the appended sub-licenses will not be "
+        f"restored automatically. Preserve them manually first.\n"
+    )
+
+
 def sync_files(
     services: List[str], root: str
 ) -> Tuple[List[FileChange], List[FileChange]]:
@@ -2441,6 +2507,12 @@ def sync_files(
     else:
         _managed_config = dict(_DEFAULT_MANAGED_CONFIG)
         _placeholder_subs = {}
+
+    # Composite-LICENSE heads-up. Runs unconditionally (cheap), only
+    # emits when `license`/`license_apache2` is enabled AND existing
+    # LICENSE shows composite markers. Behavior is NOT changed — the
+    # init-if-missing loop below still short-circuits on existence.
+    _emit_composite_license_notice(root, services)
 
     for svc in services:
         if svc not in SERVICE_INIT_FILES:
