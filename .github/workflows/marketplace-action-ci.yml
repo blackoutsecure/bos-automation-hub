@@ -119,6 +119,134 @@ name: Marketplace action CI (reusable)
         type: string
         default: 'skip'
 
+      # ----- community-health source mode (where each file lives) ---------
+      # Lets callers express *where* each community-health file is expected
+      # to live so removing a local copy in favour of the org `.github`
+      # repo doesn't silently turn into a `warn`. See the kit
+      # `community_health_source` docs for full semantics.
+      #   * `local`   — file must be in this repo (org fallback disabled).
+      #   * `inherit` — file expected at `${org_health_repo}`; local copy
+      #                 is intentionally absent and NOT consulted.
+      #   * `either`  — local first, fall back to org (default, back-compat).
+      community_health_source:
+        description: >-
+          Global default source for CH/SC files. `local` | `inherit` |
+          `either`. Default `either` (back-compat). Override per-rule with
+          the `*_source` inputs below.
+        required: false
+        type: string
+        default: 'either'
+      security_source:
+        description: 'Per-rule source for SECURITY.md (SC003). Empty = use global.'
+        required: false
+        type: string
+        default: ''
+      code_of_conduct_source:
+        description: 'Per-rule source for CODE_OF_CONDUCT.md (CH001). Empty = use global.'
+        required: false
+        type: string
+        default: ''
+      contributing_source:
+        description: 'Per-rule source for CONTRIBUTING.md (CH002). Empty = use global.'
+        required: false
+        type: string
+        default: ''
+      support_source:
+        description: 'Per-rule source for SUPPORT.md (CH003). Empty = use global.'
+        required: false
+        type: string
+        default: ''
+      issue_templates_source:
+        description: 'Per-rule source for issue templates (CH004). Empty = use global.'
+        required: false
+        type: string
+        default: ''
+      pr_template_source:
+        description: 'Per-rule source for PR template (CH005). Empty = use global.'
+        required: false
+        type: string
+        default: ''
+      funding_source:
+        description: 'Per-rule source for FUNDING.yml (CH006). Empty = use global.'
+        required: false
+        type: string
+        default: ''
+
+      # ----- DP/CQ/LT/GH/MS/SR rules (new families added in kit v0.2.0+) -
+      # Same `fail | warn | skip` semantics as the CH/SC rules above.
+      # Defaults follow the kit's own defaults — back-compat additive.
+      require_dependabot:
+        description: 'Policy for `.github/dependabot.yml` presence (DP001). Default `warn`.'
+        required: false
+        type: string
+        default: 'warn'
+      require_codeql:
+        description: 'Policy for a CodeQL workflow (CQ001). Default `warn`.'
+        required: false
+        type: string
+        default: 'warn'
+      require_editorconfig:
+        description: 'Policy for `.editorconfig` presence (LT001). Default `warn`.'
+        required: false
+        type: string
+        default: 'warn'
+      require_gitattributes:
+        description: 'Policy for `.gitattributes` presence (LT002). Default `warn`.'
+        required: false
+        type: string
+        default: 'warn'
+      require_gitignore:
+        description: 'Policy for `.gitignore` presence (LT003). Default `warn`.'
+        required: false
+        type: string
+        default: 'warn'
+      require_markdownlint:
+        description: 'Policy for markdownlint config presence (LT004). Default `skip`.'
+        required: false
+        type: string
+        default: 'skip'
+      require_yamllint:
+        description: 'Policy for yamllint config presence (LT005). Default `skip`.'
+        required: false
+        type: string
+        default: 'skip'
+      require_ghas_code_scanning:
+        description: >-
+          Policy for code-scanning enabled at repo level (GH001). Requires
+          `github_token` with `metadata: read`. Default `warn`.
+        required: false
+        type: string
+        default: 'warn'
+      require_ghas_secret_scanning:
+        description: >-
+          Policy for secret-scanning enabled at repo level (GH002).
+          Requires `github_token` with admin/write on the repo to introspect
+          `security_and_analysis`. Default `warn`.
+        required: false
+        type: string
+        default: 'warn'
+      require_dependabot_alerts:
+        description: >-
+          Policy for Dependabot alerts enabled at repo level (GH003).
+          Requires `github_token` with `Administration: read`. Default `warn`.
+        required: false
+        type: string
+        default: 'warn'
+      require_security_devops:
+        description: >-
+          Policy for a Microsoft Security DevOps workflow being present
+          (MS001). Opt-in. Default `skip`.
+        required: false
+        type: string
+        default: 'skip'
+      require_scorecard:
+        description: >-
+          Policy for an OpenSSF Scorecard workflow being present (SR001).
+          Opt-in. Default `skip`.
+        required: false
+        type: string
+        default: 'skip'
+
       # ----- name-check (opt-in) --------------------------------------------
       run_name_check:
         description: >-
@@ -242,6 +370,26 @@ jobs:
           require_issue_templates: ${{ inputs.require_issue_templates }}
           require_pr_template:     ${{ inputs.require_pr_template }}
           require_funding:         ${{ inputs.require_funding }}
+          community_health_source: ${{ inputs.community_health_source }}
+          security_source:         ${{ inputs.security_source }}
+          code_of_conduct_source:  ${{ inputs.code_of_conduct_source }}
+          contributing_source:     ${{ inputs.contributing_source }}
+          support_source:          ${{ inputs.support_source }}
+          issue_templates_source:  ${{ inputs.issue_templates_source }}
+          pr_template_source:      ${{ inputs.pr_template_source }}
+          funding_source:          ${{ inputs.funding_source }}
+          require_dependabot:           ${{ inputs.require_dependabot }}
+          require_codeql:               ${{ inputs.require_codeql }}
+          require_editorconfig:         ${{ inputs.require_editorconfig }}
+          require_gitattributes:        ${{ inputs.require_gitattributes }}
+          require_gitignore:            ${{ inputs.require_gitignore }}
+          require_markdownlint:         ${{ inputs.require_markdownlint }}
+          require_yamllint:             ${{ inputs.require_yamllint }}
+          require_ghas_code_scanning:   ${{ inputs.require_ghas_code_scanning }}
+          require_ghas_secret_scanning: ${{ inputs.require_ghas_secret_scanning }}
+          require_dependabot_alerts:    ${{ inputs.require_dependabot_alerts }}
+          require_security_devops:      ${{ inputs.require_security_devops }}
+          require_scorecard:            ${{ inputs.require_scorecard }}
 
   # ---------------------------------------------------------------------------
   # `name-check` — opt-in Marketplace name availability check.

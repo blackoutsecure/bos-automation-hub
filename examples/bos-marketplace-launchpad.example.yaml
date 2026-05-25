@@ -118,6 +118,43 @@ jobs:
       # source of truth.
       runtime_artifact_dir: 'dist'
 
+      # ----- Community-health source mode (optional) -----
+      # Tells the kit `check` composite *where* to look for each CH/SC
+      # file. Set to `inherit` if your repo intentionally has NO local
+      # CONTRIBUTING.md / SECURITY.md / etc. and those files live ONLY
+      # in your org `.github` repo. Without this override, the kit
+      # falls back to `either` (local first, then org) which silently
+      # treats a missing-on-purpose local file as a `warn`.
+      #
+      # `local` | `inherit` | `either` (default `either`, back-compat).
+      # community_health_source: 'inherit'
+      #
+      # Per-rule overrides (each empty = use global above):
+      # security_source:         ''
+      # code_of_conduct_source:  ''
+      # contributing_source:     'inherit'
+      # support_source:          ''
+      # issue_templates_source:  ''
+      # pr_template_source:      ''
+      # funding_source:          ''
+
+      # ----- Extra hardening rules (DP/CQ/LT/GH/MS/SR, optional) -----
+      # Each rule is `fail | warn | skip`. Defaults below match the
+      # kit's own defaults — uncomment + tighten only when you're
+      # ready to enforce them on this repo.
+      # require_dependabot:           'warn'   # DP001
+      # require_codeql:               'warn'   # CQ001
+      # require_editorconfig:         'warn'   # LT001
+      # require_gitattributes:        'warn'   # LT002
+      # require_gitignore:            'warn'   # LT003
+      # require_markdownlint:         'skip'   # LT004
+      # require_yamllint:             'skip'   # LT005
+      # require_ghas_code_scanning:   'warn'   # GH001
+      # require_ghas_secret_scanning: 'warn'   # GH002 (admin token)
+      # require_dependabot_alerts:    'warn'   # GH003 (admin token)
+      # require_security_devops:      'skip'   # MS001
+      # require_scorecard:            'skip'   # SR001
+
       # ----- Release dispatch inputs (ignored for non-release events) -----
       tag_name:      ${{ inputs.tag_name || '' }}
       dry_run:       ${{ inputs.dry_run || false }}
