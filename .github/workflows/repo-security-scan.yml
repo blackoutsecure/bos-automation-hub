@@ -111,6 +111,29 @@ name: Repo Security Scan (reusable)
         required: false
         type: string
         default: ubuntu-latest
+      use_advanced_pat:
+        description: >-
+          When `true` AND the caller forwards a non-empty `scanning_pat`
+          secret (typically via `secrets: inherit` from a caller that
+          defines `secrets.SCANNING_PAT`), pass that PAT to the kit
+          composite as `github_token`. Enables the kit's advanced
+          posture probes (PS002 secret-scanning posture, PS003
+          Dependabot posture) which require `repo` + admin scope
+          beyond what the default `GITHUB_TOKEN` grants. When `false`
+          (default) or the secret is empty, the kit uses the runner's
+          default `github.token` — the standard baseline scan.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      scanning_pat:
+        description: >-
+          PAT with `repo` + admin scope, used by the kit composite for
+          advanced posture probes (PS002/PS003). Optional. Ignored
+          unless `inputs.use_advanced_pat` is `true`. Easiest pass-through
+          from caller: `secrets: inherit` and define `SCANNING_PAT` at
+          the org or repo level.
+        required: false
 
 permissions: {}
 
@@ -141,8 +164,16 @@ jobs:
         # `@v1` floats across v1.x.y for automatic patch + minor uptake.
         # Bump this pin (or switch to a SHA) here to roll out a new
         # major across every opted-in kit in one hub commit.
+        #
+        # `github_token`: when the caller opts into `use_advanced_pat`
+        # AND forwards a non-empty `scanning_pat` secret, pass that PAT
+        # so the kit can run PS002 (secret-scanning posture) and PS003
+        # (Dependabot posture) — both require `repo` + admin scope
+        # beyond the default `GITHUB_TOKEN`. Otherwise fall through to
+        # the runner's default `github.token` for the baseline scan.
         uses: blackoutsecure/bos-code-scanning-kit@v1
         with:
+          github_token:    ${{ (inputs.use_advanced_pat && secrets.scanning_pat != '') && secrets.scanning_pat || github.token }}
           enable_posture:  ${{ inputs.enable_posture }}
           enable_scanners: ${{ inputs.enable_scanners }}
           enable_upload:   ${{ inputs.enable_upload }}
