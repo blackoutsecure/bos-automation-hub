@@ -15,12 +15,16 @@
 #                                       Routed for `pull_request`, `push`,
 #                                       and `workflow_dispatch` mode
 #                                       `name-check`.
-#   2. marketplace-repo-guard.yml     — PR-time block on workflow files or
+#   2. marketplace-codeql.yml         — opt-in CodeQL analysis (Python +
+#                                       Actions YAML by default). Routed
+#                                       for `pull_request` + `push`. Gated
+#                                       by `enable_codeql` input.
+#   3. marketplace-repo-guard.yml     — PR-time block on workflow files or
 #                                       other prohibited paths landing on
 #                                       `main`, plus required-files
 #                                       enforcement. Routed for
 #                                       `pull_request_target`.
-#   3. release-promote.yml            — `dev` → `main` allowlist promotion,
+#   4. release-promote.yml            — `dev` → `main` allowlist promotion,
 #                                       tag the promoted SHA, publish a
 #                                       GitHub Release. Routed for
 #                                       `workflow_dispatch` mode `release`.
@@ -41,6 +45,8 @@
 #
 # Per-job permissions are scoped least-privilege at the sub-reusable level:
 #   * ci      — `contents: read` only.
+#   * codeql  — `security-events: write`, `contents: read`, `actions: read`
+#               (only when `enable_codeql: true`).
 #   * guard   — `contents: read`, `pull-requests: read`.
 #   * release — `contents: write`.
 #
@@ -288,6 +294,31 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         type: string
         default: 'skip'
 
+      # ----- CodeQL stage (opt-in) -----
+      # When `enable_codeql: true`, the launchpad runs the shared
+      # `marketplace-codeql.yml` reusable against the consumer kit on
+      # the same events that drive the `ci` stage (pull_request + push
+      # to dev, optionally workflow_dispatch). The caller workflow MUST
+      # grant `security-events: write` and `actions: read` at workflow
+      # level so the permission cascade reaches the analyze sub-job.
+      # Default is `false` so existing kits that haven't opted in see
+      # no behavior change.
+      enable_codeql:
+        description: 'Enable consolidated CodeQL analysis via the launchpad. Caller MUST grant `security-events: write` + `actions: read` at workflow level. Default `false`.'
+        required: false
+        type: boolean
+        default: false
+      codeql_languages:
+        description: 'JSON array string of CodeQL languages. Default `[python, actions]` covers Python source + workflow / composite-action YAML.'
+        required: false
+        type: string
+        default: '[python, actions]'
+      codeql_queries:
+        description: 'CodeQL query suite. `security-and-quality` (default), `security-extended`, or `security`.'
+        required: false
+        type: string
+        default: security-and-quality
+
       proposed_name:
         description: 'Marketplace name to probe; empty reads `name:` from manifest. Only used when `dispatched_mode: name-check`.'
         required: false
@@ -495,6 +526,30 @@ jobs:
       branding_preview_feather_ref:             ${{ inputs.branding_preview_feather_ref }}
       branding_preview_artifact_name:           ${{ inputs.branding_preview_artifact_name }}
       branding_preview_artifact_retention_days: ${{ inputs.branding_preview_artifact_retention_days }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 1.5 — CodeQL analysis (opt-in).
+  # Fires on the same events as `ci` so PR-time and post-merge runs both get
+  # coverage; intentionally NOT on `pull_request_target` (the guard stage —
+  # the dev PR's CodeQL run has already covered the code by the time the
+  # main-targeting promote PR exists) and NOT on `dispatched_mode == 'release'`
+  # (release just promotes already-checked code). Caller MUST grant
+  # `security-events: write` + `actions: read` at workflow level for the
+  # SARIF upload to succeed; defaults are tuned for Python composite kits.
+  # ---------------------------------------------------------------------------
+  codeql:
+    name: CodeQL
+    if: >-
+      inputs.enable_codeql
+      && (inputs.event_name == 'pull_request' || inputs.event_name == 'push')
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/marketplace-codeql.yml@main
+    with:
+      languages: ${{ inputs.codeql_languages }}
+      queries:   ${{ inputs.codeql_queries }}
 
   # ---------------------------------------------------------------------------
   # Stage 2 — Marketplace repo compliance guard.
