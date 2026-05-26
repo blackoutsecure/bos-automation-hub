@@ -97,7 +97,7 @@ Per-workflow requirements:
 | `docker-build-push.yml` | `DEFAULT_RUNNER` + `RUNNER_X64` + `RUNNER_ARM64` |
 | `lint.yml`, `monitor-upstream-release.yml` | _(pinned to `ubuntu-latest` by design)_ |
 | `sync-managed-files.yml` | _(uses caller-supplied `inputs.runs_on` directly)_ |
-| `bos-launchpad.yml`, `bos-marketplace-launchpad.yml` | _(pure delegator; each downstream workflow runs its own preflight)_ |
+| `bos-launchpad-release.yml`, `bos-launchpad-marketplace.yml` | _(pure delegator; each downstream workflow runs its own preflight)_ |
 
 Because preflight guarantees the variable is set and well-formed, the
 per-job `runs-on:` expressions no longer carry a `'ubuntu-latest'`
@@ -123,7 +123,7 @@ is also validated by preflight on the source variable.
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
 | [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Discover the latest upstream version from a pluggable source (GitHub Releases / branch HEAD / tag list / container registry / npm / PyPI / generic URL), dispatch downstream workflows on change, and commit a tracking file. Discovery is delegated to the [bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher) standalone action. |
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
-| [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Launchpad). **Container mode:** composes `monitor-upstream-release.yml` → `release.yml` to detect a new upstream release and run the full Docker → Balena → GitHub Release pipeline against the new version. **Static-site mode:** runs `deploy-cloudflare-pages.yml` on every push for continuous Cloudflare Pages deploys. Both modes can run side-by-side in the same call. Opt-in `security_scan` stage (`enable_security_scan: true`, see [`repo-security-scan.yml`](.github/workflows/repo-security-scan.yml)) runs in parallel as an advisory check — findings surface in the Security tab and (when `security_scan_fail_on: fail`) mark the workflow run failed, but do NOT block the deploy stages. |
+| [.github/workflows/bos-launchpad-release.yml](.github/workflows/bos-launchpad-release.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Launchpad). **Container mode:** composes `monitor-upstream-release.yml` → `release.yml` to detect a new upstream release and run the full Docker → Balena → GitHub Release pipeline against the new version. **Static-site mode:** runs `deploy-cloudflare-pages.yml` on every push for continuous Cloudflare Pages deploys. Both modes can run side-by-side in the same call. Opt-in `security_scan` stage (`enable_security_scan: true`, see [`bos-launchpad-code-scan.yml`](.github/workflows/bos-launchpad-code-scan.yml)) runs in parallel as an advisory check — findings surface in the Security tab and (when `security_scan_fail_on: fail`) mark the workflow run failed, but do NOT block the deploy stages. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
 | [.github/workflows/sync-managed-files.yml](.github/workflows/sync-managed-files.yml) | Reusable workflow | Keep standardized "managed" sections of `.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, and `.github/dependabot.yml` in sync — plus canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows) and init-once starter workflows (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`). Pluggable per-service: section (`common`, `docker`, `balena`, `node`, `python`, `lf_line_endings`, `dependabot_actions`, `dependabot_npm`, `dependabot_pip`), whole-file (`logger`, `prettier`, `bos_launchpad_release` \| `bos_launchpad_cf_pages`), init-if-missing (`gha_sync_commit`, `gha_sync_drift_check`, `gha_lint_node` \| `gha_lint_python` \| `gha_lint_shell`). Two modes: `commit` (write + push) and `check` (PR drift-check). Disabled services are skipped entirely — their existing blocks / files are never touched. |
 | [.github/workflows/nginx-config-validate.yml](.github/workflows/nginx-config-validate.yml) | Reusable workflow | PR / push CI gate for repos with an in-repo nginx config tree (e.g. `docker-tar1090`, `docker-graphs1090`, `docker-dump978`). Renders `*.conf.template` files via `envsubst` with caller-supplied placeholder values and runs `nginx -t -c /etc/nginx/nginx.conf` inside the official `nginx:alpine` image. Catches syntax errors, unresolved directives, and missing `include` targets at merge time instead of at container start. |
@@ -136,15 +136,15 @@ is also validated by preflight on the source variable.
 | [.github/actions/shared/docker-scout-scan/action.yml](.github/actions/shared/docker-scout-scan/action.yml) | Composite action | Wraps `docker/scout-action` with input validation, Docker Hub login, and optional SARIF upload to GitHub code scanning. Used by the embedded scan in `docker-build-push.yml`; reach for it directly to weave Scout into custom job topologies (ad-hoc / scheduled re-scans of an already-published image). |
 | [.github/actions/shared/render-balena-yml/action.yml](.github/actions/shared/render-balena-yml/action.yml) | Composite action | Renders `balena.yml` from scalar inputs (PyYAML `safe_dump`, path-traversal + HTTPS-URL + default-vs-supported-device-type validation, defensive re-parse). Shared by `balena-block-publish.yml` (default `type: sw.block`) and `balena-fleet-deploy.yml` (default `type: sw.application`, `emit_assets: false` for the legacy per-target omit-assets behavior). |
 | [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
-| [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, `.github/dependabot.yml`), writes canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows in `.github/workflows/bos-launchpad.yml`), and initializes starter templates (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`) on first run only. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
+| [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, `.github/dependabot.yml`), writes canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows in `.github/workflows/bos-launchpad-release.yml`), and initializes starter templates (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`) on first run only. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
 | [.github/actions/nginx-config-validate/action.yml](.github/actions/nginx-config-validate/action.yml) | Composite action | Spins up the official `nginx` image, renders the consumer repo's `*.conf.template` files via `envsubst`, and runs `nginx -t -c /etc/nginx/nginx.conf`. Used by `nginx-config-validate.yml`. Positional-key envsubst (only listed keys are substituted) so nginx-native variables like `$remote_addr` pass through unchanged. |
 | [.github/actions/shared/commit-and-push/action.yml](.github/actions/shared/commit-and-push/action.yml) | Composite action | Stage files, commit, and push to the current branch with rebase-retry on concurrent commits. Single-line message + author validation. Exits cleanly with `committed=false` when nothing is staged. Used by `monitor-upstream-release.yml` and `sync-managed-files.yml`. |
-| [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml). |
-| [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml). |
-| [.github/workflows/marketplace-action-ci.yml](.github/workflows/marketplace-action-ci.yml) | Reusable workflow | **Marketplace Action CI.** PR-time `check` (manifest + LICENSE + README + branding + community-health) + `branding-preview` (Marketplace card SVG, uploaded as artifact) + opt-in `name-check` (Marketplace name availability). Drives every PR into `dev` on a Marketplace Action repo. Called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml). |
-| [.github/workflows/repo-security-scan.yml](.github/workflows/repo-security-scan.yml) | Reusable workflow | **Consolidated security scan wrapper.** Wraps the published [`blackoutsecure/bos-code-scanning-kit@v1`](https://github.com/marketplace/actions/bos-code-scanning-kit) composite (posture audit + bundled scanners: actionlint / gitleaks / shellcheck + unified SARIF upload) AND `github/codeql-action` (matrix-parallel semantic analysis) behind one reusable. Two independent sub-jobs (`scan`, `codeql`) gated by `enable_kit_composite` + `codeql_languages`; producer-kit escape hatch (`enable_kit_composite: false`) lets kits get CodeQL-only coverage without running the published @v1 against their dev source. Shared by [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) (PR-time gate, default `fail_on: fail`) and [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) (deploy-time advisory, default `fail_on: never`). Direct callers like [`bos-marketplace-kit/.github/workflows/codeql.yml`](https://github.com/blackoutsecure/bos-marketplace-kit/blob/dev/.github/workflows/codeql.yml) also consume it. |
-| [.github/workflows/bos-marketplace-launchpad.yml](.github/workflows/bos-marketplace-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Marketplace Launchpad). Composes `marketplace-action-ci.yml` + `repo-security-scan.yml` (opt-in security scan) + `marketplace-repo-guard.yml` + `release-promote.yml` with internal event routing: PRs / pushes to `dev` → CI (+ security scan when enabled); PRs to `main` → guard; `workflow_dispatch` mode `release` → promote + GH Release; `workflow_dispatch` mode `name-check` → one-shot name probe. Consumers drop a ~60-line thin caller on their `dev` branch ([`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)); all orchestration logic lives here. Sibling to [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) for the container/site family. |
-| [bos-code-scanning-kit](https://github.com/marketplace/actions/bos-code-scanning-kit) (external) | Marketplace Action | Source of the posture-audit + bundled-scanners composite consumed by [`repo-security-scan.yml`](.github/workflows/repo-security-scan.yml). SHA / version pin uses the floating `@v1` tag in the wrapper so a single bump there propagates everywhere. |
+| [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Called via [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml). |
+| [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Called via [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml). |
+| [.github/workflows/marketplace-action-ci.yml](.github/workflows/marketplace-action-ci.yml) | Reusable workflow | **Marketplace Action CI.** PR-time `check` (manifest + LICENSE + README + branding + community-health) + `branding-preview` (Marketplace card SVG, uploaded as artifact) + opt-in `name-check` (Marketplace name availability). Drives every PR into `dev` on a Marketplace Action repo. Called via [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml). |
+| [.github/workflows/bos-launchpad-code-scan.yml](.github/workflows/bos-launchpad-code-scan.yml) | Reusable workflow | **Consolidated security scan wrapper.** Wraps the published [`blackoutsecure/bos-code-scanning-kit@v1`](https://github.com/marketplace/actions/bos-code-scanning-kit) composite (posture audit + bundled scanners: actionlint / gitleaks / shellcheck + unified SARIF upload) AND `github/codeql-action` (matrix-parallel semantic analysis) behind one reusable. Two independent sub-jobs (`scan`, `codeql`) gated by `enable_kit_composite` + `codeql_languages`; producer-kit escape hatch (`enable_kit_composite: false`) lets kits get CodeQL-only coverage without running the published @v1 against their dev source. Shared by [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml) (PR-time gate, default `fail_on: fail`) and [`bos-launchpad-release.yml`](.github/workflows/bos-launchpad-release.yml) (deploy-time advisory, default `fail_on: never`). Direct callers like [`bos-marketplace-kit/.github/workflows/codeql.yml`](https://github.com/blackoutsecure/bos-marketplace-kit/blob/dev/.github/workflows/codeql.yml) also consume it. |
+| [.github/workflows/bos-launchpad-marketplace.yml](.github/workflows/bos-launchpad-marketplace.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Marketplace Launchpad). Composes `marketplace-action-ci.yml` + `bos-launchpad-code-scan.yml` (opt-in security scan) + `marketplace-repo-guard.yml` + `release-promote.yml` with internal event routing: PRs / pushes to `dev` → CI (+ security scan when enabled); PRs to `main` → guard; `workflow_dispatch` mode `release` → promote + GH Release; `workflow_dispatch` mode `name-check` → one-shot name probe. Consumers drop a ~60-line thin caller on their `dev` branch ([`examples/bos-launchpad-marketplace.example.yaml`](examples/bos-launchpad-marketplace.example.yaml)); all orchestration logic lives here. Sibling to [`bos-launchpad-release.yml`](.github/workflows/bos-launchpad-release.yml) for the container/site family. |
+| [bos-code-scanning-kit](https://github.com/marketplace/actions/bos-code-scanning-kit) (external) | Marketplace Action | Source of the posture-audit + bundled-scanners composite consumed by [`bos-launchpad-code-scan.yml`](.github/workflows/bos-launchpad-code-scan.yml). SHA / version pin uses the floating `@v1` tag in the wrapper so a single bump there propagates everywhere. |
 | [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit) (external) | Marketplace Action | Source of the `check` / `guard` / `promote` / `name-check` / `branding-preview` composite primitives consumed by `marketplace-repo-guard.yml`, `release-promote.yml`, and `marketplace-action-ci.yml`. SHA-pinned to `v0.1.1`; Dependabot tracks bumps. |
 | [scripts/marketplace-repo/](scripts/marketplace-repo/) | Bootstrap scripts | One-time platform-setup scripts for Marketplace Action repos: org ruleset template + `gh api` bootstrap (`bootstrap-ruleset.sh`) for `file_path_restriction` enforcement, and a per-repo branch-protection fallback (`bootstrap-branch-protection.sh`). See [`scripts/marketplace-repo/README.md`](scripts/marketplace-repo/README.md). |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
@@ -218,7 +218,7 @@ jobs:
 
 ### 2. Upstream-tracked release (poll upstream, then run the same pipeline)
 
-Calls the [`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow)
+Calls the [`bos-launchpad-release.yml`](#bos-launchpad-releaseyml--reusable-meta-workflow)
 meta-workflow on a 6-hourly cron. When the tracked upstream repo cuts
 a new release, the full Docker → Balena → GitHub Release pipeline runs
 against `v<upstream_version>` automatically — no tag push required in
@@ -226,7 +226,7 @@ the consumer repo.
 
 > **Setup:** enable the `bos_launchpad_release` service in your
 > [`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
-> caller — it writes `.github/workflows/bos-launchpad.yml` (the
+> caller — it writes `.github/workflows/bos-launchpad-release.yml` (the
 > kicker) for you. Your only customization point is
 > `.bos-launchpad.yaml` at the repo root; see
 > [examples/bos-launchpad-release.example.yaml](examples/bos-launchpad-release.example.yaml)
@@ -241,7 +241,7 @@ Required `secrets`: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`,
 `BALENA_API_TOKEN`.
 
 ```yaml
-# .github/workflows/bos-launchpad.yml
+# .github/workflows/bos-launchpad-release.yml
 name: Blackout Secure Launchpad
 
 on:
@@ -266,7 +266,7 @@ jobs:
       actions:         write   # nested monitor declares this; cascade requires it
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # Every launchpad stage defaults to `false`. Opt in explicitly so
       # this caller keeps doing only what it asked for, even if the hub
@@ -292,14 +292,14 @@ jobs:
 
 Some upstreams ship rolling builds off a development branch and never
 cut GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). The same
-`bos-launchpad.yml` meta-workflow handles that case via
+`bos-launchpad-release.yml` meta-workflow handles that case via
 `source: github_branch_file` — the monitor reads a version file from
 the branch HEAD and resolves the commit SHA via the GitHub API.
 
 Required `vars` and `secrets` are identical to example 2.
 
 ```yaml
-# .github/workflows/bos-launchpad.yml
+# .github/workflows/bos-launchpad-release.yml
 name: Blackout Secure Launchpad
 
 on:
@@ -322,7 +322,7 @@ jobs:
       actions:         write
       pull-requests:   write
       security-events: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       docker:            true                # opt in explicitly (default `false`)
       balena:            true
@@ -429,7 +429,7 @@ and is **not** part of the `release.yml` pipeline.)
 ### 6. Cloudflare Pages deploy (static-site launchpad)
 
 For static-site repos, drive the deploy through the
-[`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow)
+[`bos-launchpad-release.yml`](#bos-launchpad-releaseyml--reusable-meta-workflow)
 meta-workflow with only the `cloudflare_pages` stage enabled. The
 launchpad gives every consumer one canonical front door — container
 releases, upstream-tracked releases, and static-site deploys all wire
@@ -438,8 +438,8 @@ the same way — and forwards every input straight through to
 
 > **Setup:** enable the `bos_launchpad_cf_pages` service in your
 > [`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
-> caller — it writes `.github/workflows/bos-launchpad.yml` (the
-> kicker) for you. Your only customization point is
+> caller — it writes `.github/workflows/bos-launchpad-cf-pages.yml`
+> (the kicker) for you. Your only customization point is
 > `.bos-launchpad.yaml` at the repo root; see
 > [examples/bos-launchpad-cf-pages.example.yaml](examples/bos-launchpad-cf-pages.example.yaml)
 > for an annotated starter and the
@@ -458,7 +458,7 @@ to downstream jobs. The legacy `secrets.CLOUDFLARE_ACCOUNT_ID` /
 `secrets.CLOUDFLARE_ZONE_ID` inputs are still honoured for back-compat.
 
 ```yaml
-# .github/workflows/bos-launchpad.yml
+# .github/workflows/bos-launchpad-release.yml
 name: Blackout Secure Launchpad
 
 on:
@@ -481,7 +481,7 @@ jobs:
       actions:         write   # nested monitor (`gh workflow run`)
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       cloudflare_pages: true
 
@@ -529,7 +529,7 @@ flowchart LR
     dispatch([workflow_dispatch]):::trigger --> launchpad
     dispatch --> release
 
-    launchpad["bos-launchpad.yml<br/><i>monitor + release + cloudflare-pages</i>"]:::orchestrator
+    launchpad["bos-launchpad-release.yml<br/><i>monitor + release + cloudflare-pages</i>"]:::orchestrator
     release["release.yml<br/><i>release pipeline</i>"]:::orchestrator
 
     launchpad -->|upstream-tracked mode| release
@@ -1396,7 +1396,7 @@ jobs:
 A drop-in caller is shown in [Quick start](#quick-start--caller-wiring)
 below. To wire the same pipeline to an upstream-tracked schedule
 instead of a tag push, use the
-[`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow)
+[`bos-launchpad-release.yml`](#bos-launchpad-releaseyml--reusable-meta-workflow)
 meta-workflow.
 
 ### Stage skipping semantics
@@ -1447,7 +1447,7 @@ the authoritative list. High-level groups:
 
 ---
 
-## `bos-launchpad.yml` — reusable **meta-workflow**
+## `bos-launchpad-release.yml` — reusable **meta-workflow**
 
 Single front-door composer — the **Blackout Secure Launchpad**. One
 caller workflow, one input contract, three stages — consumer repos
@@ -1503,7 +1503,7 @@ or otherwise non-SemVer tags.
 
 ### Operator-config examples
 
-The kicker workflow at `.github/workflows/bos-launchpad.yml` is
+The kicker workflow at `.github/workflows/bos-launchpad-release.yml` is
 auto-written by the `bos_launchpad_release` / `bos_launchpad_cf_pages`
 [`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
 services — you don't author it by hand. Your only manual file is
@@ -1569,7 +1569,7 @@ jobs:
       actions:         write
       pull-requests:   write
       security-events: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # Explicit opt-in to the stages this caller wants (all default `false`).
       docker:              true
@@ -1589,7 +1589,7 @@ jobs:
 
 ### Inputs
 
-See [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml)
+See [.github/workflows/bos-launchpad-release.yml](.github/workflows/bos-launchpad-release.yml)
 for the authoritative list. High-level groups:
 
 - **Monitor stage:** `upstream_repo`, `track_file`, `force_run`
@@ -1669,13 +1669,17 @@ in [`sync.py`](.github/actions/sync-managed-files/sync.py):
   immediately reveal the file is hub-owned. Use this when the entire
   file body is authoritative (e.g. a shared shell library, a
   formatter config, a thin kicker workflow that just calls a hub
-  reusable). Multiple services MAY target the same path (e.g. the two
-  `bos_launchpad_*` kickers both write
-  `.github/workflows/bos-launchpad.yml`); at most ONE may be enabled
-  per repo, enforced at parse time with a clear error message naming
-  both services and the contested path. A whole-file target may not
-  also be a section or init-if-missing target — that conflict raises
-  `RuntimeError` at import time.
+  reusable). Multiple services MAY target the same path (e.g. the
+  `gha_lint_*` init flavors all write `.github/workflows/lint.yml`);
+  at most ONE may be enabled per repo, enforced at parse time with a
+  clear error message naming both services and the contested path.
+  Some service pairs are also **semantically** mutually exclusive
+  even when their paths differ — e.g. `bos_launchpad_release`
+  (writes `bos-launchpad-release.yml`) and `bos_launchpad_cf_pages`
+  (writes `bos-launchpad-cf-pages.yml`) — listed in
+  `_SEMANTIC_MUTEX_GROUPS` and rejected at the same parse-time check.
+  A whole-file target may not also be a section or init-if-missing
+  target — that conflict raises `RuntimeError` at import time.
 
 * **Init-if-missing mode** (used by the `gha_*` services) — the
   target file is written ONCE on the first run if it does not exist,
@@ -1708,8 +1712,8 @@ services are **not** removed — they're simply ignored on this run.
 | `dependabot_pip`       | section          | `.github/dependabot.yml`                         | `package-ecosystem: pip` weekly schedule. Enable for Python Marketplace Action repos. Honors `dependabot_target_branch:`. |
 | `prettier`             | whole-file       | `.prettierrc.yaml`                               | Canonical Prettier config (semi, single-quote, trailing-comma, 100-char width, LF). YAML-flavored so the file can carry the "Managed by" header comment. |
 | `logger`               | whole-file       | `root/usr/local/bin/log-functions.sh`            | Canonical shared logging library for s6-overlay init / svc scripts. Emits `<RFC3339 UTC> <tag>[<level>]: <msg>`. Supports both `log_info "x"` (function-per-level, `SVC_NAME`) and `log info "x"` (generic dispatcher, `LOG_TAG`) APIs so existing consumers keep working unchanged. Includes `LOG_LEVEL` gating, `log_kv`, and `log_pipe_cmd`. |
-| `bos_launchpad_release` | whole-file      | `.github/workflows/bos-launchpad.yml`            | Hub-managed thin kicker for **container / Balena / GitHub-Release** workloads. Calls `bos-launchpad.yml@main` on a 6-hour cron + `main` push (paths-filtered) + `workflow_dispatch`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (schema below). Mutually exclusive with `bos_launchpad_cf_pages` — both target the same path. |
-| `bos_launchpad_cf_pages` | whole-file     | `.github/workflows/bos-launchpad.yml`            | Hub-managed thin kicker for **Cloudflare Pages** workloads. Calls `bos-launchpad.yml@main` on `main` push + `workflow_dispatch`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (schema below). Mutually exclusive with `bos_launchpad_release`. |
+| `bos_launchpad_release` | whole-file      | `.github/workflows/bos-launchpad-release.yml`            | Hub-managed thin kicker for **container / Balena / GitHub-Release** workloads. Calls `bos-launchpad-release.yml@main` on a 6-hour cron + `main` push (paths-filtered) + `workflow_dispatch`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (schema below). Semantically mutually exclusive with `bos_launchpad_cf_pages` — each kicker writes its own file but a repo should enable only one delivery flavor. |
+| `bos_launchpad_cf_pages` | whole-file     | `.github/workflows/bos-launchpad-cf-pages.yml`           | Hub-managed thin kicker for **Cloudflare Pages** workloads. Calls `bos-launchpad-release.yml@main` on `main` push + `workflow_dispatch`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (schema below). Semantically mutually exclusive with `bos_launchpad_release`. |
 | `gha_sync_commit`      | init-if-missing  | `.github/workflows/sync-managed-files.yml`       | Starter caller workflow that runs the hub's `sync-managed-files.yml` reusable in `commit` mode weekly. Carries a comment listing every known service so the maintainer can uncomment what their repo needs. |
 | `gha_sync_drift_check` | init-if-missing  | `.github/workflows/sync-drift-check.yml`         | PR-time drift gate that runs the same reusable in `check` mode against the dotfiles / dependabot / prettier targets. Fails the PR on drift. |
 | `gha_lint_node`        | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Node-based GitHub Action repos. Runs `actionlint` + `eslint` (`npm run lint`) + `prettier --check`. Mutually exclusive with `gha_lint_python` / `gha_lint_shell`. |
@@ -1723,8 +1727,10 @@ services are **not** removed — they're simply ignored on this run.
 ### `.bos-launchpad.yaml` schema (used by the `bos_launchpad_*` services)
 
 When you enable either `bos_launchpad_release` or `bos_launchpad_cf_pages`,
-the hub overwrites `.github/workflows/bos-launchpad.yml` with a thin
-"kicker" that calls the org's `bos-launchpad.yml@main` reusable
+the hub overwrites the corresponding kicker file
+(`.github/workflows/bos-launchpad-release.yml` for the release flavor or
+`.github/workflows/bos-launchpad-cf-pages.yml` for the Cloudflare Pages
+flavor) with a thin "kicker" that calls the org's `bos-launchpad-release.yml@main` reusable
 meta-workflow. **All per-repo customization** (image name, upstream
 source, Balena type, Cloudflare project, …) is read at run-time from a
 **consumer-owned** `.bos-launchpad.yaml` file at the repo root. The
@@ -2213,7 +2219,7 @@ alongside the existing `violations` output, and surfaces all three
 in the job summary with per-failure remediation hints. Together with
 `blocked_paths`, this gives the guard a fully symmetric MUST-NOT-EXIST
 plus MUST-EXIST policy surface for the protected branch. See the
-[`bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)
+[`bos-launchpad-marketplace.example.yaml`](examples/bos-launchpad-marketplace.example.yaml)
 caller for a recommended baseline.
 
 #### Auto-sync of `.github/*` files to `main`
@@ -2266,11 +2272,11 @@ services in `sync-managed-files` produce this layout for you on
 
 | Setup item                                              | Auto-setup-able? | How                                                                                  |
 |---------------------------------------------------------|------------------|--------------------------------------------------------------------------------------|
-| PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (guard stage auto-routes for `pull_request_target`). |
-| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (ci stage auto-routes for `pull_request`/`push`). |
+| PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `bos-launchpad-marketplace.example.yaml` on `dev` (guard stage auto-routes for `pull_request_target`). |
+| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `bos-launchpad-marketplace.example.yaml` on `dev` (ci stage auto-routes for `pull_request`/`push`). |
 | PR-time block on deletion of `.github/dependabot.yml` (or other required files) | **Yes** | Same launchpad guard stage — default `required_paths` covers action.yml/LICENSE/NOTICE/README.md/dependabot; override `required_paths` on the caller to extend or replace. |
 | Hard-block on workflow paths during `dev -> main` promotion | **Yes**       | Baked into the [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote) — cannot be disabled. |
-| `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (release stage auto-routes for `workflow_dispatch` mode `release`). |
+| `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `bos-launchpad-marketplace.example.yaml` on `dev` (release stage auto-routes for `workflow_dispatch` mode `release`). |
 | Auto-sync of `.github/dependabot.yml` to `main`         | **Yes**          | `include_dependabot_config: true` on the release caller (default on).                |
 | Auto-sync of `.github/CODEOWNERS` / `FUNDING.yml` / `ISSUE_TEMPLATE/` / `PULL_REQUEST_TEMPLATE.md` / `SECURITY.md` / `CONTRIBUTING.md` to `main` | **Yes** | `include_github_metadata: true` on the release caller (default off). |
 | Removal of Marketplace-violating files from `main` during promote | **Yes** | Inherent to wipe-and-replay; surfaced via `removed_violations` workflow output and job summary. |
@@ -2285,17 +2291,17 @@ services in `sync-managed-files` produce this layout for you on
 > **Two `bos-*-launchpad` reusables, two different domains.** The hub
 > ships parallel meta-workflows for the org's two repo families:
 >
-> * [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) —
+> * [`bos-launchpad-release.yml`](.github/workflows/bos-launchpad-release.yml) —
 >   **container / site** delivery (upstream monitor → Docker → Balena
 >   → GitHub Release; or Cloudflare Pages on push). Drives the
 >   `docker-*` family and `blackoutsecure-site`. Config-driven via
 >   `.bos-launchpad.yaml` + `sync-managed-files`-rendered caller.
-> * [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) —
+> * [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml) —
 >   **Marketplace Action publishing** (CI + guard + release). Drives
 >   `bos-sitemap-generator`, `bos-upstream-watcher`,
 >   `bos-nginx-config-validator`. Driven by a ~60-line thin caller
 >   on the consumer's `dev` branch (see
->   [`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)).
+>   [`examples/bos-launchpad-marketplace.example.yaml`](examples/bos-launchpad-marketplace.example.yaml)).
 >
 > Both follow the same shape — hub-side reusable, thin consumer
 > caller, all orchestration logic in the hub. They share no inputs,
@@ -2305,11 +2311,11 @@ services in `sync-managed-files` produce this layout for you on
 1. **Set the default branch to `main`** (UI: Settings → Branches).
 2. **Push `dev`**: `git push origin main:dev`.
 3. **On `dev`**, add the thin Marketplace Launchpad caller:
-   * `.github/workflows/bos-marketplace-launchpad.yml` — copy from
-     [`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml).
+   * `.github/workflows/bos-launchpad-marketplace.yml` — copy from
+     [`examples/bos-launchpad-marketplace.example.yaml`](examples/bos-launchpad-marketplace.example.yaml).
      ~60 lines: event triggers + concurrency + a single `uses:` job
      forwarding event context to the hub-side
-     [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml)
+     [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml)
      reusable, which composes the three single-purpose Marketplace
      reusables (`marketplace-action-ci.yml` + `marketplace-repo-guard.yml`
      + `release-promote.yml`) and routes each event-type internally.
@@ -2324,7 +2330,7 @@ services in `sync-managed-files` produce this layout for you on
 5. **Apply platform-level enforcement** — once per org via
    `scripts/marketplace-repo/bootstrap-ruleset.sh`, OR once per repo
    via `scripts/marketplace-repo/bootstrap-branch-protection.sh`.
-6. **First release**: trigger the `bos-marketplace-launchpad.yml`
+6. **First release**: trigger the `bos-launchpad-marketplace.yml`
    workflow from the Actions tab with mode `release` and the tag
    (e.g. `v1.0.0`). The first time, also visit the Release in the
    UI and tick "Publish to GitHub Marketplace". Subsequent releases
@@ -2706,7 +2712,7 @@ whether a new behaviour belongs in the orchestrator vs a stage.
 Each `*-build-push.yml` / `*-publish.yml` / `github-release.yml` does
 **one** thing and exposes a clean input/output contract. The
 *pipelines* — [`release.yml`](#releaseyml--reusable-meta-workflow) and
-[`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow) —
+[`bos-launchpad-release.yml`](#bos-launchpad-releaseyml--reusable-meta-workflow) —
 are thin meta-workflows that compose those single-purpose stages with
 job-level `needs:` and forward inputs/secrets through. The same stage
 workflow is reusable on its own (e.g. a Docker-only repo calls
@@ -2750,7 +2756,7 @@ inferring it from the calling event — but it doesn't *bind* itself to
 any particular trigger. This lets the same pipeline be driven by a
 tag push, a `release: published` event, a manual dispatch, or another
 reusable workflow's `needs:` (which is exactly how
-`bos-launchpad.yml` calls it).
+`bos-launchpad-release.yml` calls it).
 
 When adding a new pipeline, follow the same split:
 
@@ -2785,7 +2791,7 @@ boolean, not a copy.
 
 ### 7. Concurrency is set at the orchestrator, not the stage
 
-Each orchestrator (`release.yml`, `bos-launchpad.yml`,
+Each orchestrator (`release.yml`, `bos-launchpad-release.yml`,
 `monitor-upstream-release.yml`) declares its own `concurrency:` group
 and **never** sets `cancel-in-progress: true` for publish-side runs.
 A partial release can leave the registry / fleet in a half-published

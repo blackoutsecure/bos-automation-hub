@@ -18,8 +18,8 @@
 #                                       optional post-deploy edge purge).
 #                                       Independent of the monitor/release
 #                                       path; can run on its own on every push.
-#   0. repo-security-scan.yml         — opt-in security scanning stage shared
-#                                       with `bos-marketplace-launchpad.yml`.
+#   0. bos-launchpad-code-scan.yml         — opt-in security scanning stage shared
+#                                       with `bos-launchpad-marketplace.yml`.
 #                                       Wraps `bos-code-scanning-kit@v1`
 #                                       (posture + scanners) AND
 #                                       `github/codeql-action` (matrix).
@@ -35,7 +35,7 @@
 #                                       Scout's role inside `docker-build-push`.
 #                                       For hard-gated security scanning,
 #                                       run a separate PR-time caller using
-#                                       `repo-security-scan.yml` directly.
+#                                       `bos-launchpad-code-scan.yml` directly.
 #
 # Two canonical use cases:
 #
@@ -646,7 +646,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       #   The nested job 'security_scan' is requesting
       #   'actions: read, security-events: write', but is only allowed
       #   'actions: none, security-events: none'.
-      # NOTE: all existing `bos-launchpad.yml` callers already grant
+      # NOTE: all existing `bos-launchpad-release.yml` callers already grant
       # `actions: write` (superset of `read`) for the nested monitor
       # job's `gh workflow run` calls, and `security-events: write` for
       # Docker Scout SARIF upload — so this requirement happens to be
@@ -821,7 +821,7 @@ jobs:
   #
   # Caller MUST grant `security-events: write` + `actions: read` at workflow
   # level so the permission cascade reaches both sub-jobs inside
-  # `repo-security-scan.yml` (the kit composite AND the CodeQL matrix).
+  # `bos-launchpad-code-scan.yml` (the kit composite AND the CodeQL matrix).
   # ---------------------------------------------------------------------------
   security_scan:
     name: Security scan
@@ -830,7 +830,7 @@ jobs:
       security-events: write
       contents: read
       actions: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/repo-security-scan.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-code-scan.yml@main
     with:
       fail_on:              ${{ inputs.security_scan_fail_on }}
       enable_kit_composite: ${{ inputs.security_scan_enable_kit_composite }}

@@ -1,14 +1,14 @@
 # Blackout Secure Marketplace Launchpad — thin consumer caller example.
 #
 # WHERE THIS LIVES: on the **dev** branch of a GitHub Marketplace
-# Action repo, at `.github/workflows/bos-marketplace-launchpad.yml`.
+# Action repo, at `.github/workflows/bos-launchpad-marketplace.yml`.
 # This file MUST NOT exist on `main` — Marketplace publishing
 # requires zero workflow files on the default branch.
 #
 # WHAT IT DOES: subscribes to the four event types that drive a
 # Marketplace Action repo (PR to `dev`, push to `dev`, PR to
 # `main`, operator dispatch) and forwards them to the hub-side
-# reusable `bos-marketplace-launchpad.yml@main`, which composes
+# reusable `bos-launchpad-marketplace.yml@main`, which composes
 # the three single-purpose Marketplace reusables
 # (`marketplace-action-ci.yml`, `marketplace-repo-guard.yml`,
 # `release-promote.yml`) and routes each event-type to the right
@@ -27,7 +27,7 @@
 # template path, etc.) are also `with:`-overridable; see the hub
 # reusable for the full input list.
 #
-# NOT THE SAME FILE AS `bos-launchpad.yml`. That sibling reusable
+# NOT THE SAME FILE AS `bos-launchpad-release.yml`. That sibling reusable
 # (also in this repo's `.github/workflows/`) handles container /
 # Balena / GitHub Release / Cloudflare Pages delivery for the
 # `docker-*` and site repos. The two share no inputs, no stages,
@@ -109,7 +109,7 @@ concurrency:
 
 jobs:
   launchpad:
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-marketplace-launchpad.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-marketplace.yml@main
     permissions:
       contents: write
       pull-requests: read

@@ -33,10 +33,12 @@ inputs:
       Section: `common`, `docker`, `balena`, `node`, `python`,
       `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
       `dependabot_pip`. Whole-file: `logger`, `prettier`,
-      `bos_launchpad_release`, `bos_launchpad_cf_pages` (at most one
-      `bos_launchpad_*` per repo — both target the same
-      `.github/workflows/bos-launchpad.yml`; the enabled kicker reads
-      per-repo customization from `.bos-launchpad.yaml`).
+      `bos_launchpad_release`, `bos_launchpad_cf_pages` (semantically
+      mutually exclusive — `bos_launchpad_release` writes
+      `.github/workflows/bos-launchpad-release.yml` and
+      `bos_launchpad_cf_pages` writes
+      `.github/workflows/bos-launchpad-cf-pages.yml`; the enabled
+      kicker reads per-repo customization from `.bos-launchpad.yaml`).
       Init-if-missing: `gha_sync_commit`, `gha_sync_drift_check`,
       `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
       one `gha_lint_*` per repo — all three target the same

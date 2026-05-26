@@ -15,7 +15,7 @@
 #                                       Routed for `pull_request`, `push`,
 #                                       and `workflow_dispatch` mode
 #                                       `name-check`.
-#   2. repo-security-scan.yml         — opt-in security scanning stage.
+#   2. bos-launchpad-code-scan.yml         — opt-in security scanning stage.
 #                                       Wraps the published
 #                                       `blackoutsecure/bos-code-scanning-
 #                                       kit@v1` Marketplace Action
@@ -71,7 +71,7 @@
 # Concurrency is the CALLER's responsibility — it owns the event subscription
 # and is what GitHub schedules. Recommended caller pattern: scope concurrency
 # by event-type so a release in-flight is never cancelled by an incoming PR.
-# See `examples/bos-marketplace-launchpad.example.yaml` for the canonical
+# See `examples/bos-launchpad-marketplace.example.yaml` for the canonical
 # caller shape.
 #
 # Trigger model: this workflow is intended to be called from a thin caller
@@ -81,7 +81,7 @@
 # to be triggered directly on this repo. See the README "Marketplace Action
 # repo enrollment" section for copy-paste caller examples.
 #
-# NOT THE SAME FILE AS `bos-launchpad.yml`. That sibling reusable handles
+# NOT THE SAME FILE AS `bos-launchpad-release.yml`. That sibling reusable handles
 # container/Balena/GitHub Release/Cloudflare Pages delivery for the
 # `docker-*` and site repos. The two share no inputs, no stages, and no
 # event model — they are deliberately separate orchestrators for two
@@ -314,7 +314,7 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
 
       # ----- Security scan stage (opt-in) -----
       # When `enable_security_scan: true`, the launchpad runs the
-      # consolidated `repo-security-scan.yml` wrapper against the
+      # consolidated `bos-launchpad-code-scan.yml` wrapper against the
       # consumer kit on the same events as `ci` (pull_request + push to
       # dev). The wrapper has TWO independent sub-jobs:
       #   * `scan`   — the published `blackoutsecure/bos-code-scanning-
@@ -598,7 +598,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Stage 1.5 — Consolidated security scan (opt-in).
-  # Wraps two independent sub-jobs in `repo-security-scan.yml`:
+  # Wraps two independent sub-jobs in `bos-launchpad-code-scan.yml`:
   #   * `scan`   — published `bos-code-scanning-kit@v1` composite.
   #   * `codeql` — `github/codeql-action` matrix analysis.
   # Fires on the same events as `ci` so PR-time and post-merge runs both
@@ -618,7 +618,7 @@ jobs:
       security-events: write
       contents: read
       actions: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/repo-security-scan.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-code-scan.yml@main
     with:
       fail_on:              ${{ inputs.security_scan_fail_on }}
       enable_kit_composite: ${{ inputs.security_scan_enable_kit_composite }}

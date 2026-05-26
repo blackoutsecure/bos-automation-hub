@@ -31,10 +31,10 @@
 # three reusable workflows.
 #
 # Trigger model: this workflow is intended to be called from the hub
-# meta-workflow [`bos-marketplace-launchpad.yml`](./bos-marketplace-launchpad.yml),
+# meta-workflow [`bos-launchpad-marketplace.yml`](./bos-launchpad-marketplace.yml),
 # which is itself called from a thin caller on the SOURCE branch
 # (typically `dev`) — see
-# [`examples/bos-marketplace-launchpad.example.yaml`](../../examples/bos-marketplace-launchpad.example.yaml).
+# [`examples/bos-launchpad-marketplace.example.yaml`](../../examples/bos-launchpad-marketplace.example.yaml).
 # Recommended triggers: `pull_request` (into `dev`), `push` (on `dev`
 # after merge, as a regression catch), and `workflow_dispatch` (one-
 # shot manual run when adding the workflow to an existing repo).

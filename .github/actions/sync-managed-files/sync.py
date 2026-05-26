@@ -877,13 +877,18 @@ jobs:
 # bos-launchpad kicker workflows                                              #
 # --------------------------------------------------------------------------- #
 #
-# Two whole-file kicker workflows that target the SAME path
-# (`.github/workflows/bos-launchpad.yml`) and are MUTUALLY EXCLUSIVE
-# per consumer repo (enforced at parse time, same pattern as
-# `gha_lint_*`).
+# Two whole-file kicker workflows that write to DISTINCT paths
+# (`.github/workflows/bos-launchpad-release.yml` for container release,
+# `.github/workflows/bos-launchpad-cf-pages.yml` for static-site CF
+# Pages) but are still MUTUALLY EXCLUSIVE per consumer repo — enforced
+# at parse time via `_SEMANTIC_MUTEX_GROUPS` because the path-collision
+# check no longer catches the combo. A repo should pick exactly one
+# delivery flavor; running both side-by-side would queue two unrelated
+# pipelines on every `main` push.
 #
-# Both kickers delegate to the org's `bos-launchpad.yml` reusable
-# meta-workflow and read per-repo customization from a consumer-owned
+# Both kickers delegate to the SAME hub reusable
+# (`bos-launchpad-release.yml` — the launchpad handles both modes via
+# inputs) and read per-repo customization from a consumer-owned
 # `.bos-launchpad.yaml` data file at the repo root. The kicker pipes
 # that YAML through `yq -o=json` to a job output and the downstream
 # `release:` / `cloudflare:` job consumes it via
@@ -911,7 +916,7 @@ jobs:
 _BOS_LAUNCHPAD_RELEASE_YML = """\
 # Blackout Secure Launchpad — release kicker (hub-managed).
 #
-# Calls `bos-launchpad.yml` in blackoutsecure/bos-automation-hub. Reads
+# Calls `bos-launchpad-release.yml` in blackoutsecure/bos-automation-hub. Reads
 # per-repo customization from `.bos-launchpad.yaml` at the repo root.
 #
 # CUSTOMIZE via `.bos-launchpad.yaml` — NOT this file. The hub
@@ -942,7 +947,7 @@ on:
       - 'scripts/**'
       - '.github/upstream/**'
       - '.bos-launchpad.yaml'
-      - '.github/workflows/bos-launchpad.yml'
+      - '.github/workflows/bos-launchpad-release.yml'
   workflow_dispatch:
     inputs:
       force_run:
@@ -1005,7 +1010,7 @@ jobs:
       actions:         write   # nested monitor (`gh workflow run`)
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # ----- Monitor stage -----
       upstream_repo:     ${{ fromJson(needs.parse-config.outputs.cfg).upstream.repo || '' }}
@@ -1102,7 +1107,7 @@ jobs:
 _BOS_LAUNCHPAD_CF_PAGES_YML = """\
 # Blackout Secure Launchpad — Cloudflare Pages kicker (hub-managed).
 #
-# Calls `bos-launchpad.yml` in blackoutsecure/bos-automation-hub. Reads
+# Calls `bos-launchpad-release.yml` in blackoutsecure/bos-automation-hub. Reads
 # per-repo customization from `.bos-launchpad.yaml` at the repo root.
 #
 # CUSTOMIZE via `.bos-launchpad.yaml` — NOT this file. The hub
@@ -1181,7 +1186,7 @@ jobs:
       actions:         write
       pull-requests:   write
       security-events: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # ----- Cloudflare Pages stage -----
       cloudflare_pages:                     ${{ fromJson(needs.parse-config.outputs.cfg).stages.cloudflare_pages != false }}
@@ -1976,11 +1981,13 @@ _TEMPLATED_SECTION_SERVICES = frozenset({
 # `SERVICE_FILES`      — per-service: ordered dict of {file_path:
 #   full_body}. Whole-file mode. The hub overwrites the file outright
 #   on every run. Cross-mode uniqueness per path is enforced (a path
-#   cannot appear in both whole-file AND section/init), but MULTIPLE
-#   whole-file services MAY target the same path (e.g. the two
-#   `bos_launchpad_*` kickers both target
-#   `.github/workflows/bos-launchpad.yml`) — at most one may be
+#   cannot appear in both whole-file AND section/init), and MULTIPLE
+#   whole-file services MAY target the same path — at most one may be
 #   enabled per repo, enforced at parse time by `parse_services()`.
+#   Some service pairs are also semantically mutually exclusive even
+#   when their paths differ (e.g. the two `bos_launchpad_*` kicker
+#   flavors); those pairs are listed in `_SEMANTIC_MUTEX_GROUPS` and
+#   rejected at the same parse-time check.
 #
 # `SERVICE_INIT_FILES` — per-service: ordered dict of {file_path:
 #   full_body}. Init-if-missing mode. The hub writes the file ONLY if
@@ -2045,12 +2052,26 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
         ".prettierrc.yaml": _PRETTIERRC_YAML,
     },
     "bos_launchpad_release": {
-        ".github/workflows/bos-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
+        ".github/workflows/bos-launchpad-release.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_cf_pages": {
-        ".github/workflows/bos-launchpad.yml": _BOS_LAUNCHPAD_CF_PAGES_YML,
+        ".github/workflows/bos-launchpad-cf-pages.yml": _BOS_LAUNCHPAD_CF_PAGES_YML,
     },
 }
+
+# Service pairs (or larger groups) that are semantically mutually
+# exclusive even when each service writes to its OWN file path.
+# Enforced at parse time in `parse_services()` so a misconfiguration
+# (e.g. both kicker flavors enabled) fails fast with a clear message
+# instead of producing two simultaneously-triggering kicker workflows.
+_SEMANTIC_MUTEX_GROUPS: List[Tuple[str, ...]] = [
+    # Both kicker flavors deliver via the same upstream `bos-launchpad-
+    # release.yml@main` reusable but with different `with:` blocks and
+    # trigger shapes (cron-driven container release vs push-driven static
+    # site). Each writes its own kicker file so the path-collision check
+    # below cannot catch this combo — keep them explicitly paired here.
+    ("bos_launchpad_release", "bos_launchpad_cf_pages"),
+]
 
 SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
     "gha_sync_commit": {
@@ -2106,15 +2127,18 @@ KNOWN_SERVICES = (
 
 # Cross-registry path conflicts: a single file path may only be claimed
 # by ONE registry mode. Within SERVICE_FILES, MULTIPLE services MAY
-# target the same path (e.g. `bos_launchpad_release` /
-# `bos_launchpad_cf_pages` both write
-# `.github/workflows/bos-launchpad.yml`) — at most one may be enabled
-# per repo, enforced at parse time by `parse_services()`. Within
-# SERVICE_INIT_FILES, MULTIPLE services may also target the same path
-# (e.g. `gha_lint_node` / `gha_lint_python` / `gha_lint_shell` all
-# write `.github/workflows/lint.yml`) with the same mutex semantics.
-# All checks run at import so a registry typo fails CI immediately
-# rather than at runtime.
+# target the same path — at most one may be enabled per repo, enforced
+# at parse time by `parse_services()`. Some SERVICE_FILES pairs are
+# also semantically mutually exclusive even when their paths differ
+# (e.g. `bos_launchpad_release` writes `bos-launchpad-release.yml` and
+# `bos_launchpad_cf_pages` writes `bos-launchpad-cf-pages.yml`, but a
+# repo should still enable only one); those are listed in
+# `_SEMANTIC_MUTEX_GROUPS` above. Within SERVICE_INIT_FILES, MULTIPLE
+# services may also target the same path (e.g. `gha_lint_node` /
+# `gha_lint_python` / `gha_lint_shell` all write
+# `.github/workflows/lint.yml`) with the same mutex semantics. All
+# checks run at import so a registry typo fails CI immediately rather
+# than at runtime.
 _whole_file_owners: Dict[str, List[str]] = {}
 for _svc, _files in SERVICE_FILES.items():
     for _path in _files:
@@ -2245,14 +2269,19 @@ def parse_services(raw: str) -> List[str]:
     Preserve order; dedupe.
 
     Additionally enforces that at most ONE whole-file service AND at
-    most ONE init-if-missing service may target a given path per repo.
-    The registry-level check at import time only catches the case
-    where two services accidentally target the same path AT THE PYTHON
-    LEVEL — for both SERVICE_FILES (e.g. `bos_launchpad_release` vs
-    `bos_launchpad_cf_pages`) and SERVICE_INIT_FILES (e.g.
-    `gha_lint_*` variants) we deliberately allow that (so each flavor
-    can ship its own canonical body) and instead enforce the mutual
-    exclusion at parse time against the caller's `services:` list.
+    most ONE init-if-missing service may target a given path per repo,
+    AND that no two services listed in `_SEMANTIC_MUTEX_GROUPS` are
+    enabled together. The registry-level check at import time only
+    catches the case where two services accidentally target the same
+    path AT THE PYTHON LEVEL — for SERVICE_FILES (e.g. `gha_lint_*`
+    variants targeting `.github/workflows/lint.yml` when init-if-
+    missing) we deliberately allow that (so each flavor can ship its
+    own canonical body) and instead enforce the mutual exclusion at
+    parse time against the caller's `services:` list. The semantic
+    mutex covers pairs that no longer collide on a path but still must
+    not both be enabled (e.g. the two `bos_launchpad_*` kicker flavors,
+    each of which writes its own kicker file but would produce two
+    simultaneously-triggering pipelines).
     """
     seen = set()
     result: List[str] = []
@@ -2275,11 +2304,9 @@ def parse_services(raw: str) -> List[str]:
     if not result:
         die("input 'services' resolved to zero entries")
 
-    # Reject ≥2 enabled whole-file services that target the same path
-    # (e.g. `bos_launchpad_release` + `bos_launchpad_cf_pages` both
-    # writing `.github/workflows/bos-launchpad.yml`). Reported with
-    # both service names AND the contested path so the caller can fix
-    # their list.
+    # Reject ≥2 enabled whole-file services that target the same path.
+    # Reported with both service names AND the contested path so the
+    # caller can fix their list.
     whole_path_owner: Dict[str, str] = {}
     for svc in result:
         if svc not in SERVICE_FILES:
@@ -2292,6 +2319,18 @@ def parse_services(raw: str) -> List[str]:
                     f"one of them per repo."
                 )
             whole_path_owner[path] = svc
+
+    # Reject semantically-incompatible service combinations (pairs or
+    # larger groups whose paths no longer collide but that still must
+    # not coexist in a single repo — see `_SEMANTIC_MUTEX_GROUPS`).
+    enabled = set(result)
+    for group in _SEMANTIC_MUTEX_GROUPS:
+        overlap = [s for s in group if s in enabled]
+        if len(overlap) > 1:
+            die(
+                f"services {overlap!r} are mutually exclusive. Enable "
+                f"at most one of them per repo."
+            )
 
     # Reject ≥2 enabled init-if-missing services that target the same
     # path (e.g. `gha_lint_node` + `gha_lint_python` both writing

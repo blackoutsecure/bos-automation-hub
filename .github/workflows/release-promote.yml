@@ -19,10 +19,10 @@
 # Dependabot / metadata auto-sync, GitHub Release chaining) around
 # it.
 # Trigger model: this workflow is intended to be called from the hub
-# meta-workflow [`bos-marketplace-launchpad.yml`](./bos-marketplace-launchpad.yml),
+# meta-workflow [`bos-launchpad-marketplace.yml`](./bos-launchpad-marketplace.yml),
 # which is itself called from a thin caller on the SOURCE branch
 # (typically `dev`) — see
-# [`examples/bos-marketplace-launchpad.example.yaml`](../../examples/bos-marketplace-launchpad.example.yaml).
+# [`examples/bos-launchpad-marketplace.example.yaml`](../../examples/bos-launchpad-marketplace.example.yaml).
 # Triggers normally include `workflow_dispatch` (operator types the
 # version) and may include `push: tags: ['v*']` when the operator
 # prefers to tag on dev first.
