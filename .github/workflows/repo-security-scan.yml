@@ -82,11 +82,13 @@ name: Repo Security Scan (reusable)
       codeql_languages:
         description: >-
           JSON array string of CodeQL languages to analyze (e.g.
-          `[python, actions]`, `[javascript-typescript]`, `[go]`). Empty
-          string (default) skips the `codeql` job entirely. Entries must
-          be valid CodeQL language identifiers; the string is parsed with
-          `fromJSON` to drive a matrix, so each language runs in its own
-          parallel job.
+          `["python", "actions"]`, `["javascript-typescript"]`,
+          `["go"]`). Empty string (default) skips the `codeql` job
+          entirely. Entries must be valid CodeQL language identifiers
+          AND must be double-quoted JSON strings — the value is parsed
+          with `fromJSON` to drive a matrix, so YAML's flow-list
+          shorthand `[python, actions]` is REJECTED with
+          `fromJSON: Unexpected symbol: 'python'`.
         required: false
         type: string
         default: ''

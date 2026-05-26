@@ -365,7 +365,7 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         type: boolean
         default: true
       security_scan_codeql_languages:
-        description: 'JSON array string of CodeQL languages (e.g. `[python, actions]`). Empty (default) skips the CodeQL sub-job entirely.'
+        description: 'JSON array string of CodeQL languages (e.g. `["python", "actions"]`). Empty (default) skips the CodeQL sub-job entirely. MUST be valid JSON with double-quoted strings — `[python, actions]` is REJECTED by `fromJSON`.'
         required: false
         type: string
         default: ''
