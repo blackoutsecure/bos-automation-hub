@@ -635,10 +635,22 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       # `docker-build-push.yml`: scanners are observational, deploy
       # gating is via explicit toggles + the operator's eyeballs.
       #
-      # Caller workflow MUST grant `security-events: write` + `actions:
-      # read` at workflow level so the permission cascade reaches both
-      # sub-jobs (the kit composite AND the CodeQL matrix) inside
-      # `repo-security-scan.yml`.
+      # PERMISSIONS REQUIREMENT (STATIC, UNCONDITIONAL):
+      # The caller workflow MUST grant `security-events: write` and
+      # `actions: read` at workflow level (and cascade them to the
+      # `launchpad` job's `permissions:` block) REGARDLESS of whether
+      # `enable_security_scan` is set. GitHub validates the nested-job
+      # permission cascade at workflow-load time, BEFORE evaluating the
+      # job's `if:` gate. Omitting the grants when `enable_security_scan:
+      # false` produces a hard load-time failure:
+      #   The nested job 'security_scan' is requesting
+      #   'actions: read, security-events: write', but is only allowed
+      #   'actions: none, security-events: none'.
+      # NOTE: all existing `bos-launchpad.yml` callers already grant
+      # `actions: write` (superset of `read`) for the nested monitor
+      # job's `gh workflow run` calls, and `security-events: write` for
+      # Docker Scout SARIF upload — so this requirement happens to be
+      # met by the existing perm block, but it is not redundant.
       #
       # The default `fail_on: never` is intentionally LOOSER than the
       # Marketplace launchpad's `fail_on: fail` default — deploy
@@ -648,7 +660,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       # in `.bos-launchpad.yaml` / caller `with:` once findings have
       # been triaged.
       enable_security_scan:
-        description: 'Enable consolidated security scanning (kit composite + CodeQL) via the launchpad. Caller MUST grant `security-events: write` + `actions: read` at workflow level. Default `false`.'
+        description: 'Enable consolidated security scanning (kit composite + CodeQL) via the launchpad. Default `false`. NOTE: caller MUST grant `security-events: write` + `actions: read` at workflow level UNCONDITIONALLY (even when this input is `false`) — GitHub validates the nested `security_scan` job''s permission cascade statically, before the `if:` gate.'
         required: false
         type: boolean
         default: false
