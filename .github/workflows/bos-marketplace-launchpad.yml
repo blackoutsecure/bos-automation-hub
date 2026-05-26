@@ -393,7 +393,7 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         type: string
         default: ''
       tag_name:
-        description: 'SemVer release tag (`vX.Y.Z[-suffix]`). Required for release runs; ignored for other events.'
+        description: 'SemVer release tag (`vX.Y.Z[-suffix]`). Optional for release runs: when empty, the release-promote stage auto-bumps the patch of the latest stable SemVer tag on `source_branch` (defaulting to `v0.1.0` for a first release). Pass an explicit value for minor/major bumps or pre-release suffixes. Ignored for non-release events.'
         required: false
         type: string
         default: ''

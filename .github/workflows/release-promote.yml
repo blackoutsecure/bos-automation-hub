@@ -115,9 +115,22 @@ name: Release promote (reusable)
       tag_name:
         description: >-
           Tag to create on the new `target_branch` commit.
-          SemVer (`vX.Y.Z[-suffix]`). Required.
-        required: true
+          SemVer (`vX.Y.Z[-suffix]`).
+
+          OPTIONAL: when empty, this workflow auto-resolves to the
+          next-patch bump of the latest stable SemVer tag on
+          `source_branch` (or `v0.1.0` for a never-released repo).
+          Pre-release tags (`vX.Y.Z-suffix`) are intentionally
+          excluded from "latest" for auto-resolve — operators wanting
+          a minor/major bump or any pre-release suffix MUST pass an
+          explicit value here.
+
+          Required-by-convention for the underlying `promote`
+          composite, which validates the SemVer shape; the empty
+          case is handled before the composite runs.
+        required: false
         type: string
+        default: ''
       commit_message:
         description: >-
           Commit message for the promotion commit. Default
@@ -259,41 +272,105 @@ jobs:
       removed_paths:      ${{ steps.promote.outputs.removed_paths }}
       removed_violations: ${{ steps.promote.outputs.removed_violations }}
     steps:
-      # Fail-fast UX guard for the most common operator mistake:
-      # dispatching `mode: release` from the caller without filling
-      # in the `tag_name` field. Per-repo callers MUST declare the
-      # workflow_dispatch `tag_name` input as `required: false`
-      # because the same dispatch form also supports `mode:
-      # name-check`, which doesn't take a tag — so the empty-string
-      # check has to happen at runtime, not at the input-schema
-      # layer. Without this step the same condition is eventually
-      # caught ~3 reusable layers deeper inside the `promote`
-      # composite Action, where the error ("input 'tag_name' is
-      # required and must be a single bare tag name (got: '')") is
-      # technically correct but completely opaque to the operator.
-      # Shape validation (SemVer regex, etc.) is intentionally NOT
-      # duplicated here — that lives in the `promote` composite and
-      # stays single-sourced there.
-      - name: Validate dispatch inputs
-        env:
-          TAG_NAME: ${{ inputs.tag_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${TAG_NAME}" ]; then
-            echo "::error title=Missing tag_name::workflow_dispatch with mode=release requires a SemVer 'tag_name' (e.g. v1.2.0). Re-dispatch the workflow and populate the 'tag_name' field."
-            exit 1
-          fi
-
       - name: Checkout source_branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.source_branch }}
           # Full history is required so the worktree-based promotion
-          # can fetch + checkout arbitrary refs.
+          # can fetch + checkout arbitrary refs. As a side-effect,
+          # `fetch-depth: 0` also fetches all tags — which the
+          # `Resolve tag` step below relies on to compute the
+          # auto-bumped next tag when `tag_name` is empty.
           fetch-depth: 0
           # We re-push via the same checkout — persist the bot token.
           persist-credentials: true
+
+      # Resolve the effective tag for this release.
+      #
+      # `inputs.tag_name` is intentionally OPTIONAL on the caller's
+      # workflow_dispatch input schema, because the same dispatch
+      # form is shared with `mode: name-check` (which doesn't take a
+      # tag) and GitHub Actions has no way to mark an input as
+      # "required iff mode == release". So the empty-string case has
+      # to be handled at runtime, here — and rather than failing the
+      # operator out, we auto-resolve to the next-patch bump of the
+      # latest stable SemVer tag (or `v0.1.0` for a never-released
+      # repo).
+      #
+      # Algorithm:
+      #   1. If `inputs.tag_name` is non-empty, pass through verbatim
+      #      — the `promote` composite enforces SemVer shape, so we
+      #      don't duplicate that regex here.
+      #   2. Else, find the highest tag matching the strict stable
+      #      pattern `^v?[0-9]+\.[0-9]+\.[0-9]+$` (pre-release tags
+      #      like `v1.2.3-rc1` are intentionally excluded from
+      #      "latest" — pre-releases should not auto-promote to the
+      #      next stable; the operator types those explicitly).
+      #   3. Bump the patch component by 1. Preserve the leading `v`
+      #      prefix from the source tag (the typical convention) or
+      #      add one if the tag was bare.
+      #   4. If no stable tags exist at all, default to `v0.1.0` —
+      #      the canonical "first release" SemVer per
+      #      https://semver.org/#how-should-i-deal-with-revisions-in-the-0yz-initial-development-phase.
+      #
+      # Overrides: operators wanting a minor/major bump (or any
+      # pre-release suffix) MUST type the full target tag into the
+      # `tag_name` dispatch field. Auto-resolve is intentionally
+      # patch-only — it's the safest "I forgot to type the tag"
+      # fallback and never accidentally cuts a breaking-change
+      # release.
+      - name: Resolve tag
+        id: resolve_tag
+        env:
+          TAG_NAME_INPUT: ${{ inputs.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${TAG_NAME_INPUT}" ]; then
+            RESOLVED="${TAG_NAME_INPUT}"
+            echo "Using operator-supplied tag_name: ${RESOLVED}"
+            echo "auto_resolved=false" >> "${GITHUB_OUTPUT}"
+            echo "previous_tag=" >> "${GITHUB_OUTPUT}"
+          else
+            # Find the highest stable SemVer tag. `sort -V` handles
+            # SemVer ordering correctly for the strict X.Y.Z shape.
+            LATEST="$(git tag --list \
+              | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | tail -n1 || true)"
+
+            if [ -z "${LATEST}" ]; then
+              RESOLVED='v0.1.0'
+              echo "No stable SemVer tags found on this repo; defaulting to ${RESOLVED} (first release)."
+              echo "auto_resolved=true" >> "${GITHUB_OUTPUT}"
+              echo "previous_tag=" >> "${GITHUB_OUTPUT}"
+            else
+              # Preserve the source tag's `v` prefix (or lack thereof).
+              case "${LATEST}" in
+                v*) PREFIX='v'; CORE="${LATEST#v}" ;;
+                *)  PREFIX='v'; CORE="${LATEST}" ;;  # always normalize to v-prefixed
+              esac
+              MAJOR="${CORE%%.*}"
+              REST="${CORE#*.}"
+              MINOR="${REST%%.*}"
+              PATCH="${REST#*.}"
+              # Defensive: confirm components are pure integers.
+              case "${MAJOR}${MINOR}${PATCH}" in
+                ''|*[!0-9]*)
+                  echo "::error title=Tag parse failed::Could not parse '${LATEST}' as X.Y.Z (got MAJOR='${MAJOR}' MINOR='${MINOR}' PATCH='${PATCH}'). Re-dispatch with an explicit tag_name." >&2
+                  exit 1
+                  ;;
+              esac
+              PATCH_NEW=$((PATCH + 1))
+              RESOLVED="${PREFIX}${MAJOR}.${MINOR}.${PATCH_NEW}"
+              echo "No tag_name supplied; auto-resolved to ${RESOLVED} (patch-bump from latest stable tag ${LATEST})."
+              echo "auto_resolved=true" >> "${GITHUB_OUTPUT}"
+              echo "previous_tag=${LATEST}" >> "${GITHUB_OUTPUT}"
+            fi
+          fi
+
+          echo "tag_name=${RESOLVED}" >> "${GITHUB_OUTPUT}"
 
       - name: Resolve extra allowlist (toggles + operator paths)
         id: extras
@@ -367,13 +444,18 @@ jobs:
         # `bos-marketplace-kit` Action. SHA-pinned per the hub's
         # GHA pin policy (org/repo@<sha> # vX.Y.Z). Dependabot bumps
         # both halves in lockstep.
+        #
+        # `tag_name` is the resolved value from the `Resolve tag`
+        # step above (operator-supplied verbatim OR auto-bumped
+        # next-patch) — never `inputs.tag_name` directly, because
+        # that can be empty.
         uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@8cb53a2c81712c47b61af1031a1db69058bc5be3 # v0.1.2
         with:
           source_branch:         ${{ inputs.source_branch }}
           target_branch:         ${{ inputs.target_branch }}
           allowlist_paths:       ${{ inputs.allowlist_paths }}
           extra_allowlist_paths: ${{ steps.extras.outputs.extra_allowlist_paths }}
-          tag_name:              ${{ inputs.tag_name }}
+          tag_name:              ${{ steps.resolve_tag.outputs.tag_name }}
           commit_message:        ${{ inputs.commit_message }}
           dry_run:               ${{ inputs.dry_run }}
 
@@ -385,11 +467,26 @@ jobs:
           TARGET_BRANCH:      ${{ inputs.target_branch }}
           SOURCE_SHA:         ${{ steps.promote.outputs.source_sha }}
           TARGET_SHA:         ${{ steps.promote.outputs.target_sha }}
-          TAG_NAME:           ${{ steps.promote.outputs.tag_name }}
+          TAG_NAME:           ${{ steps.resolve_tag.outputs.tag_name }}
+          AUTO_RESOLVED:      ${{ steps.resolve_tag.outputs.auto_resolved }}
+          PREVIOUS_TAG:       ${{ steps.resolve_tag.outputs.previous_tag }}
           DRY_RUN:            ${{ inputs.dry_run }}
           REMOVED_PATHS:      ${{ steps.promote.outputs.removed_paths }}
           REMOVED_VIOLATIONS: ${{ steps.promote.outputs.removed_violations }}
         run: |
+          # Render the tag cell with a hint when we picked it for the
+          # operator, so the summary self-documents what happened
+          # (no need to dig through step logs to see "why this tag?").
+          if [ "${AUTO_RESOLVED}" = 'true' ]; then
+            if [ -n "${PREVIOUS_TAG}" ]; then
+              TAG_CELL="\`${TAG_NAME}\` _(auto-resolved: patch-bump from \`${PREVIOUS_TAG}\`)_"
+            else
+              TAG_CELL="\`${TAG_NAME}\` _(auto-resolved: first release, no prior tags)_"
+            fi
+          else
+            TAG_CELL="\`${TAG_NAME}\`"
+          fi
+
           {
             echo "## Release promote"
             echo ""
@@ -399,7 +496,7 @@ jobs:
             echo "| Target branch  | \`${TARGET_BRANCH}\` |"
             echo "| Source SHA     | \`${SOURCE_SHA:-n/a}\` |"
             echo "| Target SHA     | \`${TARGET_SHA:-n/a}\` |"
-            echo "| Tag            | \`${TAG_NAME}\` |"
+            echo "| Tag            | ${TAG_CELL} |"
             echo "| Promoted       | \`${PROMOTED}\` |"
             echo "| Dry run        | \`${DRY_RUN}\` |"
             echo ""
