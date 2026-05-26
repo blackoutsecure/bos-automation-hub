@@ -330,12 +330,25 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
       # `security_scan_enable_kit_composite: false` so they don't run
       # the published @v1 against their own dev source while still
       # getting CodeQL coverage via the wrapper.
+      # Producer-kit pattern: kits that produce the published
+      # `bos-code-scanning-kit@v1` should set
+      # `security_scan_enable_kit_composite: false` so they don't run
+      # the published @v1 against their own dev source while still
+      # getting CodeQL coverage via the wrapper.
+      #
+      # PERMISSIONS REQUIREMENT (STATIC, UNCONDITIONAL):
       # The caller workflow MUST grant `security-events: write` and
-      # `actions: read` at workflow level so the permission cascade
-      # reaches BOTH sub-jobs inside the wrapper. Default is `false`
-      # so existing kits that haven't opted in see no behavior change.
+      # `actions: read` at workflow level (and cascade them to the
+      # `launchpad` job's `permissions:` block) REGARDLESS of whether
+      # `enable_security_scan` is set. GitHub validates the nested-job
+      # permission cascade at workflow-load time, BEFORE evaluating the
+      # job's `if:` gate. Omitting the grants when `enable_security_scan:
+      # false` produces a hard load-time failure:
+      #   The nested job 'security_scan' is requesting
+      #   'actions: read, security-events: write', but is only allowed
+      #   'actions: none, security-events: none'.
       enable_security_scan:
-        description: 'Enable consolidated security scanning (kit composite + CodeQL) via the launchpad. Caller MUST grant `security-events: write` + `actions: read` at workflow level. Default `false`.'
+        description: 'Enable consolidated security scanning (kit composite + CodeQL) via the launchpad. Default `false`. NOTE: caller MUST grant `security-events: write` + `actions: read` at workflow level UNCONDITIONALLY (even when this input is `false`) — GitHub validates the nested `security_scan` job''s permission cascade statically, before the `if:` gate.'
         required: false
         type: boolean
         default: false

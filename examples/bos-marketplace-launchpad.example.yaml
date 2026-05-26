@@ -81,9 +81,18 @@ name: Blackout Secure Marketplace Launchpad
 # Workflow-default permissions. Each sub-job inside the hub reusable
 # scopes its own narrower permissions internally; this top-level grant
 # is the UNION (the maximum the nested workflow may use).
+#
+# `security-events: write` + `actions: read` are required UNCONDITIONALLY
+# (even with `enable_security_scan: false` below) because the hub
+# reusable declares a nested `security_scan` job that requests them,
+# and GitHub validates the cascade statically at workflow-load time
+# BEFORE evaluating any `if:` gate. Omitting them produces a hard
+# load-time error referencing the `security_scan` job.
 permissions:
   contents: write       # required by the release stage (promote + tag + GH Release)
   pull-requests: read   # required by the guard stage (PR diff inspection)
+  security-events: write  # statically required by the `security_scan` nested job (see note above)
+  actions: read           # statically required by the `security_scan` nested job (see note above)
 
 # Per-event concurrency: PRs cancel themselves on new pushes; releases
 # never cancel each other (so a manual re-run of a release waits in
@@ -104,6 +113,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: read
+      security-events: write  # statically required by the `security_scan` nested job; see workflow-level note
+      actions: read           # statically required by the `security_scan` nested job; see workflow-level note
     with:
       # ----- Event-routing context (forwarded from the caller event) -----
       event_name:      ${{ github.event_name }}
@@ -163,10 +174,14 @@ jobs:
       # SARIF upload) AND `github/codeql-action` (matrix-parallel
       # CodeQL). Both upload SARIF to this repo's Security tab.
       #
-      # The CALLER workflow (this file) MUST grant the matching
-      # permissions at workflow-level — the cascade reaches the two
-      # sub-jobs inside `repo-security-scan.yml`. Add to the
-      # workflow-level `permissions:` block above:
+      # PERMISSIONS REQUIREMENT (STATIC, UNCONDITIONAL):
+      # The CALLER workflow MUST grant the following at workflow level
+      # AND in this `launchpad:` job's `permissions:` block, REGARDLESS
+      # of whether `enable_security_scan` is set or true. GitHub
+      # validates the nested `security_scan` job's permission cascade
+      # statically at workflow-load time, BEFORE evaluating the `if:`
+      # gate, so omitting these grants while leaving the input default
+      # (`false`) ALSO breaks the workflow:
       #   security-events: write
       #   actions:         read
       #
