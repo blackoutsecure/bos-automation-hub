@@ -1,0 +1,231 @@
+# Reusable wrapper around the published `blackoutsecure/bos-code-scanning-kit`
+# Marketplace Action AND the GitHub-hosted `github/codeql-action`. Lets ANY
+# caller (Marketplace Launchpad, delivery Launchpad, hand-authored callers,
+# etc.) gate runs on:
+#
+#   1. The kit composite — posture audit + bundled scanners (actionlint /
+#      gitleaks / shellcheck) + unified SARIF upload to GHAS.
+#   2. CodeQL — GitHub's first-party semantic source analysis, run as a
+#      parallel matrix over `inputs.codeql_languages` and uploaded to the
+#      caller's Security tab.
+#
+# The two stages are independent: callers can enable either, both, or
+# neither. Both write to the caller's Security tab via separate SARIF
+# uploads keyed off distinct `category` values so they coexist cleanly.
+#
+# Hosted in the hub so a single bump of the `@v1` kit pin (or the
+# `github/codeql-action` SHA pins) here propagates to every caller that
+# opts in. Filename is intentionally generic (`repo-security-scan`) so
+# both launchpads — the Marketplace publishing launchpad AND the
+# container / site delivery launchpad — and direct callers (kit
+# `codeql.yml` files) all consume one wrapper.
+#
+# Caller hosting model: SARIF gets uploaded to the CALLER repo's Security
+# tab — `actions/checkout` clones the caller repo, then the kit / CodeQL
+# run against that working tree. The kit composite itself handles
+# `actions/setup-python` + `pip install`, so this wrapper stays minimal.
+#
+# Producer-kit escape hatch: kits that produce the published
+# `bos-code-scanning-kit@v1` (or otherwise want to run CodeQL via this
+# wrapper without invoking the published composite against their dev
+# source) can set `enable_kit_composite: false`. That skips the `scan`
+# job entirely while still allowing the `codeql` matrix job to fire when
+# `codeql_languages` is non-empty.
+#
+# IMPORTANT: the `@v1` floating tag on the kit invocation is intentional
+# so the hub automatically tracks v1.x patch and minor releases. If a
+# regression ships and breaks downstream callers, override at the hub
+# level by pinning a SHA in a follow-up commit rather than asking callers
+# to rev — that's the whole reason this wrapper exists.
+
+name: Repo Security Scan (reusable)
+
+"on":
+  workflow_call:
+    inputs:
+      fail_on:
+        description: >-
+          Forwarded to the kit's `fail_on`. `fail` (default) exits non-zero
+          when posture has any FAIL findings or any bundled scanner reports
+          a result — gates the build. `never` collects findings but always
+          exits 0 (useful for first-time rollouts and for the
+          `enable_upload: true` audit-only mode).
+        required: false
+        type: string
+        default: fail
+      enable_kit_composite:
+        description: >-
+          Run the published `bos-code-scanning-kit@v1` composite as the
+          `scan` job. Default `true`. Set `false` for producer-kit
+          callers that want CodeQL coverage from this wrapper but do NOT
+          want the published kit running against their own dev source
+          (CodeQL-only mode). When `false`, the `enable_posture` /
+          `enable_scanners` / `enable_upload` inputs become irrelevant.
+        required: false
+        type: boolean
+        default: true
+      enable_posture:
+        description: 'Forwarded to the kit. Run the posture audit step. Default `true`.'
+        required: false
+        type: boolean
+        default: true
+      enable_scanners:
+        description: 'Forwarded to the kit. Run the bundled scanners (actionlint / gitleaks / shellcheck). Default `true`.'
+        required: false
+        type: boolean
+        default: true
+      enable_upload:
+        description: 'Forwarded to the kit. Upload merged SARIF to GitHub Advanced Security. Default `true`.'
+        required: false
+        type: boolean
+        default: true
+      codeql_languages:
+        description: >-
+          JSON array string of CodeQL languages to analyze (e.g.
+          `["python", "actions"]`, `["javascript-typescript"]`,
+          `["go"]`). Empty string (default) skips the `codeql` job
+          entirely. Entries must be valid CodeQL language identifiers
+          AND must be double-quoted JSON strings — the value is parsed
+          with `fromJSON` to drive a matrix, so YAML's flow-list
+          shorthand `[python, actions]` is REJECTED with
+          `fromJSON: Unexpected symbol: 'python'`.
+        required: false
+        type: string
+        default: ''
+      codeql_queries:
+        description: >-
+          CodeQL query suite. `security-and-quality` (default) covers both
+          vulnerability and code-quality patterns; `security-extended`
+          raises recall at the cost of noise; `security` is the smallest /
+          lowest-noise set. Ignored when `codeql_languages` is empty.
+        required: false
+        type: string
+        default: security-and-quality
+      codeql_timeout_minutes:
+        description: 'Per-language CodeQL job timeout in minutes.'
+        required: false
+        type: number
+        default: 30
+      runs_on:
+        description: 'Runner label. Default `ubuntu-latest`.'
+        required: false
+        type: string
+        default: ubuntu-latest
+      use_advanced_pat:
+        description: >-
+          When `true` AND the caller forwards a non-empty `scanning_pat`
+          secret (typically via `secrets: inherit` from a caller that
+          defines `secrets.SCANNING_PAT`), pass that PAT to the kit
+          composite as `github_token`. Enables the kit's advanced
+          posture probes (PS002 secret-scanning posture, PS003
+          Dependabot posture) which require `repo` + admin scope
+          beyond what the default `GITHUB_TOKEN` grants. When `false`
+          (default) or the secret is empty, the kit uses the runner's
+          default `github.token` — the standard baseline scan.
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      scanning_pat:
+        description: >-
+          PAT with `repo` + admin scope, used by the kit composite for
+          advanced posture probes (PS002/PS003). Optional. Ignored
+          unless `inputs.use_advanced_pat` is `true`. Easiest pass-through
+          from caller: `secrets: inherit` and define `SCANNING_PAT` at
+          the org or repo level.
+        required: false
+
+permissions: {}
+
+jobs:
+  scan:
+    name: bos-code-scanning-kit
+    if: inputs.enable_kit_composite
+    runs-on: ${{ inputs.runs_on }}
+    # Permissions are scoped at the job level rather than the workflow level
+    # so the calling workflow's effective-permissions cascade is explicit.
+    # `security-events: write` is required for the kit's SARIF upload;
+    # `actions: read` is required by codeql-action/upload-sarif for
+    # workflow context; `contents: read` is the checkout minimum.
+    permissions:
+      contents:        read
+      security-events: write
+      actions:         read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The kit doesn't push anything; revoke push capability so a
+          # supply-chain compromise of the kit can't escalate to repo
+          # writes via the runner's GITHUB_TOKEN.
+          persist-credentials: false
+
+      - name: Run BOS Code Scanning Kit
+        # `@v1` floats across v1.x.y for automatic patch + minor uptake.
+        # Bump this pin (or switch to a SHA) here to roll out a new
+        # major across every opted-in kit in one hub commit.
+        #
+        # `github_token`: when the caller opts into `use_advanced_pat`
+        # AND forwards a non-empty `scanning_pat` secret, pass that PAT
+        # so the kit can run PS002 (secret-scanning posture) and PS003
+        # (Dependabot posture) — both require `repo` + admin scope
+        # beyond the default `GITHUB_TOKEN`. Otherwise fall through to
+        # the runner's default `github.token` for the baseline scan.
+        uses: blackoutsecure/bos-code-scanning-kit@v1
+        with:
+          github_token:    ${{ (inputs.use_advanced_pat && secrets.scanning_pat != '') && secrets.scanning_pat || github.token }}
+          enable_posture:  ${{ inputs.enable_posture }}
+          enable_scanners: ${{ inputs.enable_scanners }}
+          enable_upload:   ${{ inputs.enable_upload }}
+          fail_on:         ${{ inputs.fail_on }}
+
+  # ---------------------------------------------------------------------------
+  # CodeQL matrix job — first-party `github/codeql-action` semantic analysis.
+  # Runs only when `codeql_languages` is a non-empty JSON array string. Each
+  # language gets its own parallel job (matrix), uploads its own SARIF, and
+  # surfaces under `Analyze (<language>)` in the Checks UI — conventional
+  # naming that external dashboards / required-check rules can key off.
+  # ---------------------------------------------------------------------------
+  codeql:
+    name: Analyze (${{ matrix.language }})
+    if: inputs.codeql_languages != ''
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.codeql_timeout_minutes }}
+    permissions:
+      # Required by github/codeql-action to upload SARIF to the
+      # calling repo's Security tab.
+      security-events: write
+      # Required by actions/checkout.
+      contents: read
+      # Documented "starter" permission in GitHub's CodeQL template.
+      # Not strictly required for public repos, but included for parity
+      # with the kit-side starter template that consumers receive via
+      # `marketplace-kit generate-policy codeql-workflow`.
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.codeql_languages) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          languages: ${{ matrix.language }}
+          queries:   ${{ inputs.codeql_queries }}
+
+      # No `Autobuild` step: the default supported languages here
+      # (`python`, `actions`) are interpreted / YAML and need no build.
+      # Consumers analyzing compiled languages should set
+      # `codeql_languages` to a build-capable set and add an inline
+      # build step in their own workflow that runs BEFORE this
+      # reusable — or invoke `github/codeql-action` directly.
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          category: "/language:${{ matrix.language }}"
