@@ -18,6 +18,24 @@
 #                                       optional post-deploy edge purge).
 #                                       Independent of the monitor/release
 #                                       path; can run on its own on every push.
+#   0. repo-security-scan.yml         — opt-in security scanning stage shared
+#                                       with `bos-marketplace-launchpad.yml`.
+#                                       Wraps `bos-code-scanning-kit@v1`
+#                                       (posture + scanners) AND
+#                                       `github/codeql-action` (matrix).
+#                                       Gated by `enable_security_scan` input,
+#                                       default `false`. Runs in PARALLEL
+#                                       with monitor (no `needs:`) and is
+#                                       INDEPENDENT of release — findings
+#                                       surface in the Security tab + (when
+#                                       `security_scan_fail_on: fail`) mark
+#                                       the workflow run failed, but do NOT
+#                                       block the deploy stages. This is the
+#                                       advisory model that matches Docker
+#                                       Scout's role inside `docker-build-push`.
+#                                       For hard-gated security scanning,
+#                                       run a separate PR-time caller using
+#                                       `repo-security-scan.yml` directly.
 #
 # Two canonical use cases:
 #
@@ -607,6 +625,69 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         type: boolean
         default: false
 
+      # ----- Security scan stage (opt-in) ----------------------------------
+      # Independent advisory stage: runs in parallel with `monitor` and
+      # has no `needs:` cascade into `release` or `cloudflare-pages`.
+      # Findings surface in the caller repo's Security tab via SARIF
+      # upload, and — when `security_scan_fail_on: fail` — a failing
+      # finding marks the workflow run failed, but does NOT block any
+      # deploy stage. Mirrors the Docker Scout pattern already in
+      # `docker-build-push.yml`: scanners are observational, deploy
+      # gating is via explicit toggles + the operator's eyeballs.
+      #
+      # Caller workflow MUST grant `security-events: write` + `actions:
+      # read` at workflow level so the permission cascade reaches both
+      # sub-jobs (the kit composite AND the CodeQL matrix) inside
+      # `repo-security-scan.yml`.
+      #
+      # The default `fail_on: never` is intentionally LOOSER than the
+      # Marketplace launchpad's `fail_on: fail` default — deploy
+      # pipelines are time-sensitive (cron-driven container releases,
+      # push-driven site deploys), and a posture rule misfire shouldn't
+      # mark an otherwise-clean release as failed. Override to `fail`
+      # in `.bos-launchpad.yaml` / caller `with:` once findings have
+      # been triaged.
+      enable_security_scan:
+        description: 'Enable consolidated security scanning (kit composite + CodeQL) via the launchpad. Caller MUST grant `security-events: write` + `actions: read` at workflow level. Default `false`.'
+        required: false
+        type: boolean
+        default: false
+      security_scan_fail_on:
+        description: 'Forwarded to the kit `fail_on`. `never` (default for deploy context) surfaces findings without marking the workflow failed; `fail` gates the workflow on findings (but still does NOT block the deploy stages — see header doc).'
+        required: false
+        type: string
+        default: never
+      security_scan_enable_kit_composite:
+        description: 'Run the published `bos-code-scanning-kit@v1` composite sub-job inside the wrapper. Default `true`. Set `false` for CodeQL-only mode.'
+        required: false
+        type: boolean
+        default: true
+      security_scan_enable_posture:
+        description: 'Forwarded to the kit. Run the posture audit step. Default `true`. Ignored when `security_scan_enable_kit_composite: false`.'
+        required: false
+        type: boolean
+        default: true
+      security_scan_enable_scanners:
+        description: 'Forwarded to the kit. Run the bundled scanners (actionlint / gitleaks / shellcheck). Default `true`. Ignored when `security_scan_enable_kit_composite: false`.'
+        required: false
+        type: boolean
+        default: true
+      security_scan_enable_upload:
+        description: 'Forwarded to the kit. Upload merged SARIF to GHAS. Default `true`. Ignored when `security_scan_enable_kit_composite: false`.'
+        required: false
+        type: boolean
+        default: true
+      security_scan_codeql_languages:
+        description: 'JSON array string of CodeQL languages (e.g. `[javascript-typescript]` for sites, empty for Dockerfile-only repos). Empty (default) skips the CodeQL sub-job entirely.'
+        required: false
+        type: string
+        default: ''
+      security_scan_codeql_queries:
+        description: 'CodeQL query suite. `security-and-quality` (default), `security-extended`, or `security`. Ignored when `security_scan_codeql_languages` is empty.'
+        required: false
+        type: string
+        default: security-and-quality
+
       # ----- Shared / advanced ---------------------------------------------
       platforms:
         description: 'Platform list reported in release notes.'
@@ -720,6 +801,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Stage 0 — Consolidated security scan (opt-in, advisory).
+  # Runs in parallel with `monitor` (no `needs:`). Has NO downstream
+  # `needs:` consumers — findings are advisory, not deploy-gating. See the
+  # top-of-file header doc for the full rationale.
+  #
+  # Caller MUST grant `security-events: write` + `actions: read` at workflow
+  # level so the permission cascade reaches both sub-jobs inside
+  # `repo-security-scan.yml` (the kit composite AND the CodeQL matrix).
+  # ---------------------------------------------------------------------------
+  security_scan:
+    name: Security scan
+    if: inputs.enable_security_scan
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/repo-security-scan.yml@main
+    with:
+      fail_on:              ${{ inputs.security_scan_fail_on }}
+      enable_kit_composite: ${{ inputs.security_scan_enable_kit_composite }}
+      enable_posture:       ${{ inputs.security_scan_enable_posture }}
+      enable_scanners:      ${{ inputs.security_scan_enable_scanners }}
+      enable_upload:        ${{ inputs.security_scan_enable_upload }}
+      codeql_languages:     ${{ inputs.security_scan_codeql_languages }}
+      codeql_queries:       ${{ inputs.security_scan_codeql_queries }}
+
   # ---------------------------------------------------------------------------
   # Stage 1 — detect upstream change (commits tracking file on the default branch).
   # `target_workflows` is left empty so we chain to the release job via `needs:`

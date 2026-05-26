@@ -15,10 +15,25 @@
 #                                       Routed for `pull_request`, `push`,
 #                                       and `workflow_dispatch` mode
 #                                       `name-check`.
-#   2. marketplace-codeql.yml         — opt-in CodeQL analysis (Python +
-#                                       Actions YAML by default). Routed
-#                                       for `pull_request` + `push`. Gated
-#                                       by `enable_codeql` input.
+#   2. repo-security-scan.yml         — opt-in security scanning stage.
+#                                       Wraps the published
+#                                       `blackoutsecure/bos-code-scanning-
+#                                       kit@v1` Marketplace Action
+#                                       (posture audit + bundled scanners:
+#                                       actionlint / gitleaks / shellcheck)
+#                                       AND `github/codeql-action`
+#                                       (matrix-parallel CodeQL analysis).
+#                                       Both produce SARIF that lands in
+#                                       the caller's Security tab via
+#                                       independent uploads. Routed for
+#                                       `pull_request` + `push`. Gated by
+#                                       `enable_security_scan` input;
+#                                       CodeQL within the stage is further
+#                                       gated by `security_scan_codeql_
+#                                       languages` being non-empty. Shared
+#                                       with the delivery `bos-launchpad`.
+#                                       reusable so a single wrapper bump
+#                                       propagates everywhere.
 #   3. marketplace-repo-guard.yml     — PR-time block on workflow files or
 #                                       other prohibited paths landing on
 #                                       `main`, plus required-files
@@ -44,11 +59,14 @@
 #   workflow_dispatch mode=name-check → ci      stage runs (name-check on)
 #
 # Per-job permissions are scoped least-privilege at the sub-reusable level:
-#   * ci      — `contents: read` only.
-#   * codeql  — `security-events: write`, `contents: read`, `actions: read`
-#               (only when `enable_codeql: true`).
-#   * guard   — `contents: read`, `pull-requests: read`.
-#   * release — `contents: write`.
+#   * ci            — `contents: read` only.
+#   * security_scan — `security-events: write`, `contents: read`,
+#                     `actions: read` (only when
+#                     `enable_security_scan: true`). Covers BOTH the kit
+#                     composite sub-job AND the CodeQL matrix sub-job
+#                     inside the wrapper.
+#   * guard         — `contents: read`, `pull-requests: read`.
+#   * release       — `contents: write`.
 #
 # Concurrency is the CALLER's responsibility — it owns the event subscription
 # and is what GitHub schedules. Recommended caller pattern: scope concurrency
@@ -294,27 +312,65 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         type: string
         default: 'skip'
 
-      # ----- CodeQL stage (opt-in) -----
-      # When `enable_codeql: true`, the launchpad runs the shared
-      # `marketplace-codeql.yml` reusable against the consumer kit on
-      # the same events that drive the `ci` stage (pull_request + push
-      # to dev, optionally workflow_dispatch). The caller workflow MUST
-      # grant `security-events: write` and `actions: read` at workflow
-      # level so the permission cascade reaches the analyze sub-job.
-      # Default is `false` so existing kits that haven't opted in see
-      # no behavior change.
-      enable_codeql:
-        description: 'Enable consolidated CodeQL analysis via the launchpad. Caller MUST grant `security-events: write` + `actions: read` at workflow level. Default `false`.'
+      # ----- Security scan stage (opt-in) -----
+      # When `enable_security_scan: true`, the launchpad runs the
+      # consolidated `repo-security-scan.yml` wrapper against the
+      # consumer kit on the same events as `ci` (pull_request + push to
+      # dev). The wrapper has TWO independent sub-jobs:
+      #   * `scan`   — the published `blackoutsecure/bos-code-scanning-
+      #               kit@v1` composite: posture audit + bundled scanners
+      #               (actionlint / gitleaks / shellcheck) + unified
+      #               SARIF upload. Gated by `security_scan_enable_kit_
+      #               composite` (default true).
+      #   * `codeql` — `github/codeql-action` matrix analysis. Gated by
+      #               `security_scan_codeql_languages` being non-empty
+      #               (default empty string = skip).
+      # Producer-kit pattern: kits that produce the published
+      # `bos-code-scanning-kit@v1` should set
+      # `security_scan_enable_kit_composite: false` so they don't run
+      # the published @v1 against their own dev source while still
+      # getting CodeQL coverage via the wrapper.
+      # The caller workflow MUST grant `security-events: write` and
+      # `actions: read` at workflow level so the permission cascade
+      # reaches BOTH sub-jobs inside the wrapper. Default is `false`
+      # so existing kits that haven't opted in see no behavior change.
+      enable_security_scan:
+        description: 'Enable consolidated security scanning (kit composite + CodeQL) via the launchpad. Caller MUST grant `security-events: write` + `actions: read` at workflow level. Default `false`.'
         required: false
         type: boolean
         default: false
-      codeql_languages:
-        description: 'JSON array string of CodeQL languages. Default `[python, actions]` covers Python source + workflow / composite-action YAML.'
+      security_scan_fail_on:
+        description: 'Forwarded to the kit `fail_on`. `fail` (default) gates the build on findings; `never` only surfaces them.'
         required: false
         type: string
-        default: '[python, actions]'
-      codeql_queries:
-        description: 'CodeQL query suite. `security-and-quality` (default), `security-extended`, or `security`.'
+        default: fail
+      security_scan_enable_kit_composite:
+        description: 'Run the published `bos-code-scanning-kit@v1` composite sub-job inside the wrapper. Default `true`. Set `false` for producer-kit callers that want CodeQL only.'
+        required: false
+        type: boolean
+        default: true
+      security_scan_enable_posture:
+        description: 'Forwarded to the kit. Run the posture audit step. Default `true`. Ignored when `security_scan_enable_kit_composite: false`.'
+        required: false
+        type: boolean
+        default: true
+      security_scan_enable_scanners:
+        description: 'Forwarded to the kit. Run the bundled scanners. Default `true`. Ignored when `security_scan_enable_kit_composite: false`.'
+        required: false
+        type: boolean
+        default: true
+      security_scan_enable_upload:
+        description: 'Forwarded to the kit. Upload merged SARIF to GHAS. Default `true`. Ignored when `security_scan_enable_kit_composite: false`.'
+        required: false
+        type: boolean
+        default: true
+      security_scan_codeql_languages:
+        description: 'JSON array string of CodeQL languages (e.g. `[python, actions]`). Empty (default) skips the CodeQL sub-job entirely.'
+        required: false
+        type: string
+        default: ''
+      security_scan_codeql_queries:
+        description: 'CodeQL query suite. `security-and-quality` (default), `security-extended`, or `security`. Ignored when `security_scan_codeql_languages` is empty.'
         required: false
         type: string
         default: security-and-quality
@@ -528,28 +584,36 @@ jobs:
       branding_preview_artifact_retention_days: ${{ inputs.branding_preview_artifact_retention_days }}
 
   # ---------------------------------------------------------------------------
-  # Stage 1.5 — CodeQL analysis (opt-in).
-  # Fires on the same events as `ci` so PR-time and post-merge runs both get
-  # coverage; intentionally NOT on `pull_request_target` (the guard stage —
-  # the dev PR's CodeQL run has already covered the code by the time the
-  # main-targeting promote PR exists) and NOT on `dispatched_mode == 'release'`
-  # (release just promotes already-checked code). Caller MUST grant
-  # `security-events: write` + `actions: read` at workflow level for the
-  # SARIF upload to succeed; defaults are tuned for Python composite kits.
+  # Stage 1.5 — Consolidated security scan (opt-in).
+  # Wraps two independent sub-jobs in `repo-security-scan.yml`:
+  #   * `scan`   — published `bos-code-scanning-kit@v1` composite.
+  #   * `codeql` — `github/codeql-action` matrix analysis.
+  # Fires on the same events as `ci` so PR-time and post-merge runs both
+  # get coverage; intentionally NOT on `pull_request_target` (guard stage
+  # — the dev PR's scan already covered the code) and NOT on
+  # `dispatched_mode == 'release'` (release just promotes already-checked
+  # code). Caller MUST grant `security-events: write` + `actions: read`
+  # at workflow level so the cascade reaches BOTH sub-jobs inside the
+  # wrapper.
   # ---------------------------------------------------------------------------
-  codeql:
-    name: CodeQL
+  security_scan:
+    name: Security scan
     if: >-
-      inputs.enable_codeql
+      inputs.enable_security_scan
       && (inputs.event_name == 'pull_request' || inputs.event_name == 'push')
     permissions:
       security-events: write
       contents: read
       actions: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/marketplace-codeql.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/repo-security-scan.yml@main
     with:
-      languages: ${{ inputs.codeql_languages }}
-      queries:   ${{ inputs.codeql_queries }}
+      fail_on:              ${{ inputs.security_scan_fail_on }}
+      enable_kit_composite: ${{ inputs.security_scan_enable_kit_composite }}
+      enable_posture:       ${{ inputs.security_scan_enable_posture }}
+      enable_scanners:      ${{ inputs.security_scan_enable_scanners }}
+      enable_upload:        ${{ inputs.security_scan_enable_upload }}
+      codeql_languages:     ${{ inputs.security_scan_codeql_languages }}
+      codeql_queries:       ${{ inputs.security_scan_codeql_queries }}
 
   # ---------------------------------------------------------------------------
   # Stage 2 — Marketplace repo compliance guard.

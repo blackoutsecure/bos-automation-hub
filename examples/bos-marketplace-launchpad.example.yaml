@@ -155,6 +155,30 @@ jobs:
       # require_security_devops:      'skip'   # MS001
       # require_scorecard:            'skip'   # SR001
 
+      # ----- Consolidated security scan (opt-in) -----
+      # Adds a `security_scan` stage that runs in parallel with `ci` on
+      # `pull_request` + `push` events. Wraps the published
+      # `blackoutsecure/bos-code-scanning-kit@v1` composite (posture +
+      # bundled scanners: actionlint / gitleaks / shellcheck + unified
+      # SARIF upload) AND `github/codeql-action` (matrix-parallel
+      # CodeQL). Both upload SARIF to this repo's Security tab.
+      #
+      # The CALLER workflow (this file) MUST grant the matching
+      # permissions at workflow-level — the cascade reaches the two
+      # sub-jobs inside `repo-security-scan.yml`. Add to the
+      # workflow-level `permissions:` block above:
+      #   security-events: write
+      #   actions:         read
+      #
+      # enable_security_scan:               true
+      # security_scan_fail_on:              fail            # `fail` (default) gates the build; `never` audits only.
+      # security_scan_enable_kit_composite: true            # Set `false` for CodeQL-only mode (producer-kit pattern).
+      # security_scan_enable_posture:       true
+      # security_scan_enable_scanners:      true
+      # security_scan_enable_upload:        true
+      # security_scan_codeql_languages:     '[python, actions]'   # Empty (default) skips CodeQL entirely.
+      # security_scan_codeql_queries:       'security-and-quality'
+
       # ----- Release dispatch inputs (ignored for non-release events) -----
       tag_name:      ${{ inputs.tag_name || '' }}
       dry_run:       ${{ inputs.dry_run || false }}
