@@ -259,6 +259,32 @@ jobs:
       removed_paths:      ${{ steps.promote.outputs.removed_paths }}
       removed_violations: ${{ steps.promote.outputs.removed_violations }}
     steps:
+      # Fail-fast UX guard for the most common operator mistake:
+      # dispatching `mode: release` from the caller without filling
+      # in the `tag_name` field. Per-repo callers MUST declare the
+      # workflow_dispatch `tag_name` input as `required: false`
+      # because the same dispatch form also supports `mode:
+      # name-check`, which doesn't take a tag — so the empty-string
+      # check has to happen at runtime, not at the input-schema
+      # layer. Without this step the same condition is eventually
+      # caught ~3 reusable layers deeper inside the `promote`
+      # composite Action, where the error ("input 'tag_name' is
+      # required and must be a single bare tag name (got: '')") is
+      # technically correct but completely opaque to the operator.
+      # Shape validation (SemVer regex, etc.) is intentionally NOT
+      # duplicated here — that lives in the `promote` composite and
+      # stays single-sourced there.
+      - name: Validate dispatch inputs
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${TAG_NAME}" ]; then
+            echo "::error title=Missing tag_name::workflow_dispatch with mode=release requires a SemVer 'tag_name' (e.g. v1.2.0). Re-dispatch the workflow and populate the 'tag_name' field."
+            exit 1
+          fi
+
       - name: Checkout source_branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
