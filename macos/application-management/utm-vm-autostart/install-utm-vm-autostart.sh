@@ -20,9 +20,9 @@
 #   auto-start. Users without it will still trigger the
 #   LaunchAgent at login, but the helper will wait
 #   $UTM_AUTOSTART_BOOT_TIMEOUT seconds for UTM.app, fail to
-#   find it, log an error to /tmp/bos-utm-vm-autostart.log, and
-#   exit non-zero -- so the Login Item is effectively the opt-in
-#   switch: no Login Item, no VM autostart for that user.
+#   find it, log an error to /var/log/bos-utm-vm-autostart.log,
+#   and exit non-zero -- so the Login Item is effectively the
+#   opt-in switch: no Login Item, no VM autostart for that user.
 #
 #   For each user that should have VMs auto-start, sign in as
 #   that user and do ONE of the following:
@@ -52,8 +52,8 @@
 #   --check         - read-only audit. Exit 0 = all PASS, 2 = drift
 #   --uninstall     - bootout the LaunchAgent for the active console
 #                     user, then remove the helper + plist. Idempotent
-#                     (succeeds even if nothing is installed). Runtime
-#                     and install logs are retained for diagnostics.
+#                     (succeeds even if nothing is installed). The
+#                     shared log is retained for diagnostics.
 #
 # Idempotency:
 #   Re-running with the same configuration is a no-op: the helper
@@ -61,24 +61,58 @@
 #   are reasserted, and the LaunchAgent is only re-bootstrapped
 #   when content actually changed.
 #
-# Selection model (set ONE of these at install time):
-#   UTM_AUTOSTART_VMS              Explicit list: newline- or comma-
-#                                  separated VM names, started in the
-#                                  order given. Highest precedence.
-#   UTM_AUTOSTART_MATCH            Dynamic match: POSIX ERE regex tested
+# Selection model:
+#   The helper picks VMs to start using an explicit name list, a regex
+#   matched against 'utmctl list', or both. The default mode 'auto'
+#   accepts either or both inputs and falls back from list -> regex at
+#   runtime; the strict modes 'list' / 'regex' force exactly one input
+#   and error on conflicts.
+#
+#   UTM_AUTOSTART_MODE             Selection mode:
+#                                    list   -- force list mode. Use
+#                                              UTM_AUTOSTART_VMS (or
+#                                              the baked-in 'defaultvms').
+#                                              Errors if MATCH is also set.
+#                                    regex  -- force regex mode. Use
+#                                              UTM_AUTOSTART_MATCH.
+#                                              Errors if MATCH is unset
+#                                              or if VMS is also set.
+#                                    auto   -- (default) accept either
+#                                              or both inputs. At login
+#                                              the helper:
+#                                                1. tries the explicit
+#                                                   list (only counting
+#                                                   names that exist in
+#                                                   'utmctl list'); if
+#                                                   any match -> done.
+#                                                2. otherwise falls
+#                                                   back to the regex.
+#                                                3. if both yield zero,
+#                                                   logs 'no VMs found'
+#                                                   and exits 0.
+#                                              Setting both VMS and
+#                                              MATCH is only allowed in
+#                                              this mode.
+#   UTM_AUTOSTART_VMS              Explicit list input: newline- or
+#                                  comma-separated VM names, started
+#                                  in the order given.
+#   UTM_AUTOSTART_MATCH            Regex input: POSIX ERE tested
 #                                  against the name column of
-#                                  `utmctl list` at every login. Picked
-#                                  up automatically when VMs are added,
-#                                  removed, or renamed in the UTM GUI.
+#                                  `utmctl list` at every login.
 #                                    Examples:
 #                                      ^prod-                       (all prod-* VMs)
 #                                      \[autostart\]$              (suffix tag)
-#   UTM_AUTOSTART_EXCLUDE          Optional ERE; dynamic-mode names
-#                                  matching this are skipped.
-#   (neither set)                  Falls back to the `defaultvms` variable
-#                                  in the variables block below. If that
-#                                  is also empty (the default), the
-#                                  installer aborts with an error.
+#   UTM_AUTOSTART_EXCLUDE          Optional ERE; regex names matching
+#                                  this are skipped (applies whenever
+#                                  the regex branch runs, including in
+#                                  the auto-mode fallback).
+#   (no selection input)           Auto mode falls back to the
+#                                  `defaultvms` variable in the
+#                                  variables block below. If that is
+#                                  also empty (the default), the
+#                                  installer still completes but the
+#                                  helper will log 'no VMs found' at
+#                                  every login until selection is set.
 #
 # Common runtime tuning (env vars, evaluated at install time):
 #   UTM_AUTOSTART_DELAY_SECONDS    Delay between successive VM starts.
@@ -131,9 +165,11 @@ appname="UTM VM Autostart"
 label="app.blackoutsecure.utm-vm-autostart"
 helperpath="/usr/local/bin/bos-utm-vm-autostart"
 plistpath="/Library/LaunchAgents/${label}.plist"
-log="/var/log/installutmvmautostart.log"
-runtimelog="/tmp/bos-utm-vm-autostart.log"
-runtimeerr="/tmp/bos-utm-vm-autostart.err.log"
+# Single shared log for both the installer (running as root) and the
+# per-user LaunchAgent helper (running in the login user's gui domain).
+# Created 0666 by the installer so the user-context helper can append --
+# see the `touch + chmod` block right before `exec > >(tee -a "$log")`.
+log="/var/log/bos-utm-vm-autostart.log"
 
 # ----- Ownership / permissions applied to installed files -----
 fileowner="root:wheel"
@@ -151,7 +187,18 @@ utmprocess="UTM"
 # Space-separated list of utmctl candidates, in lookup order.
 utmctlpaths="/usr/local/bin/utmctl /opt/homebrew/bin/utmctl ${utmappbinary}"
 
-# ----- Selection defaults (which VMs / which users) -----
+# ----- Selection defaults (which mode / which VMs / which users) -----
+# defaultmode: baked-in default for UTM_AUTOSTART_MODE. One of:
+#   auto   -- (default) accept either UTM_AUTOSTART_VMS, UTM_AUTOSTART_MATCH,
+#             or BOTH. At login the helper tries the explicit list first
+#             (only counting names that exist in 'utmctl list') and falls
+#             back to the regex if the list yielded nothing.
+#   list   -- force list mode (UTM_AUTOSTART_VMS / defaultvms).
+#             Errors if UTM_AUTOSTART_MATCH is also passed in.
+#   regex  -- force regex mode (UTM_AUTOSTART_MATCH). Errors if
+#             UTM_AUTOSTART_MATCH is unset, or UTM_AUTOSTART_VMS is
+#             also passed in.
+defaultmode="auto"
 # defaultvms: optional newline-separated baked-in VM list. Leave empty
 # to require callers to provide UTM_AUTOSTART_VMS or UTM_AUTOSTART_MATCH;
 # set to, e.g., $'web-vm\napi-vm\ndb-vm' to embed a deployment-specific
@@ -221,13 +268,20 @@ for arg in "$@"; do
                nothing is installed. Runtime + install logs are left
                in place as a diagnostic audit trail.
 
-Environment variables (apply + check) - set ONE of:
-  UTM_AUTOSTART_VMS             explicit list (newline- or comma-separated)
-  UTM_AUTOSTART_MATCH           regex (POSIX ERE) matched against
-                                'utmctl list' at every login. Dynamic:
-                                picks up new/renamed VMs without re-install.
-  UTM_AUTOSTART_EXCLUDE         optional ERE; matching names are skipped
-                                (only relevant with UTM_AUTOSTART_MATCH)
+Environment variables (apply + check):
+  UTM_AUTOSTART_MODE            Force selection mode: 'list' | 'regex' |
+                                'auto' (default: ${defaultmode}). 'auto'
+                                infers from which selection env var is
+                                set; 'list' / 'regex' fail fast if the
+                                wrong input combination is provided.
+  UTM_AUTOSTART_VMS             List-mode input: VM names, newline- or
+                                comma-separated, started in order.
+  UTM_AUTOSTART_MATCH           Regex-mode input: POSIX ERE matched
+                                against 'utmctl list' at every login.
+                                Picks up new/renamed VMs without
+                                re-install.
+  UTM_AUTOSTART_EXCLUDE         Optional ERE; matching names are skipped
+                                (only relevant in regex mode)
 Common:
   UTM_AUTOSTART_DELAY_SECONDS   delay between VM starts (default: ${defaultdelay})
   UTM_AUTOSTART_BOOT_TIMEOUT    max wait for UTM.app (default: ${defaultboottimeout})
@@ -247,48 +301,86 @@ Common:
     esac
 done
 
-# Mode resolution (precedence: explicit env list > regex match > baked-in default).
-autostart_mode="explicit"
+# Normalise UTM_AUTOSTART_MODE -> 'auto' | 'list' | 'regex'. Validated
+# strictly: no synonyms, so a typo errors fast at install time rather
+# than silently picking the wrong selection branch.
+automode_raw="${UTM_AUTOSTART_MODE:-${defaultmode}}"
+case "$(printf '%s' "$automode_raw" | tr '[:upper:]' '[:lower:]')" in
+    auto)  automode="auto"  ;;
+    list)  automode="list"  ;;
+    regex) automode="regex" ;;
+    *) echo "ERROR: UTM_AUTOSTART_MODE must be one of: auto, list, regex (got '$automode_raw')"; exit 1 ;;
+esac
+
+# Mode resolution.
+#
+# automode='list'  -> use UTM_AUTOSTART_VMS (or defaultvms). Conflicts
+#                     with UTM_AUTOSTART_MATCH being set.
+# automode='regex' -> use UTM_AUTOSTART_MATCH. Conflicts with
+#                     UTM_AUTOSTART_VMS being set; MATCH must be non-empty.
+# automode='auto'  -> bake EVERYTHING that's configured into the helper.
+#                     At login the helper tries the explicit list first
+#                     (only counting names that exist in 'utmctl list'
+#                     output) and falls back to the regex if the list
+#                     yielded nothing. If both yield nothing, the helper
+#                     logs "no VMs found" and exits 0. This is the only
+#                     mode where setting both VMS and MATCH is allowed.
+autostart_mode=""
 match_pattern=""
 exclude_pattern=""
 vmsraw=""
-if [[ -n "${UTM_AUTOSTART_VMS:-}" ]]; then
-    autostart_mode="explicit"
-    vmsraw="$UTM_AUTOSTART_VMS"
-elif [[ -n "${UTM_AUTOSTART_MATCH:-}" ]]; then
-    autostart_mode="dynamic"
+
+if [[ "$automode" == "list" ]]; then
+    if [[ -n "${UTM_AUTOSTART_MATCH:-}" ]]; then
+        echo "ERROR: UTM_AUTOSTART_MODE=list conflicts with UTM_AUTOSTART_MATCH being set."
+        echo "       Unset UTM_AUTOSTART_MATCH, or set UTM_AUTOSTART_MODE=auto to enable list-then-regex fallback."
+        exit 1
+    fi
+    autostart_mode="list"
+    vmsraw="${UTM_AUTOSTART_VMS:-$defaultvms}"
+elif [[ "$automode" == "regex" ]]; then
+    if [[ -n "${UTM_AUTOSTART_VMS:-}" ]]; then
+        echo "ERROR: UTM_AUTOSTART_MODE=regex conflicts with UTM_AUTOSTART_VMS being set."
+        echo "       Unset UTM_AUTOSTART_VMS, or set UTM_AUTOSTART_MODE=auto to enable list-then-regex fallback."
+        exit 1
+    fi
+    if [[ -z "${UTM_AUTOSTART_MATCH:-}" ]]; then
+        echo "ERROR: UTM_AUTOSTART_MODE=regex requires UTM_AUTOSTART_MATCH to be set."
+        exit 1
+    fi
+    autostart_mode="regex"
     match_pattern="$UTM_AUTOSTART_MATCH"
     exclude_pattern="${UTM_AUTOSTART_EXCLUDE:-}"
-elif [[ -n "$defaultvms" ]]; then
-    autostart_mode="explicit"
-    vmsraw="$defaultvms"
 else
-    # No VM selection was provided. Install everything anyway so the
-    # helper + LaunchAgent are in place, but warn loudly: the helper
-    # will be a no-op at every login until the operator re-runs the
-    # installer with UTM_AUTOSTART_VMS / UTM_AUTOSTART_MATCH set (or
-    # edits 'defaultvms' above). Suppressed for --uninstall since the
-    # VM selection is irrelevant when tearing things down.
-    autostart_mode="explicit"
-    vmsraw=""
-    if [[ "$mode" != "uninstall" ]]; then
+    # automode == "auto" -- bake whatever's configured. Both VMS and
+    # MATCH may be set simultaneously; the helper decides at runtime.
+    autostart_mode="auto"
+    vmsraw="${UTM_AUTOSTART_VMS:-$defaultvms}"
+    match_pattern="${UTM_AUTOSTART_MATCH:-}"
+    exclude_pattern="${UTM_AUTOSTART_EXCLUDE:-}"
+    if [[ -z "$vmsraw" && -z "$match_pattern" && "$mode" != "uninstall" ]]; then
+        # No selection of any kind. Still proceed so the helper +
+        # LaunchAgent get installed; the helper will log "no VMs
+        # found" at every login until selection is provided.
         printf '%s\n' >&2 "WARNING: no VMs configured.
 
 Proceeding with install so the helper and LaunchAgent are in place,
 but no VMs will be started at login until selection is provided.
 
-To enable autostart, re-run this installer with one of:
+To enable autostart, re-run this installer with one (or both) of:
 
-  UTM_AUTOSTART_VMS='vm-one,vm-two'    (explicit list; comma- or newline-separated)
-  UTM_AUTOSTART_MATCH='^prod-'         (POSIX ERE matched against 'utmctl list' at login)
+  UTM_AUTOSTART_VMS='vm-one,vm-two'    (explicit name list)
+  UTM_AUTOSTART_MATCH='^prod-'         (POSIX ERE matched against 'utmctl list')
 
-Or edit the 'defaultvms' variable at the top of this script to bake in
-a deployment-specific fallback list. Try --help for the full list of
-supported environment variables."
+In auto mode (default), setting both makes the helper try the list
+first and fall back to the regex if no list names actually exist on
+this Mac at login. Edit the 'defaultvms' variable at the top of this
+script to bake in a deployment-specific fallback list. Try --help for
+the full list of supported environment variables."
     fi
 fi
 
-# Normalise the explicit list (only consulted when autostart_mode == "explicit").
+# Normalise the explicit name list (only consulted when autostart_mode == "list").
 vmlist="$(printf '%s\n' "$vmsraw" | tr ',' '\n' \
     | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
     | grep -v '^$' || true)"
@@ -308,8 +400,25 @@ if ! [[ "$waitpollinterval" =~ ^[0-9]+$ ]] || (( waitpollinterval < 1 )); then
 fi
 
 # start logging (console + file)
-
-exec > >(tee -a "$log") 2>&1
+#
+# The same $log path is shared with the per-user LaunchAgent helper, so
+# ensure it exists and is appendable by non-root callers before tee'ing
+# into it. Without 0666 here the helper (running as the logged-in user)
+# would fail to append on first run after a fresh install.
+#
+# Gated on being root because:
+#   - apply / uninstall already require root and will hit their own
+#     root assertion shortly after this block, so writing to $log is
+#     guaranteed to succeed here.
+#   - --check (read-only) is usable as a regular user; in that case we
+#     skip the prep + tee and stay on stdout-only to keep output clean.
+if [[ "$(id -u)" -eq 0 ]]; then
+    mkdir -p "$(dirname "$log")"
+    touch "$log"
+    chown "$fileowner" "$log"
+    chmod 0666 "$log"
+    exec > >(tee -a "$log") 2>&1
+fi
 
 # Optional LOG_LEVEL gate: trace|debug|info|warn|error. Default 'info'
 # keeps existing output unchanged. 'debug' adds log_debug lines; 'trace'
@@ -335,7 +444,7 @@ echo "# $(date) | Starting $banner_verb of $appname"
 echo "##############################################################"
 echo ""
 
-if [[ "$autostart_mode" == "explicit" && -z "$vmlist" && "$mode" != "uninstall" ]]; then
+if [[ "$autostart_mode" == "list" && -z "$vmlist" && "$mode" != "uninstall" ]]; then
     log_warn "no VM names provided; helper will be a no-op at login. Re-run with UTM_AUTOSTART_VMS (newline- or comma-separated) or UTM_AUTOSTART_MATCH to enable autostart."
 fi
 
@@ -343,10 +452,13 @@ fi
 # Each name / pattern is single-quote-escaped (embedded ' -> '\'').
 escape_sq() { printf "%s" "$1" | sed "s/'/'\\\\''/g"; }
 
-# In explicit mode, render the EXPLICIT_VMS array body. In dynamic mode
-# the array stays empty and the helper drives selection off the regex.
+# Render the EXPLICIT_VMS array body. Populated whenever $vmlist
+# is non-empty -- that is, list mode (always) and auto mode (when
+# UTM_AUTOSTART_VMS or defaultvms is set). Regex-only configurations
+# leave the array empty so the helper's auto-fallback knows to skip
+# straight to the regex branch.
 explicit_block=""
-if [[ "$autostart_mode" == "explicit" ]]; then
+if [[ -n "$vmlist" ]]; then
     while IFS= read -r vm; do
         [[ -z "$vm" ]] && continue
         explicit_block+="    '$(escape_sq "$vm")'"$'\n'
@@ -380,16 +492,37 @@ helper_content="#!/bin/bash
 # and re-run; do not edit this file directly.
 #
 # Starts UTM virtual machines via utmctl once the UTM.app process
-# is running. Selection is either an explicit list (baked in at
-# install time) or a regex matched against 'utmctl list' output
-# at every login.
+# is running. Selection is one of:
+#   list  -- start a fixed set of VM names baked in at install time.
+#   regex -- match a POSIX ERE against 'utmctl list' at every login.
+#   auto  -- try the explicit list first (only counting names that
+#            actually exist in 'utmctl list'); if it yields nothing,
+#            fall back to the regex; if both yield nothing, log
+#            'no VMs found' and exit 0.
+#
+# SCOPE -- runtime only.
+#   This helper does NOT inspect, verify, or repair its own
+#   install state. It assumes the installer (re-run
+#   install-utm-vm-autostart.sh as root) has placed it at the
+#   correct path with the correct permissions. At login time
+#   the helper does only the runtime work needed to start the
+#   configured VMs:
+#     1. Honour USER_EXCLUDE (skip on excluded user accounts)
+#     2. Locate utmctl
+#     3. Wait for UTM.app to be running (per-user GUI app)
+#     4. Resolve which VMs to start (list -> regex fallback in auto)
+#     5. Log a 'Detected N VM(s) ...' summary line for debugging
+#     6. For each: skip if already running, else 'utmctl start'
+#   Anything beyond that (file integrity, ownership, plist
+#   shape, etc.) belongs to the installer's pre-flight audit,
+#   not here. Keep this script lean.
 #
 # Usage: bos-utm-vm-autostart [--dry-run|--help]
 #   --dry-run   Resolve the start list and print what would be
 #               started, without invoking 'utmctl start'.
 # =============================================================
 
-LOGFILE=\"${runtimelog}\"
+LOGFILE="${log}"
 BOOT_TIMEOUT=${boottimeout}
 WAIT_POLL_INTERVAL=${waitpollinterval}
 DELAY=${delaybetween}
@@ -489,30 +622,123 @@ status_of() {
     printf 'unknown'
 }
 
-# Build the wanted list in start order.
-wanted=()
-if [[ \"\$AUTOSTART_MODE\" == \"explicit\" ]]; then
+# --- VM resolution helpers ---
+#
+# populate_wanted_from_list_strict:
+#   Take EXPLICIT_VMS verbatim. Used in forced 'list' mode -- preserves
+#   the original semantic that unknown VM names get attempted (and
+#   utmctl reports the error per-VM) rather than silently dropped.
+#
+# populate_wanted_from_list_detect:
+#   Take EXPLICIT_VMS but only keep names that currently exist in
+#   'utmctl list' output. Used in 'auto' mode so we can tell whether
+#   the list resolved to anything and decide whether to fall back to
+#   the regex.
+#
+# populate_wanted_from_regex:
+#   Walk the cached list sorted by name; apply MATCH / EXCLUDE bash
+#   EREs. Used in forced 'regex' mode AND as the 'auto' fallback.
+populate_wanted_from_list_strict() {
+    wanted=()
     for vm in \"\${EXPLICIT_VMS[@]}\"; do
         wanted+=(\"\$vm\")
     done
-else
-    # Walk the cached list sorted by name; include/exclude with bash ERE.
+}
+
+populate_wanted_from_list_detect() {
+    wanted=()
+    local vm s
+    for vm in \"\${EXPLICIT_VMS[@]}\"; do
+        s=\"\$(status_of \"\$vm\")\"
+        if [[ \"\$s\" != \"unknown\" ]]; then
+            wanted+=(\"\$vm\")
+        else
+            log \"  auto/list: '\$vm' not present in 'utmctl list' (skipped)\"
+        fi
+    done
+}
+
+populate_wanted_from_regex() {
+    wanted=()
+    local status name
     while IFS=\$'\t' read -r status name; do
         [[ -z \"\$name\" ]] && continue
         if [[ -n \"\$MATCH\"   && ! \"\$name\" =~ \$MATCH   ]]; then continue; fi
         if [[ -n \"\$EXCLUDE\" &&   \"\$name\" =~ \$EXCLUDE ]]; then continue; fi
         wanted+=(\"\$name\")
     done < <(printf '%s\n' \"\$list_cache\" | sort -t \$'\t' -k2,2)
-fi
+}
 
+# Format \${wanted[@]} as 'a, b, c' for log output.
+join_names() {
+    local sep=\"\" out=\"\" n
+    for n in \"\${wanted[@]}\"; do
+        out+=\"\${sep}\${n}\"
+        sep=\", \"
+    done
+    printf '%s' \"\$out\"
+}
+
+# Build the wanted list. In 'auto' the helper tries the explicit list
+# first (only counting names that actually exist in 'utmctl list'),
+# then falls back to the regex; if both yield nothing, 'wanted' stays
+# empty and the helper logs 'no VMs found' and exits 0.
 log \"==== UTM VM autostart run begin (mode=\$AUTOSTART_MODE, dry_run=\$DRY_RUN) ====\"
 
-if [[ \${#wanted[@]} -eq 0 ]]; then
-    if [[ \"\$AUTOSTART_MODE\" == \"dynamic\" ]]; then
-        log \"No VMs matched MATCH='\$MATCH' EXCLUDE='\$EXCLUDE'; nothing to do.\"
-    else
-        log \"Explicit VM list is empty; nothing to do.\"
-    fi
+wanted=()
+detected_method=\"\$AUTOSTART_MODE\"
+
+case \"\$AUTOSTART_MODE\" in
+    list)
+        populate_wanted_from_list_strict
+        ;;
+    regex)
+        populate_wanted_from_regex
+        ;;
+    auto)
+        if (( \${#EXPLICIT_VMS[@]} > 0 )); then
+            log \"Auto mode: trying explicit list first (\${#EXPLICIT_VMS[@]} candidate name(s) baked in)\"
+            populate_wanted_from_list_detect
+            if (( \${#wanted[@]} > 0 )); then
+                detected_method=\"list\"
+                log \"Auto mode: explicit list matched \${#wanted[@]} existing VM(s).\"
+            else
+                log \"Auto mode: none of the explicit names exist in 'utmctl list'; falling back to regex.\"
+            fi
+        else
+            log \"Auto mode: no explicit names baked in; skipping straight to regex.\"
+        fi
+        if (( \${#wanted[@]} == 0 )) && [[ -n \"\$MATCH\" ]]; then
+            log \"Auto mode: trying regex MATCH='\$MATCH' EXCLUDE='\$EXCLUDE'\"
+            populate_wanted_from_regex
+            if (( \${#wanted[@]} > 0 )); then
+                detected_method=\"regex\"
+                log \"Auto mode: regex matched \${#wanted[@]} VM(s).\"
+            fi
+        fi
+        if (( \${#wanted[@]} == 0 )); then
+            detected_method=\"none\"
+        fi
+        ;;
+esac
+
+# Always log the detected wanted list for debugging visibility -- even
+# in forced list/regex modes you get a single summary line showing
+# what was resolved before any 'utmctl start' fires.
+if (( \${#wanted[@]} > 0 )); then
+    log \"Detected \${#wanted[@]} VM(s) for autostart (via \$detected_method): \$(join_names)\"
+else
+    case \"\$AUTOSTART_MODE\" in
+        auto)
+            log \"No VMs specified/found via either method (explicit list candidates=\${#EXPLICIT_VMS[@]}, regex MATCH='\$MATCH' EXCLUDE='\$EXCLUDE'). Nothing to autostart.\"
+            ;;
+        list)
+            log \"List mode: EXPLICIT_VMS is empty. Nothing to autostart.\"
+            ;;
+        regex)
+            log \"Regex mode: no VMs matched MATCH='\$MATCH' EXCLUDE='\$EXCLUDE'. Nothing to autostart.\"
+            ;;
+    esac
     log \"==== UTM VM autostart run end ====\"
     exit 0
 fi
@@ -561,107 +787,163 @@ plist_content="<?xml version=\"1.0\" encoding=\"UTF-8\"?>
     <true/>
 
     <key>StandardOutPath</key>
-    <string>${runtimelog}</string>
+    <string>${log}</string>
 
     <key>StandardErrorPath</key>
-    <string>${runtimeerr}</string>
+    <string>${log}</string>
 </dict>
 </plist>"
+
+# =============================================================
+# Pre-flight audit (shared by --check and apply)
+#
+# Inspects every install target location and compares against the
+# rendered desired state (helper_content / plist_content built
+# above). Reports PASS / FAIL per check and sets two globals the
+# caller reads to decide what to do next:
+#
+#   audit_pass -- count of PASS lines
+#   audit_fail -- count of FAIL lines
+#
+# Pure reporter: never writes, never mutates, never exits. Both
+# --check (read-only mode) and apply (uses it as a pre-flight
+# install-location check so you can see what already exists and
+# what will be replaced *before* anything is written) call this.
+# =============================================================
+run_preflight_audit() {
+    local context="${1:-audit}"
+    audit_pass=0
+    audit_fail=0
+
+    case "$context" in
+        check)
+            echo "=== --check (read-only) ==="
+            ;;
+        pre-flight)
+            echo "=== Pre-flight: inspecting install locations ==="
+            ;;
+        *)
+            echo "=== Audit ==="
+            ;;
+    esac
+    # Mode line: 'auto' is reported with a hint about its fallback
+    # semantics so logs are self-documenting.
+    case "$autostart_mode" in
+        auto)
+            if [[ -n "$vmlist" && -n "$match_pattern" ]]; then
+                echo "Mode: auto  (try explicit list first; fall back to regex if no list names exist)"
+            elif [[ -n "$vmlist" ]]; then
+                echo "Mode: auto  (explicit list only; no regex fallback configured)"
+            elif [[ -n "$match_pattern" ]]; then
+                echo "Mode: auto  (regex only; no explicit list configured)"
+            else
+                echo "Mode: auto  (NO selection configured -- helper will log 'no VMs found' at every login)"
+            fi
+            ;;
+        *)
+            echo "Mode: $autostart_mode"
+            ;;
+    esac
+    # List candidates (printed for list mode and for auto when populated)
+    if [[ "$autostart_mode" == "list" || ( "$autostart_mode" == "auto" && -n "$vmlist" ) ]]; then
+        echo "Explicit VMs:"
+        while IFS= read -r vm; do
+            [[ -z "$vm" ]] && continue
+            echo "    - $vm"
+        done <<< "$vmlist"
+    fi
+    # Regex (printed for regex mode and for auto when populated)
+    if [[ "$autostart_mode" == "regex" || ( "$autostart_mode" == "auto" && -n "$match_pattern" ) ]]; then
+        echo "Include regex: $match_pattern"
+        [[ -n "$exclude_pattern" ]] && echo "Exclude regex: $exclude_pattern"
+    fi
+    echo "Skip running: $skiprunning  |  Delay: ${delaybetween}s  |  Boot timeout: ${boottimeout}s  |  Poll: ${waitpollinterval}s"
+    echo ""
+
+    _report() {
+        local verdict="$1" name="$2" detail="$3"
+        printf "  [%-4s] %-32s %s\n" "$verdict" "$name" "$detail"
+        case "$verdict" in PASS) ((audit_pass++));; FAIL) ((audit_fail++));; esac
+    }
+
+    # OS must be macOS
+    local os
+    os="$(uname -s 2>/dev/null || echo unknown)"
+    if [[ "$os" == "$supportedos" ]]; then
+        _report PASS "operating system" "$os (macOS)"
+    else
+        _report FAIL "operating system" "got '$os', want $supportedos"
+    fi
+
+    # UTM.app installed
+    if [[ -d "$utmappdir" ]]; then
+        _report PASS "UTM.app installed" "$utmappdir"
+    else
+        _report FAIL "UTM.app installed" "$utmappdir not present"
+    fi
+
+    # utmctl reachable somewhere
+    local utmctl_found="" candidate
+    for candidate in $utmctlpaths; do
+        if [[ -x "$candidate" ]]; then utmctl_found="$candidate"; break; fi
+    done
+    if [[ -n "$utmctl_found" ]]; then
+        _report PASS "utmctl reachable" "$utmctl_found"
+    else
+        _report FAIL "utmctl reachable" "not found in any of: $utmctlpaths"
+    fi
+
+    # Helper script present + content matches the rendered desired state.
+    local owner
+    if [[ -f "$helperpath" ]]; then
+        if diff -q <(printf '%s\n' "$helper_content") "$helperpath" >/dev/null 2>&1; then
+            _report PASS "helper script content" "$helperpath up to date"
+        else
+            _report FAIL "helper script content" "$helperpath differs from desired (will replace)"
+        fi
+        if [[ -x "$helperpath" ]]; then
+            _report PASS "helper script executable" "yes"
+        else
+            _report FAIL "helper script executable" "missing +x (will fix)"
+        fi
+        owner="$(stat -f '%Su:%Sg' "$helperpath" 2>/dev/null || echo unknown)"
+        if [[ "$owner" == "$fileowner" ]]; then
+            _report PASS "helper script ownership" "$owner"
+        else
+            _report FAIL "helper script ownership" "got $owner, want $fileowner (will fix)"
+        fi
+    else
+        _report FAIL "helper script present" "$helperpath missing (will install)"
+    fi
+
+    # Plist present + content matches.
+    if [[ -f "$plistpath" ]]; then
+        if diff -q <(printf '%s\n' "$plist_content") "$plistpath" >/dev/null 2>&1; then
+            _report PASS "launch agent plist" "$plistpath up to date"
+        else
+            _report FAIL "launch agent plist" "$plistpath differs from desired (will replace)"
+        fi
+        owner="$(stat -f '%Su:%Sg' "$plistpath" 2>/dev/null || echo unknown)"
+        if [[ "$owner" == "$fileowner" ]]; then
+            _report PASS "plist ownership" "$owner"
+        else
+            _report FAIL "plist ownership" "got $owner, want $fileowner (will fix)"
+        fi
+    else
+        _report FAIL "launch agent plist" "$plistpath missing (will install)"
+    fi
+
+    echo ""
+    echo "Summary: $audit_pass PASS / $audit_fail FAIL"
+}
 
 # =============================================================
 # --check (read-only status) mode
 # Exit 0 = all PASS, 2 = drift detected.
 # =============================================================
 if [[ "$mode" == "check" ]]; then
-    echo "=== --check (read-only) ==="
-    echo "Mode: $autostart_mode"
-    if [[ "$autostart_mode" == "explicit" ]]; then
-        echo "Explicit VMs:"
-        while IFS= read -r vm; do
-            [[ -z "$vm" ]] && continue
-            echo "    - $vm"
-        done <<< "$vmlist"
-    else
-        echo "Include regex: $match_pattern"
-        [[ -n "$exclude_pattern" ]] && echo "Exclude regex: $exclude_pattern"
-    fi
-    echo "Skip running: $skiprunning  |  Delay: ${delaybetween}s  |  Boot timeout: ${boottimeout}s  |  Poll: ${waitpollinterval}s"
-    echo ""
-    pass=0; fail=0
-    report() {
-        local verdict="$1" name="$2" detail="$3"
-        printf "  [%-4s] %-32s %s\n" "$verdict" "$name" "$detail"
-        case "$verdict" in PASS) ((pass++));; FAIL) ((fail++));; esac
-    }
-
-    # OS must be macOS
-    os="$(uname -s 2>/dev/null || echo unknown)"
-    if [[ "$os" == "$supportedos" ]]; then
-        report PASS "operating system" "$os (macOS)"
-    else
-        report FAIL "operating system" "got '$os', want $supportedos"
-    fi
-
-    # UTM.app installed
-    if [[ -d "$utmappdir" ]]; then
-        report PASS "UTM.app installed" "$utmappdir"
-    else
-        report FAIL "UTM.app installed" "$utmappdir not present"
-    fi
-
-    # utmctl reachable somewhere
-    utmctl_found=""
-    for candidate in $utmctlpaths; do
-        if [[ -x "$candidate" ]]; then utmctl_found="$candidate"; break; fi
-    done
-    if [[ -n "$utmctl_found" ]]; then
-        report PASS "utmctl reachable" "$utmctl_found"
-    else
-        report FAIL "utmctl reachable" "not found in any of: $utmctlpaths"
-    fi
-
-    # Helper script present + content matches the rendered desired state.
-    if [[ -f "$helperpath" ]]; then
-        if diff -q <(printf '%s\n' "$helper_content") "$helperpath" >/dev/null 2>&1; then
-            report PASS "helper script content" "$helperpath up to date"
-        else
-            report FAIL "helper script content" "$helperpath differs from desired"
-        fi
-        if [[ -x "$helperpath" ]]; then
-            report PASS "helper script executable" "yes"
-        else
-            report FAIL "helper script executable" "missing +x"
-        fi
-        owner="$(stat -f '%Su:%Sg' "$helperpath" 2>/dev/null || echo unknown)"
-        if [[ "$owner" == "$fileowner" ]]; then
-            report PASS "helper script ownership" "$owner"
-        else
-            report FAIL "helper script ownership" "got $owner, want $fileowner"
-        fi
-    else
-        report FAIL "helper script present" "$helperpath missing"
-    fi
-
-    # Plist present + content matches.
-    if [[ -f "$plistpath" ]]; then
-        if diff -q <(printf '%s\n' "$plist_content") "$plistpath" >/dev/null 2>&1; then
-            report PASS "launch agent plist" "$plistpath up to date"
-        else
-            report FAIL "launch agent plist" "$plistpath differs from desired"
-        fi
-        owner="$(stat -f '%Su:%Sg' "$plistpath" 2>/dev/null || echo unknown)"
-        if [[ "$owner" == "$fileowner" ]]; then
-            report PASS "plist ownership" "$owner"
-        else
-            report FAIL "plist ownership" "got $owner, want $fileowner"
-        fi
-    else
-        report FAIL "launch agent plist" "$plistpath missing"
-    fi
-
-    echo ""
-    echo "Summary: $pass PASS / $fail FAIL"
-    if [[ "$fail" -gt 0 ]]; then
+    run_preflight_audit check
+    if [[ "$audit_fail" -gt 0 ]]; then
         echo "DRIFT DETECTED. Re-run without --check to reconcile."
         exit 2
     fi
@@ -726,8 +1008,8 @@ if [[ "$mode" == "uninstall" ]]; then
     fi
 
     echo "$(date) | $appname uninstall complete (removed=$removed, skipped=$skipped)"
-    echo "$(date) | Logs retained: $log, $runtimelog, $runtimeerr"
-    echo "$(date) |   (delete manually if you no longer need them)"
+    echo "$(date) | Log retained:  $log"
+    echo "$(date) |   (delete manually if you no longer need it)"
     exit 0
 fi
 
@@ -741,28 +1023,30 @@ if [[ "$(id -u)" -ne 0 ]]; then
     exit 1
 fi
 
-# UTM.app isn't strictly required to *install* the agent, but warn loudly.
+# ----- pre-flight: inspect install target locations -----
+# Every apply run begins with a full audit so we can see what
+# already exists at the helper / plist install paths and decide
+# exactly which files need to be (re)written. Each file write
+# below is independently diff-guarded as a defense-in-depth
+# backstop, so this audit is informational -- callers see *up
+# front* what will and won't change before any disk write occurs.
+run_preflight_audit pre-flight
+echo ""
+
+# UTM.app being missing won't block install (the LaunchAgent
+# will simply fail at the next user login until UTM.app is
+# present), but make the warning loud so it isn't lost in
+# the audit table.
 if [[ ! -d "$utmappdir" ]]; then
-    log_warn "$utmappdir is not installed; the LaunchAgent will fail until UTM.app is present."
+    log_warn "$utmappdir is not installed; the LaunchAgent will fail at login until UTM.app is present."
 fi
 
-echo "$(date) | Autostart mode: $autostart_mode"
-if [[ "$autostart_mode" == "explicit" ]]; then
-    echo "$(date) | VMs to autostart (in order):"
-    while IFS= read -r vm; do
-        [[ -z "$vm" ]] && continue
-        echo "    - $vm"
-    done <<< "$vmlist"
+if [[ "$audit_fail" -eq 0 ]]; then
+    echo "$(date) | Pre-flight: all install locations in desired state; re-asserting permissions only (idempotent)."
 else
-    echo "$(date) | Include regex: $match_pattern"
-    if [[ -n "$exclude_pattern" ]]; then
-        echo "$(date) | Exclude regex: $exclude_pattern"
-    fi
-    echo "$(date) | (VM list resolved at each login via 'utmctl list')"
+    echo "$(date) | Pre-flight: $audit_fail check(s) need reconciliation; replacing/installing only what differs..."
 fi
-echo "$(date) | Skip already-running: $skiprunning"
-echo "$(date) | Delay between starts: ${delaybetween}s"
-echo "$(date) | UTM.app boot timeout: ${boottimeout}s"
+echo ""
 
 # ----- write helper script -----
 helper_changed=0
@@ -843,7 +1127,7 @@ fi
 echo "$(date) | $appname installed"
 echo "$(date) | Helper script: $helperpath"
 echo "$(date) | LaunchAgent:   $plistpath"
-echo "$(date) | Runtime log:   $runtimelog"
+echo "$(date) | Log:           $log"
 echo "$(date) | NEXT STEP (per user): add ${utmappdir} to 'Open at Login'"
 echo "$(date) |   System Settings -> General -> Login Items & Extensions -> +"
 echo "$(date) |   (do this once per macOS account whose VMs should auto-start)"

@@ -33,19 +33,23 @@ name: Monitor Upstream Release (reusable)
         default: 'false'
       source:
         description: >-
-          Where to read the upstream version from. Pluggable via the
-          `discover-upstream-release` composite action.
+          Where to read the upstream version from. Delegated to the
+          [bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher)
+          composite action.
 
-          * `github_release` (alias: `latest_release`) — poll
-            `GET /repos/<repo>/releases/latest`. Default.
-          * `github_branch_file` (alias: `branch_head`) — fetch a single
+          * `github_release` — poll
+            `GET /repos/<repo>/releases/latest`. Default. Set
+            `include_prereleases: 'true'` for upstreams that ship only
+            `-rc`/`-beta` releases (e.g. `actions/runner`).
+          * `github_branch_file` — fetch a single
             file from a branch's HEAD; the raw contents are the version
             string. Use for rolling-build projects that never cut a Release
             (e.g. `wiedehopf/readsb` `dev`).
           * `github_tags` — list `repos/<repo>/tags`, pick the highest
             SemVer-matching tag.
-          * `container_image` — list Docker Hub tags for an image, pick
-            the highest SemVer.
+          * `container_image` — list registry tags for an image, pick the
+            highest SemVer. Supports `docker.io`, `ghcr.io`, and `quay.io`
+            (public images only on `ghcr.io`/`quay.io` in this revision).
           * `npm` — `registry.npmjs.org/<package>/latest`.
           * `pypi` — `pypi.org/pypi/<package>/json`.
           * `generic_url` — fetch a URL and extract the version via a
@@ -71,8 +75,12 @@ name: Monitor Upstream Release (reusable)
         default: 'version'
       image_ref:
         description: >-
-          Container image reference (e.g. `docker.io/library/nginx`). Required
-          when `source: container_image`. Only docker.io is supported.
+          Container image reference. Required when `source: container_image`.
+          Supported registries: `docker.io/<ns>/<image>`,
+          `ghcr.io/<owner>/<image>` (public images only),
+          `quay.io/<ns>/<image>` (public repos only). Bare names
+          (`<ns>/<image>` or `<image>`) assume Docker Hub. Other
+          registries are rejected with an explicit error.
         required: false
         type: string
         default: ''
@@ -98,11 +106,23 @@ name: Monitor Upstream Release (reusable)
       tag_pattern:
         description: >-
           Optional regex used to filter candidate tags/versions for
-          `github_tags` and `container_image` before SemVer ranking. Default
+          `github_tags`, `container_image`, and `github_release` (when
+          `include_prereleases: true`) before SemVer ranking. Default
           accepts `[v]X.Y.Z[-suffix]`.
         required: false
         type: string
         default: ''
+      include_prereleases:
+        description: >-
+          When `'true'`, `source: github_release` lists
+          `repos/{repo}/releases` (including pre-releases) instead of
+          `releases/latest`, filters by `tag_pattern`, and picks the highest
+          SemVer. Required for upstreams that ship only pre-releases
+          (e.g. `actions/runner`). Default `'false'` preserves the legacy
+          `releases/latest` behavior. Ignored for all other providers.
+        required: false
+        type: string
+        default: 'false'
       strip_v_prefix:
         description: 'Strip a leading `v` from the upstream tag before storing it.'
         required: false
@@ -168,6 +188,27 @@ name: Monitor Upstream Release (reusable)
       upstream_source_url:
         description: 'URL that was consulted, for traceability.'
         value: ${{ jobs.monitor.outputs.upstream_source_url }}
+      upstream_label:
+        description: >-
+          Canonical identifier for the upstream (forwarded from
+          `bos-upstream-watcher`'s `label` output): `owner/name` for GitHub
+          sources, package name for `npm`/`pypi`, `<registry>/<ns>/<image>`
+          for `container_image`, or the URL for `generic_url`. Use this in
+          downstream notifications instead of an `inputs.* || inputs.*`
+          fallback chain.
+        value: ${{ jobs.monitor.outputs.upstream_label }}
+      upstream_release_url:
+        description: '`source: github_release` only. HTML URL of the GitHub Release.'
+        value: ${{ jobs.monitor.outputs.upstream_release_url }}
+      upstream_release_name:
+        description: '`source: github_release` only. Release display name (may differ from the tag).'
+        value: ${{ jobs.monitor.outputs.upstream_release_name }}
+      upstream_release_body:
+        description: '`source: github_release` only. Markdown release notes (multi-line).'
+        value: ${{ jobs.monitor.outputs.upstream_release_body }}
+      upstream_published_at:
+        description: '`source: github_release` only. ISO 8601 publication timestamp.'
+        value: ${{ jobs.monitor.outputs.upstream_published_at }}
       dispatched:
         description: 'Newline-separated list of workflows actually dispatched.'
         value: ${{ jobs.monitor.outputs.dispatched }}
@@ -219,6 +260,11 @@ jobs:
       upstream_tag: ${{ steps.discover.outputs.tag }}
       upstream_commit: ${{ steps.discover.outputs.commit }}
       upstream_source_url: ${{ steps.discover.outputs.source_url }}
+      upstream_label: ${{ steps.discover.outputs.label }}
+      upstream_release_url: ${{ steps.discover.outputs.release_url }}
+      upstream_release_name: ${{ steps.discover.outputs.release_name }}
+      upstream_release_body: ${{ steps.discover.outputs.release_body }}
+      upstream_published_at: ${{ steps.discover.outputs.published_at }}
       dispatched: ${{ steps.dispatch.outputs.dispatched }}
     steps:
       - name: Preflight validation
@@ -271,20 +317,21 @@ jobs:
 
       - name: Discover upstream version
         id: discover
-        uses: blackoutsecure/bos-automation-hub/.github/actions/discover-upstream-release@main
+        uses: blackoutsecure/bos-upstream-watcher@2c7955ed75d4bc2ee78af9ecec31c2a698f37f9d # v1.1.0
         with:
-          source:            ${{ inputs.source }}
-          upstream_repo:     ${{ inputs.upstream_repo }}
-          upstream_branch:   ${{ inputs.upstream_branch }}
-          version_file_path: ${{ inputs.version_file_path }}
-          image_ref:         ${{ inputs.image_ref }}
-          package_name:      ${{ inputs.package_name }}
-          version_url:       ${{ inputs.version_url }}
-          version_regex:     ${{ inputs.version_regex }}
-          tag_pattern:       ${{ inputs.tag_pattern }}
-          strip_v_prefix:    ${{ inputs.strip_v_prefix }}
-          tracker_path:      ${{ inputs.track_file }}
-          gh_token:          ${{ secrets.UPSTREAM_TOKEN || github.token }}
+          source:              ${{ inputs.source }}
+          upstream_repo:       ${{ inputs.upstream_repo }}
+          upstream_branch:     ${{ inputs.upstream_branch }}
+          version_file_path:   ${{ inputs.version_file_path }}
+          image_ref:           ${{ inputs.image_ref }}
+          package_name:        ${{ inputs.package_name }}
+          version_url:         ${{ inputs.version_url }}
+          version_regex:       ${{ inputs.version_regex }}
+          tag_pattern:         ${{ inputs.tag_pattern }}
+          include_prereleases: ${{ inputs.include_prereleases }}
+          strip_v_prefix:      ${{ inputs.strip_v_prefix }}
+          tracker_path:        ${{ inputs.track_file }}
+          github_token:        ${{ secrets.UPSTREAM_TOKEN || github.token }}
 
       # Dispatch happens BEFORE the commit so a transient dispatch failure
       # leaves the marker file unchanged and the next scheduled run retries.
@@ -329,7 +376,11 @@ jobs:
         id: msg
         if: steps.discover.outputs.changed == 'true'
         env:
-          UPSTREAM_LABEL: ${{ inputs.upstream_repo || inputs.package_name || inputs.image_ref || inputs.version_url }}
+          # Use the action's canonical `label` output — resolves to
+          # `owner/name` (GitHub sources), package name (npm/pypi),
+          # `<registry>/<ns>/<image>` (container_image), or the URL
+          # (generic_url). One source of truth, no fallback chain.
+          UPSTREAM_LABEL: ${{ steps.discover.outputs.label }}
           UPSTREAM_VERSION: ${{ steps.discover.outputs.version }}
           MSG_TEMPLATE: ${{ inputs.commit_message_template }}
         run: |
@@ -355,26 +406,20 @@ jobs:
       - name: Job summary
         if: always()
         env:
-          UPSTREAM_LABEL: ${{ inputs.upstream_repo || inputs.package_name || inputs.image_ref || inputs.version_url }}
-          SOURCE: ${{ inputs.source }}
-          UPSTREAM_TAG: ${{ steps.discover.outputs.tag }}
-          UPSTREAM_VERSION: ${{ steps.discover.outputs.version }}
-          UPSTREAM_COMMIT: ${{ steps.discover.outputs.commit }}
-          UPSTREAM_SOURCE_URL: ${{ steps.discover.outputs.source_url }}
+          # bos-upstream-watcher@v1.1.0 writes its own "🔍 Upstream Watcher"
+          # block to $GITHUB_STEP_SUMMARY (source, label, tag, version,
+          # commit, source_url, release info). This wrapper-side summary
+          # is deliberately scoped to what the WRAPPER did on top of that:
+          # the changed flag (which drove the dispatch decision) and the
+          # list of downstream workflows it actually triggered.
           CHANGED: ${{ steps.discover.outputs.changed }}
           DISPATCHED: ${{ steps.dispatch.outputs.dispatched }}
         run: |
           {
-            echo "## Upstream Release Monitor"
+            echo "## Upstream Release Monitor — wrapper"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Source        | \`${SOURCE}\` |"
-            echo "| Upstream      | \`${UPSTREAM_LABEL:-n/a}\` |"
-            echo "| Latest tag    | \`${UPSTREAM_TAG:-n/a}\` |"
-            echo "| Version       | \`${UPSTREAM_VERSION:-n/a}\` |"
-            echo "| Commit        | \`${UPSTREAM_COMMIT:-n/a}\` |"
-            echo "| Source URL    | ${UPSTREAM_SOURCE_URL:-n/a} |"
             echo "| Changed       | \`${CHANGED:-false}\` |"
             if [ -n "${DISPATCHED:-}" ]; then
               echo "| Dispatched    | \`$(printf '%s' "${DISPATCHED}" | tr '\n' ' ')\` |"

@@ -1,0 +1,200 @@
+# Blackout Secure Marketplace Launchpad — thin consumer caller example.
+#
+# WHERE THIS LIVES: on the **dev** branch of a GitHub Marketplace
+# Action repo, at `.github/workflows/bos-marketplace-launchpad.yml`.
+# This file MUST NOT exist on `main` — Marketplace publishing
+# requires zero workflow files on the default branch.
+#
+# WHAT IT DOES: subscribes to the four event types that drive a
+# Marketplace Action repo (PR to `dev`, push to `dev`, PR to
+# `main`, operator dispatch) and forwards them to the hub-side
+# reusable `bos-marketplace-launchpad.yml@main`, which composes
+# the three single-purpose Marketplace reusables
+# (`marketplace-action-ci.yml`, `marketplace-repo-guard.yml`,
+# `release-promote.yml`) and routes each event-type to the right
+# one via internal `if:` gates.
+#
+# All orchestration / composition logic lives in the hub. This
+# caller is intentionally a thin event-trigger + input-forwarder
+# wrapper: ~60 lines of YAML, identical shape across every
+# Marketplace Action repo in the org.
+#
+# Per-repo customization happens via the `with:` block on the one
+# job below. The only field that typically varies is
+# `runtime_artifact_dir` — `dist` for JS Actions, `src` for
+# composite Actions (Python / Shell / Docker `runs:` entry point).
+# Other fields (extra allowlist entries, dry-run defaults, release
+# template path, etc.) are also `with:`-overridable; see the hub
+# reusable for the full input list.
+#
+# NOT THE SAME FILE AS `bos-launchpad.yml`. That sibling reusable
+# (also in this repo's `.github/workflows/`) handles container /
+# Balena / GitHub Release / Cloudflare Pages delivery for the
+# `docker-*` and site repos. The two share no inputs, no stages,
+# and no event model — they are deliberately separate orchestrators
+# for two different domains. Use THIS one for Marketplace Action
+# repos.
+#
+# Event routing inside the hub reusable:
+#
+#   pull_request (base = dev)         → ci      stage runs
+#   push (branch = dev)               → ci      stage runs (post-merge re-verify)
+#   pull_request_target (base = main) → guard   stage runs
+#   workflow_dispatch mode=release    → release stage runs
+#   workflow_dispatch mode=name-check → ci      stage runs (name-check on)
+
+name: Blackout Secure Marketplace Launchpad
+
+"on":
+  pull_request:
+    branches: ['dev']
+  push:
+    branches: ['dev']
+  pull_request_target:
+    branches: ['main']
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Operation: `release` (promote dev → main + GH Release) or `name-check` (one-shot Marketplace name availability probe).'
+        required: true
+        type: choice
+        options:
+          - release
+          - name-check
+        default: release
+      tag_name:
+        description: 'Release tag (SemVer, e.g. v1.2.0). Leave empty to auto-bump the patch of the latest stable tag (or `v0.1.0` for a first release). Pass an explicit tag for minor/major bumps or pre-release suffixes.'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run — validate + diff, do not push/tag.'
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: 'Publish the GitHub Release as a draft.'
+        required: false
+        type: boolean
+        default: false
+
+# Workflow-default permissions. Each sub-job inside the hub reusable
+# scopes its own narrower permissions internally; this top-level grant
+# is the UNION (the maximum the nested workflow may use).
+#
+# `security-events: write` + `actions: read` are required UNCONDITIONALLY
+# (even with `enable_security_scan: false` below) because the hub
+# reusable declares a nested `security_scan` job that requests them,
+# and GitHub validates the cascade statically at workflow-load time
+# BEFORE evaluating any `if:` gate. Omitting them produces a hard
+# load-time error referencing the `security_scan` job.
+permissions:
+  contents: write       # required by the release stage (promote + tag + GH Release)
+  pull-requests: read   # required by the guard stage (PR diff inspection)
+  security-events: write  # statically required by the `security_scan` nested job (see note above)
+  actions: read           # statically required by the `security_scan` nested job (see note above)
+
+# Per-event concurrency: PRs cancel themselves on new pushes; releases
+# never cancel each other (so a manual re-run of a release waits in
+# line rather than racing). Keyed by event_name so a release in-flight
+# is never cancelled by an incoming PR.
+concurrency:
+  group: >-
+    bos-marketplace-launchpad-${{ github.workflow }}-${{ github.event_name }}-${{
+      github.event.pull_request.number
+      || inputs.tag_name
+      || github.ref
+    }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  launchpad:
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-marketplace-launchpad.yml@main
+    permissions:
+      contents: write
+      pull-requests: read
+      security-events: write  # statically required by the `security_scan` nested job; see workflow-level note
+      actions: read           # statically required by the `security_scan` nested job; see workflow-level note
+    with:
+      # ----- Event-routing context (forwarded from the caller event) -----
+      event_name:      ${{ github.event_name }}
+      dispatched_mode: ${{ inputs.mode || '' }}
+      pr_base_sha:     ${{ github.event.pull_request.base.sha || '' }}
+      pr_head_sha:     ${{ github.event.pull_request.head.sha || '' }}
+
+      # ----- Per-repo customization -----
+      # `dist` for JS Actions (compiled bundle); `src` for composite Actions
+      # (Python / Shell / Docker `runs:` entry point). Auto-appended to both
+      # `allowlist_paths` (release) and `required_paths` (guard) — single
+      # source of truth.
+      runtime_artifact_dir: 'dist'
+
+      # ----- Community-health source mode (optional) -----
+      # Tells the kit `check` composite *where* to look for each CH/SC
+      # file. Set to `inherit` if your repo intentionally has NO local
+      # CONTRIBUTING.md / SECURITY.md / etc. and those files live ONLY
+      # in your org `.github` repo. Without this override, the kit
+      # falls back to `either` (local first, then org) which silently
+      # treats a missing-on-purpose local file as a `warn`.
+      #
+      # `local` | `inherit` | `either` (default `either`, back-compat).
+      # community_health_source: 'inherit'
+      #
+      # Per-rule overrides (each empty = use global above):
+      # security_source:         ''
+      # code_of_conduct_source:  ''
+      # contributing_source:     'inherit'
+      # support_source:          ''
+      # issue_templates_source:  ''
+      # pr_template_source:      ''
+      # funding_source:          ''
+
+      # ----- Extra hardening rules (DP/CQ/LT/GH/MS/SR, optional) -----
+      # Each rule is `fail | warn | skip`. Defaults below match the
+      # kit's own defaults — uncomment + tighten only when you're
+      # ready to enforce them on this repo.
+      # require_dependabot:           'warn'   # DP001
+      # require_codeql:               'warn'   # CQ001
+      # require_editorconfig:         'warn'   # LT001
+      # require_gitattributes:        'warn'   # LT002
+      # require_gitignore:            'warn'   # LT003
+      # require_markdownlint:         'skip'   # LT004
+      # require_yamllint:             'skip'   # LT005
+      # require_ghas_code_scanning:   'warn'   # GH001
+      # require_ghas_secret_scanning: 'warn'   # GH002 (admin token)
+      # require_dependabot_alerts:    'warn'   # GH003 (admin token)
+      # require_security_devops:      'skip'   # MS001
+      # require_scorecard:            'skip'   # SR001
+
+      # ----- Consolidated security scan (opt-in) -----
+      # Adds a `security_scan` stage that runs in parallel with `ci` on
+      # `pull_request` + `push` events. Wraps the published
+      # `blackoutsecure/bos-code-scanning-kit@v1` composite (posture +
+      # bundled scanners: actionlint / gitleaks / shellcheck + unified
+      # SARIF upload) AND `github/codeql-action` (matrix-parallel
+      # CodeQL). Both upload SARIF to this repo's Security tab.
+      #
+      # PERMISSIONS REQUIREMENT (STATIC, UNCONDITIONAL):
+      # The CALLER workflow MUST grant the following at workflow level
+      # AND in this `launchpad:` job's `permissions:` block, REGARDLESS
+      # of whether `enable_security_scan` is set or true. GitHub
+      # validates the nested `security_scan` job's permission cascade
+      # statically at workflow-load time, BEFORE evaluating the `if:`
+      # gate, so omitting these grants while leaving the input default
+      # (`false`) ALSO breaks the workflow:
+      #   security-events: write
+      #   actions:         read
+      #
+      # enable_security_scan:               true
+      # security_scan_fail_on:              fail            # `fail` (default) gates the build; `never` audits only.
+      # security_scan_enable_kit_composite: true            # Set `false` for CodeQL-only mode (producer-kit pattern).
+      # security_scan_enable_posture:       true
+      # security_scan_enable_scanners:      true
+      # security_scan_enable_upload:        true
+      # security_scan_codeql_languages:     '["python", "actions"]'   # Empty (default) skips CodeQL entirely. JSON array with DOUBLE-QUOTED strings — `[python, actions]` is rejected by `fromJSON`.
+      # security_scan_codeql_queries:       'security-and-quality'
+
+      # ----- Release dispatch inputs (ignored for non-release events) -----
+      tag_name:      ${{ inputs.tag_name || '' }}
+      dry_run:       ${{ inputs.dry_run || false }}
+      release_draft: ${{ inputs.draft || false }}

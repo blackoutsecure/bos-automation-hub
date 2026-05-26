@@ -2,6 +2,8 @@
 
 > Maintained by [Blackout Secure](https://blackoutsecure.app)
 
+[![Made by BlackoutSecure](https://img.shields.io/badge/made%20by-BlackoutSecure-1f1f1f)](https://github.com/blackoutsecure)
+
 Two things live in this repo:
 
 1. **Reusable GitHub Actions workflows and composite actions** under
@@ -93,10 +95,9 @@ Per-workflow requirements:
 | `release.yml`, `github-release.yml`, `openwrt-readsb-wiedehopf-bump.yml`, `deploy-cloudflare-pages.yml` | `DEFAULT_RUNNER` |
 | `balena-block-publish.yml`, `balena-fleet-deploy.yml` | `DEFAULT_RUNNER` + `RUNNER_X64` |
 | `docker-build-push.yml` | `DEFAULT_RUNNER` + `RUNNER_X64` + `RUNNER_ARM64` |
-| `docker-scout-scan.yml` | `RUNNER_X64` |
 | `lint.yml`, `monitor-upstream-release.yml` | _(pinned to `ubuntu-latest` by design)_ |
 | `sync-managed-files.yml` | _(uses caller-supplied `inputs.runs_on` directly)_ |
-| `bos-launchpad.yml` | _(pure delegator; each downstream workflow runs its own preflight)_ |
+| `bos-launchpad.yml`, `bos-marketplace-launchpad.yml` | _(pure delegator; each downstream workflow runs its own preflight)_ |
 
 Because preflight guarantees the variable is set and well-formed, the
 per-job `runs-on:` expressions no longer carry a `'ubuntu-latest'`
@@ -105,11 +106,10 @@ fallback or a `vars-…-not-set` sentinel — a job that reaches the
 
 **Per-call overrides:** workflows that ship a deploy-style step expose
 a `runs_on` input (currently `deploy-cloudflare-pages.yml`,
-`balena-block-publish.yml`, `balena-fleet-deploy.yml`,
-`docker-scout-scan.yml`). Pass a literal label or JSON-array string to
-override the resolved variable for that one job; leave it empty to
-inherit. The shape rule is identical and is also validated by
-preflight on the source variable.
+`balena-block-publish.yml`, `balena-fleet-deploy.yml`). Pass a literal
+label or JSON-array string to override the resolved variable for that
+one job; leave it empty to inherit. The shape rule is identical and
+is also validated by preflight on the source variable.
 
 ---
 
@@ -118,47 +118,41 @@ preflight on the source variable.
 | Path | Kind | Purpose |
 |------|------|---------|
 | [.github/workflows/docker-build-push.yml](.github/workflows/docker-build-push.yml) | Reusable workflow | Multi-arch Docker build, push-by-digest, and single-manifest publish to Docker Hub. Includes default-on Docker Scout CVE scanning (PR comment + SARIF upload to code scanning). |
-| [.github/workflows/docker-scout-scan.yml](.github/workflows/docker-scout-scan.yml) | Reusable workflow | Standalone Docker Scout scan of an already-published image (e.g. scheduled re-scan of `:latest`). Uploads SARIF to code scanning. |
 | [.github/workflows/balena-block-publish.yml](.github/workflows/balena-block-publish.yml) | Reusable workflow | Resolve a block version, optionally sync `balena.yml`, and publish via `balena-io/deploy-to-balena-action`. |
 | [.github/workflows/balena-fleet-deploy.yml](.github/workflows/balena-fleet-deploy.yml) | Reusable workflow | Render a per-fleet `balena.yml` from inputs and deploy the same block to one or more balenaCloud fleets in a matrix. |
 | [.github/workflows/github-release.yml](.github/workflows/github-release.yml) | Reusable workflow | Render Markdown release notes from a template + structured inputs and create/update a GitHub Release via `softprops/action-gh-release`. |
-| [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Discover the latest upstream version from a pluggable source (GitHub Releases / branch HEAD / tag list / container registry / npm / PyPI / generic URL), dispatch downstream workflows on change, and commit a tracking file. Provider plugins live in `.github/actions/discover-upstream-release/`. |
+| [.github/workflows/monitor-upstream-release.yml](.github/workflows/monitor-upstream-release.yml) | Reusable workflow | Discover the latest upstream version from a pluggable source (GitHub Releases / branch HEAD / tag list / container registry / npm / PyPI / generic URL), dispatch downstream workflows on change, and commit a tracking file. Discovery is delegated to the [bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher) standalone action. |
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
-| [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Launchpad). **Stage 0:** runs `repo-code-scan.yml` as a pre-gate (default on; toggle via `enable_repo_code_scan`). **Container mode:** composes `monitor-upstream-release.yml` → `release.yml` to detect a new upstream release and run the full Docker → Balena → GitHub Release pipeline against the new version. **Static-site mode:** runs `deploy-cloudflare-pages.yml` on every push for continuous Cloudflare Pages deploys. Both modes can run side-by-side in the same call. |
+| [.github/workflows/bos-launchpad.yml](.github/workflows/bos-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Launchpad). **Container mode:** composes `monitor-upstream-release.yml` → `release.yml` to detect a new upstream release and run the full Docker → Balena → GitHub Release pipeline against the new version. **Static-site mode:** runs `deploy-cloudflare-pages.yml` on every push for continuous Cloudflare Pages deploys. Both modes can run side-by-side in the same call. Opt-in `security_scan` stage (`enable_security_scan: true`, see [`repo-security-scan.yml`](.github/workflows/repo-security-scan.yml)) runs in parallel as an advisory check — findings surface in the Security tab and (when `security_scan_fail_on: fail`) mark the workflow run failed, but do NOT block the deploy stages. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
-| [.github/workflows/sync-managed-files.yml](.github/workflows/sync-managed-files.yml) | Reusable workflow | Keep standardized "managed" sections of `.gitignore`, `.dockerignore`, `.editorconfig`, and `.gitattributes` — AND canonical whole files like `root/usr/local/bin/log-functions.sh` — in sync with hub-owned content. Pluggable per-service: section services (`common`, `docker`, `balena`, `node`, `python`, `lf_line_endings`) and whole-file services (`logger`). Two modes: `commit` (write + push) and `check` (PR drift-check). Disabled services are skipped entirely — their existing blocks / files are never touched. |
+| [.github/workflows/sync-managed-files.yml](.github/workflows/sync-managed-files.yml) | Reusable workflow | Keep standardized "managed" sections of `.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, and `.github/dependabot.yml` in sync — plus canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows) and init-once starter workflows (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`). Pluggable per-service: section (`common`, `docker`, `balena`, `node`, `python`, `lf_line_endings`, `dependabot_actions`, `dependabot_npm`, `dependabot_pip`), whole-file (`logger`, `prettier`, `bos_launchpad_release` \| `bos_launchpad_cf_pages`), init-if-missing (`gha_sync_commit`, `gha_sync_drift_check`, `gha_lint_node` \| `gha_lint_python` \| `gha_lint_shell`). Two modes: `commit` (write + push) and `check` (PR drift-check). Disabled services are skipped entirely — their existing blocks / files are never touched. |
 | [.github/workflows/nginx-config-validate.yml](.github/workflows/nginx-config-validate.yml) | Reusable workflow | PR / push CI gate for repos with an in-repo nginx config tree (e.g. `docker-tar1090`, `docker-graphs1090`, `docker-dump978`). Renders `*.conf.template` files via `envsubst` with caller-supplied placeholder values and runs `nginx -t -c /etc/nginx/nginx.conf` inside the official `nginx:alpine` image. Catches syntax errors, unresolved directives, and missing `include` targets at merge time instead of at container start. |
-| [.github/workflows/repo-code-scan.yml](.github/workflows/repo-code-scan.yml) | Workflow + reusable workflow | Runs `blackoutsecure/bos-code-scanning-kit` and uploads unified SARIF findings. Can run directly (schedule / push / manual) and can also be called via `workflow_call`. Baseline mode uses `GITHUB_TOKEN`; optional advanced mode uses `SCANNING_PAT` when `BOS_SCAN_ADVANCED=true` (or caller/dispatch input `advanced_scanning=true`). Set `BOS_SCAN_REQUIRE_PAT=true` (or caller/dispatch `require_pat=true`) to fail fast if advanced mode is requested without the PAT. |
 | [.github/actions/shared/resolve-docker-image-tags/action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
 | [.github/actions/shared/resolve-release-context/action.yml](.github/actions/shared/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
 | [.github/actions/shared/resolve-upstream-version/action.yml](.github/actions/shared/resolve-upstream-version/action.yml) | Composite action | Shallow-clones an upstream git repo at a ref and resolves a version (file → `git describe` → short SHA), commit SHA, and commit date. |
 | [.github/actions/shared/docker-multiarch-manifest/action.yml](.github/actions/shared/docker-multiarch-manifest/action.yml) | Composite action | Assembles a multi-arch Docker manifest from per-arch digest artifacts and pushes it under one or more tags, with retry on transient registry failures. |
 | [.github/actions/sync-dockerhub-description/action.yml](.github/actions/sync-dockerhub-description/action.yml) | Composite action | Validates inputs and pushes a repo's README + short description to Docker Hub via `peter-evans/dockerhub-description`. |
 | [.github/actions/docker-scout-enable-repo/action.yml](.github/actions/docker-scout-enable-repo/action.yml) | Composite action | Idempotently enrolls a Docker Hub repository in Docker Scout's continuous-monitoring service. Validates credentials, logs in to Docker Hub, installs the Scout CLI, and calls `docker scout repo enable`. |
-| [.github/actions/shared/docker-scout-scan/action.yml](.github/actions/shared/docker-scout-scan/action.yml) | Composite action | Wraps `docker/scout-action` with input validation, Docker Hub login, and optional SARIF upload to GitHub code scanning. Used by both the embedded scan in `docker-build-push.yml` and the standalone `docker-scout-scan.yml`. |
+| [.github/actions/shared/docker-scout-scan/action.yml](.github/actions/shared/docker-scout-scan/action.yml) | Composite action | Wraps `docker/scout-action` with input validation, Docker Hub login, and optional SARIF upload to GitHub code scanning. Used by the embedded scan in `docker-build-push.yml`; reach for it directly to weave Scout into custom job topologies (ad-hoc / scheduled re-scans of an already-published image). |
 | [.github/actions/shared/render-balena-yml/action.yml](.github/actions/shared/render-balena-yml/action.yml) | Composite action | Renders `balena.yml` from scalar inputs (PyYAML `safe_dump`, path-traversal + HTTPS-URL + default-vs-supported-device-type validation, defensive re-parse). Shared by `balena-block-publish.yml` (default `type: sw.block`) and `balena-fleet-deploy.yml` (default `type: sw.application`, `emit_assets: false` for the legacy per-target omit-assets behavior). |
 | [.github/actions/render-release-notes/action.yml](.github/actions/render-release-notes/action.yml) | Composite action | Renders Markdown release notes from a template with safe `{{ key }}` substitution — no shell or template-engine execution against user values. |
-| [.github/actions/discover-upstream-release/action.yml](.github/actions/discover-upstream-release/action.yml) | Composite action | Pluggable upstream-version discovery (stdlib-only Python). Sources: `github_release`, `github_branch_file`, `github_tags`, `container_image`, `npm`, `pypi`, `generic_url`. Writes a byte-stable tracker JSON file and reports whether the version changed. Used by `monitor-upstream-release.yml`. |
-| [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`) AND writes canonical whole files (`root/usr/local/bin/log-functions.sh` via the `logger` service) for each enabled service. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
+| [.github/actions/sync-managed-files/action.yml](.github/actions/sync-managed-files/action.yml) | Composite action | Inserts / replaces canonical managed-section blocks (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, `.github/dependabot.yml`), writes canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows in `.github/workflows/bos-launchpad.yml`), and initializes starter templates (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`) on first run only. Pure-Python (stdlib only). Used by `sync-managed-files.yml`. |
 | [.github/actions/nginx-config-validate/action.yml](.github/actions/nginx-config-validate/action.yml) | Composite action | Spins up the official `nginx` image, renders the consumer repo's `*.conf.template` files via `envsubst`, and runs `nginx -t -c /etc/nginx/nginx.conf`. Used by `nginx-config-validate.yml`. Positional-key envsubst (only listed keys are substituted) so nginx-native variables like `$remote_addr` pass through unchanged. |
 | [.github/actions/shared/commit-and-push/action.yml](.github/actions/shared/commit-and-push/action.yml) | Composite action | Stage files, commit, and push to the current branch with rebase-retry on concurrent commits. Single-line message + author validation. Exits cleanly with `committed=false` when nothing is staged. Used by `monitor-upstream-release.yml` and `sync-managed-files.yml`. |
+| [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml). |
+| [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml). |
+| [.github/workflows/marketplace-action-ci.yml](.github/workflows/marketplace-action-ci.yml) | Reusable workflow | **Marketplace Action CI.** PR-time `check` (manifest + LICENSE + README + branding + community-health) + `branding-preview` (Marketplace card SVG, uploaded as artifact) + opt-in `name-check` (Marketplace name availability). Drives every PR into `dev` on a Marketplace Action repo. Called via [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml). |
+| [.github/workflows/repo-security-scan.yml](.github/workflows/repo-security-scan.yml) | Reusable workflow | **Consolidated security scan wrapper.** Wraps the published [`blackoutsecure/bos-code-scanning-kit@v1`](https://github.com/marketplace/actions/bos-code-scanning-kit) composite (posture audit + bundled scanners: actionlint / gitleaks / shellcheck + unified SARIF upload) AND `github/codeql-action` (matrix-parallel semantic analysis) behind one reusable. Two independent sub-jobs (`scan`, `codeql`) gated by `enable_kit_composite` + `codeql_languages`; producer-kit escape hatch (`enable_kit_composite: false`) lets kits get CodeQL-only coverage without running the published @v1 against their dev source. Shared by [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) (PR-time gate, default `fail_on: fail`) and [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) (deploy-time advisory, default `fail_on: never`). Direct callers like [`bos-marketplace-kit/.github/workflows/codeql.yml`](https://github.com/blackoutsecure/bos-marketplace-kit/blob/dev/.github/workflows/codeql.yml) also consume it. |
+| [.github/workflows/bos-marketplace-launchpad.yml](.github/workflows/bos-marketplace-launchpad.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Marketplace Launchpad). Composes `marketplace-action-ci.yml` + `repo-security-scan.yml` (opt-in security scan) + `marketplace-repo-guard.yml` + `release-promote.yml` with internal event routing: PRs / pushes to `dev` → CI (+ security scan when enabled); PRs to `main` → guard; `workflow_dispatch` mode `release` → promote + GH Release; `workflow_dispatch` mode `name-check` → one-shot name probe. Consumers drop a ~60-line thin caller on their `dev` branch ([`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)); all orchestration logic lives here. Sibling to [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) for the container/site family. |
+| [bos-code-scanning-kit](https://github.com/marketplace/actions/bos-code-scanning-kit) (external) | Marketplace Action | Source of the posture-audit + bundled-scanners composite consumed by [`repo-security-scan.yml`](.github/workflows/repo-security-scan.yml). SHA / version pin uses the floating `@v1` tag in the wrapper so a single bump there propagates everywhere. |
+| [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit) (external) | Marketplace Action | Source of the `check` / `guard` / `promote` / `name-check` / `branding-preview` composite primitives consumed by `marketplace-repo-guard.yml`, `release-promote.yml`, and `marketplace-action-ci.yml`. SHA-pinned to `v0.1.1`; Dependabot tracks bumps. |
+| [scripts/marketplace-repo/](scripts/marketplace-repo/) | Bootstrap scripts | One-time platform-setup scripts for Marketplace Action repos: org ruleset template + `gh api` bootstrap (`bootstrap-ruleset.sh`) for `file_path_restriction` enforcement, and a per-repo branch-protection fallback (`bootstrap-branch-protection.sh`). See [`scripts/marketplace-repo/README.md`](scripts/marketplace-repo/README.md). |
 | [.github/workflows/lint.yml](.github/workflows/lint.yml) | Workflow | Runs `actionlint` + `shellcheck` on this repo's workflows and actions. |
-| [.github/workflows/sync-self.yml](.github/workflows/sync-self.yml) | Workflow | Dogfood caller that runs this repo's own `sync-managed-files.yml` reusable against this repository to keep canonical managed file sections in sync. |
 | [.github/workflows/openwrt-readsb-wiedehopf-bump.yml](.github/workflows/openwrt-readsb-wiedehopf-bump.yml) | Scheduled automation | Tracks new `wiedehopf/readsb` releases and proposes them upstream as a cross-repo PR to `openwrt/packages` (bumps `PKG_VERSION`/`PKG_HASH`, resets `PKG_RELEASE`) via a bot-owned fork. |
 | [linux/](linux/) | OS administration scripts | Distribution-grouped install/configure scripts for managed Linux endpoints (Ubuntu, OpenWrt / GL.iNet). See [linux/README.md](linux/README.md). |
 | [macos/](macos/) | OS administration scripts | Application/lifecycle scripts for managed macOS endpoints (MDM-friendly: Intune, Jamf, Kandji, Mosyle, Workspace ONE). See [macos/README.md](macos/README.md). |
 
 ---
-
-### Intentional non-reusable workflows
-
-Only three workflows are intentionally non-reusable in this repository:
-
-- [.github/workflows/lint.yml](.github/workflows/lint.yml): repository-local CI for this hub's own workflow/action sources.
-- [.github/workflows/sync-self.yml](.github/workflows/sync-self.yml): dogfood caller that invokes the reusable sync workflow against this repository.
-- [.github/workflows/openwrt-readsb-wiedehopf-bump.yml](.github/workflows/openwrt-readsb-wiedehopf-bump.yml): project-specific cross-repo maintenance automation for OpenWrt packaging.
-
-All other workflows under [.github/workflows/](.github/workflows/) are reusable (`workflow_call`) workflows.
 
 ## Quick start — caller wiring
 
@@ -230,11 +224,16 @@ a new release, the full Docker → Balena → GitHub Release pipeline runs
 against `v<upstream_version>` automatically — no tag push required in
 the consumer repo.
 
-> **Full annotated template:** [examples/bos-launchpad-release-example.yml](examples/bos-launchpad-release-example.yml).
-> Copy that file to your repo as `.github/workflows/bos-launchpad.yml`,
-> fill in the `# TODO` placeholders, and you're done. The minimal
-> shape below is for reading; the template has every comment and
-> structural guard rail the production callers use.
+> **Setup:** enable the `bos_launchpad_release` service in your
+> [`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
+> caller — it writes `.github/workflows/bos-launchpad.yml` (the
+> kicker) for you. Your only customization point is
+> `.bos-launchpad.yaml` at the repo root; see
+> [examples/bos-launchpad-release.example.yaml](examples/bos-launchpad-release.example.yaml)
+> for an annotated starter and the
+> [`.bos-launchpad.yaml` schema](#bos-launchpadyaml-schema-used-by-the-bos_launchpad_-services)
+> for the full field reference. The kicker shape below is for
+> reading — you don't author it by hand.
 
 Required `vars`: `UPSTREAM_REPO`, `IMAGE_NAME`, `DOCKERHUB_NAMESPACE`,
 `BALENA_NAMESPACE`.
@@ -294,9 +293,8 @@ jobs:
 Some upstreams ship rolling builds off a development branch and never
 cut GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). The same
 `bos-launchpad.yml` meta-workflow handles that case via
-`source: github_branch_file` (legacy alias: `branch_head`) — the
-monitor reads a version file from the branch HEAD and resolves the
-commit SHA via the GitHub API.
+`source: github_branch_file` — the monitor reads a version file from
+the branch HEAD and resolves the commit SHA via the GitHub API.
 
 Required `vars` and `secrets` are identical to example 2.
 
@@ -354,74 +352,21 @@ file path is `version` (the wiedehopf convention); override with
 #### 2b. Other upstream sources (tags, container image, npm, PyPI, arbitrary URL)
 
 The monitor delegates version discovery to the
-[`discover-upstream-release`](.github/actions/discover-upstream-release/action.yml)
-composite action, which ships with seven pluggable providers. Switch
+[bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher)
+standalone action, which ships with seven pluggable providers. Switch
 providers by changing `source:` and the matching input:
 
 | `source:`               | Required inputs                                  | Notes |
 |-------------------------|--------------------------------------------------|-------|
-| `github_release`        | `upstream_repo`                                  | Default. Polls `releases/latest`. Alias: `latest_release`. |
-| `github_branch_file`    | `upstream_repo`, `upstream_branch`               | Reads `version_file_path` from branch HEAD. Alias: `branch_head`. |
+| `github_release`        | `upstream_repo`                                  | Default. Polls `releases/latest`. |
+| `github_branch_file`    | `upstream_repo`, `upstream_branch`               | Reads `version_file_path` from branch HEAD. |
 | `github_tags`           | `upstream_repo`                                  | Lists tags, picks highest SemVer. Filter via `tag_pattern`. |
 | `container_image`       | `image_ref` (e.g. `docker.io/library/nginx`)     | Docker Hub tags only in this revision. Picks highest SemVer. |
 | `npm`                   | `package_name` (scoped names allowed)            | `registry.npmjs.org/<pkg>/latest`. |
 | `pypi`                  | `package_name`                                   | `pypi.org/pypi/<pkg>/json`. |
 | `generic_url`           | `version_url`, `version_regex` (1 capture group) | Stdlib-only HTTP, no auth. |
 
-Legacy aliases `latest_release` and `branch_head` continue to work
-byte-for-byte against existing `tracked-release.json` files.
-
-### 3. Scheduled Docker Scout re-scan
-
-Calls the [`docker-scout-scan.yml`](#docker-scout-scanyml--reusable-workflow)
-reusable workflow daily so newly disclosed CVEs in already-published
-images surface in the **Security** tab even when no commits land.
-
-Required `vars`: `IMAGE_NAME`, `DOCKERHUB_NAMESPACE`.
-Required `secrets`: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
-
-```yaml
-# .github/workflows/docker-scout.yml
-name: Docker Scout (scheduled)
-
-on:
-  schedule:
-    - cron: '0 6 * * *'   # 06:00 UTC daily
-  workflow_dispatch:
-    inputs:
-      image_tag:
-        description: 'Tag to scan (default: latest).'
-        required: false
-        type: string
-        default: 'latest'
-
-permissions:
-  contents: read
-
-concurrency:
-  group: docker-scout-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
-jobs:
-  scout:
-    permissions:
-      contents: read
-      security-events: write
-      pull-requests: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/docker-scout-scan.yml@main
-    with:
-      image: docker.io/${{ vars.DOCKERHUB_NAMESPACE }}/${{ vars.IMAGE_NAME }}:${{ inputs.image_tag || 'latest' }}
-      command: cves
-      severities: critical,high
-      sarif: true
-      sarif_upload: true
-      summary: true
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
-```
-
-### 4. Monitor upstream and dispatch other workflows in this repo
+### 3. Monitor upstream and dispatch other workflows in this repo
 
 Use this when the consumer repo *isn't* a Docker/Balena/Release product
 and you just want to fan out to one or more existing local workflows
@@ -466,14 +411,14 @@ jobs:
       force_dispatch: ${{ github.event_name == 'workflow_dispatch' && inputs.force_dispatch && 'true' || 'false' }}
 ```
 
-### 5. Multi-arch Docker build only
+### 4. Multi-arch Docker build only
 
 For a repo that just builds and pushes a Docker image (no Balena, no
 GitHub Release), call [`docker-build-push.yml`](#docker-build-pushyml--reusable-workflow)
 directly — see the [Minimal caller](#minimal-caller) example in that
 section.
 
-### 6. Multi-fleet balenaBlock deploy
+### 5. Multi-fleet balenaBlock deploy
 
 For a block deployed to multiple fleets that differ only by device
 type, use [`balena-fleet-deploy.yml`](#balena-fleet-deployyml--reusable-workflow)
@@ -481,7 +426,7 @@ type, use [`balena-fleet-deploy.yml`](#balena-fleet-deployyml--reusable-workflow
 section. (This is a different topology from `balena-block-publish.yml`
 and is **not** part of the `release.yml` pipeline.)
 
-### 7. Cloudflare Pages deploy (static-site launchpad)
+### 6. Cloudflare Pages deploy (static-site launchpad)
 
 For static-site repos, drive the deploy through the
 [`bos-launchpad.yml`](#bos-launchpadyml--reusable-meta-workflow)
@@ -491,9 +436,15 @@ releases, upstream-tracked releases, and static-site deploys all wire
 the same way — and forwards every input straight through to
 [`deploy-cloudflare-pages.yml`](#deploy-cloudflare-pagesyml--reusable-workflow).
 
-> **Full annotated template:** [examples/bos-launchpad-cloudflare-pages-example.yml](examples/bos-launchpad-cloudflare-pages-example.yml).
-> Copy that file to your repo as `.github/workflows/bos-launchpad.yml`,
-> fill in the `# TODO` placeholders, and you're done.
+> **Setup:** enable the `bos_launchpad_cf_pages` service in your
+> [`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
+> caller — it writes `.github/workflows/bos-launchpad.yml` (the
+> kicker) for you. Your only customization point is
+> `.bos-launchpad.yaml` at the repo root; see
+> [examples/bos-launchpad-cf-pages.example.yaml](examples/bos-launchpad-cf-pages.example.yaml)
+> for an annotated starter and the
+> [`.bos-launchpad.yaml` schema](#bos-launchpadyaml-schema-used-by-the-bos_launchpad_-services)
+> for the full field reference.
 
 Required `vars`: `CLOUDFLARE_PROJECT_NAME`.
 Required `secrets`: `CLOUDFLARE_API_TOKEN`.
@@ -647,10 +598,15 @@ macos/
 4. Update the parent category `README.md` table so the new target is
    discoverable.
 
-`shellcheck` runs against every shell script via the `actionlint` job
-in [.github/workflows/lint.yml](.github/workflows/lint.yml) (the
-`raven-actions/actionlint` action invokes `shellcheck` on `run:` blocks
-and adjacent shell files). Keep new scripts shellcheck-clean.
+`shellcheck` runs against every `.sh` file via the `extra-lint` job
+in [.github/workflows/lint.yml](.github/workflows/lint.yml), which
+invokes the [`blackoutsecure/bos-marketplace-kit`](https://github.com/blackoutsecure/bos-marketplace-kit)
+`lint` composite (markdown + YAML + shell). This job is currently
+**advisory** (`severity: warn`) — findings are annotated in the job
+summary but do not block CI; the companion `actionlint` job (strict)
+covers workflow YAML and shell snippets embedded in `run:` blocks.
+Keep new scripts shellcheck-clean so the `extra-lint` job can be
+flipped to strict in the future.
 
 ---
 
@@ -809,9 +765,8 @@ just on PRs, leave `enable_scout: true` and set
 `scout_write_comment: false` and `scout_sarif_upload: false`.
 
 For ad-hoc / scheduled scans of an image not produced by this
-workflow, use the standalone
-[`docker-scout-scan.yml`](.github/workflows/docker-scout-scan.yml)
-reusable workflow.
+workflow, use the [`docker-scout-scan`](.github/actions/shared/docker-scout-scan/action.yml)
+composite action directly in a custom job.
 
 #### Permissions
 
@@ -974,92 +929,16 @@ for full details.
 
 ---
 
-## `docker-scout-scan.yml` — reusable workflow
-
-Standalone Docker Scout scan of an already-published image. Use it
-when the build-time scan in [`docker-build-push.yml`](.github/workflows/docker-build-push.yml)
-isn't enough — most commonly:
-
-- **Scheduled re-scans** of `:latest` (or any other long-lived tag) so
-  newly disclosed CVEs surface in GitHub code scanning even when no
-  commits land. See [Quick start](#quick-start--caller-wiring) for a
-  copy-paste daily-cron caller.
-- **Out-of-band** scans of an image not built by this org's pipeline
-  (e.g. a third-party base image you depend on).
-- Recording an image into a Scout `environment` from a deploy job
-  that lives outside `docker-build-push.yml`.
-
-This workflow does **not** build anything — for build → push → scan
-wire-up, use `docker-build-push.yml`, which embeds the same scan
-inline so the PR comment renders against the exact image the matrix
-build produced.
-
-### Minimal usage
-
-```yaml
-jobs:
-  scout:
-    permissions:
-      contents: read
-      security-events: write   # SARIF upload
-      pull-requests: write     # PR comment (if invoked from a PR)
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/docker-scout-scan.yml@main
-    with:
-      image: docker.io/acme/widget:latest
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
-```
-
-### Inputs (selected — see the workflow file for the full list)
-
-- `image` (**required**) — image reference to scan. Accepts an
-  optional Scout prefix (`registry://`, `local://`, `oci-dir://`,
-  `archive://`, `fs://`, `sbom://`).
-- `command` — `quickview`, `cves` (default), `compare`,
-  `recommendations`, `sbom`, or `environment`. Comma-separate to
-  chain commands.
-- `severities` — comma-separated severities to keep. Default
-  `critical,high`.
-- `only_fixed`, `only_unfixed`, `only_cisa_kev`, `ignore_base`,
-  `ignore_unchanged` — standard Scout filters.
-- `to`, `to_env`, `to_latest`, `organization` — `compare`-mode
-  targets. Mutually exclusive (validated in preflight).
-- `environment`, `organization` — `environment`-mode targets.
-- `sarif`, `sarif_upload`, `sarif_category` — control SARIF
-  generation and upload to GitHub code scanning.
-- `summary`, `write_comment`, `keep_previous_comments` — control how
-  results are surfaced.
-- `exit_code`, `exit_on` — control whether the job fails on findings.
-- `registry` — non–Docker Hub registry to additionally log in to
-  (paired with `secrets.REGISTRY_USERNAME` / `REGISTRY_PASSWORD`).
-- `runs_on`, `timeout_minutes` — runner / timeout overrides.
-
-### Required secrets
-
-- `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN` — Scout's vulnerability API
-  is gated behind Docker Hub auth even for local image scans.
-
-### Permissions
-
-The caller job needs:
-
-- `contents: read`
-- `security-events: write` if `sarif_upload: true` (default).
-- `pull-requests: write` if `write_comment: true` (default) and the
-  workflow is invoked from a PR.
-
----
-
 ## `docker-scout-scan` — composite action
 
 Direct wrapper around
 [`docker/scout-action`](https://github.com/docker/scout-action) used
-by both `docker-scout-scan.yml` and the embedded scan jobs in
-`docker-build-push.yml`. Reach for it directly when you need to weave
-Scout into a custom job topology — e.g. scanning an image you've
-already built and loaded earlier in the same job, or running multiple
-Scout commands sharing a single login.
+by the embedded scan jobs in `docker-build-push.yml`. Reach for it
+directly when you need to weave Scout into a custom job topology —
+e.g. scanning an image you've already built and loaded earlier in
+the same job, running multiple Scout commands sharing a single login,
+or running ad-hoc / scheduled re-scans of an already-published image
+outside the build pipeline.
 
 ```yaml
 - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/docker-scout-scan@main
@@ -1146,9 +1025,10 @@ sync the version back into `balena.yml`, and publish to balenaCloud via
 > [`docker-build-push.yml`](.github/workflows/docker-build-push.yml)
 > first (Scout runs there by default), then call the Balena workflow
 > as the second stage of [`release.yml`](.github/workflows/release.yml).
-> If you only ship via balenaCloud, schedule a periodic
-> [`docker-scout-scan.yml`](.github/workflows/docker-scout-scan.yml)
-> against the published Hub image to keep code-scanning alerts current.
+> If you only ship via balenaCloud, run a scheduled job that calls the
+> [`docker-scout-scan`](.github/actions/shared/docker-scout-scan/action.yml)
+> composite action against the published Hub image to keep code-scanning
+> alerts current.
 
 ### Required configuration on the caller repo
 
@@ -1386,35 +1266,44 @@ living in every caller repo.
 ### Source modes
 
 The `source` input selects how the upstream version is discovered.
-Both modes produce the same outputs (`upstream_tag`, `upstream_version`,
+All modes produce the same outputs (`upstream_tag`, `upstream_version`,
 `upstream_commit`, `changed`) so downstream consumers don't branch on it.
+Discovery is delegated to the
+[bos-upstream-watcher](https://github.com/blackoutsecure/bos-upstream-watcher)
+standalone action; see its README for the full provider list, behaviour
+details, and tracker-file schemas.
 
 | `source` | Behaviour | When to use |
 |---|---|---|
-| `latest_release` *(default)* | Polls `GET /repos/<repo>/releases/latest`. Uses the release's `tag_name` and resolves the commit via `repos/.../commits/<tag>`. | Upstream publishes proper GitHub Releases (the majority case). |
-| `branch_head` | `curl`s a `version` file from the branch HEAD; resolves the commit via `git ls-remote refs/heads/<branch>`. SemVer-validates the fetched string and synthesizes `upstream_tag = upstream_version`. | Upstream ships rolling builds off a development branch and never cuts GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). |
+| `github_release` *(default)* | Polls `GET /repos/<repo>/releases/latest`. Uses the release's `tag_name` and resolves the commit via `repos/.../commits/<tag>`. | Upstream publishes proper GitHub Releases (the majority case). |
+| `github_branch_file` | Fetches a version file from the branch HEAD; resolves the commit via the GitHub API. SemVer-validates the fetched string and synthesizes `upstream_tag = upstream_version`. | Upstream ships rolling builds off a development branch and never cuts GitHub Releases (e.g. `wiedehopf/readsb` on `dev`). |
 
-`branch_head` requires `upstream_branch`; the file path defaults to
-`version` and is overridable via `version_file_path`.
+The action exposes four additional providers — `github_tags`,
+`container_image`, `npm`, `pypi`, `generic_url` — that this workflow
+also forwards. See the table in [§2b](#2b-other-upstream-sources-tags-container-image-npm-pypi-arbitrary-url)
+above.
+
+`github_branch_file` requires `upstream_branch`; the file path defaults
+to `version` and is overridable via `version_file_path`.
 
 ### Default behaviour
 
 - **Tracking file.** A small JSON file at `inputs.track_file` (default
   `.github/upstream/tracked-release.json`) records the last-seen state.
   Schema depends on `source`:
-  - `latest_release`: `{repo, tag, version, commit}` — held byte-stable
+  - `github_release`: `{repo, tag, version, commit}` — held byte-stable
     for back-compat with existing tracker files.
-  - `branch_head`: `{repo, source: "branch_head", branch, version, commit}` —
+  - `github_branch_file`: `{repo, source: "github_branch_file", branch, version, commit}` —
     self-describing on inspection.
   The file is committed back to the default branch when the upstream
   changes; subsequent runs diff against it to detect change.
-- **Real commit SHA.** In `latest_release` mode, the release's
+- **Real commit SHA.** In `github_release` mode, the release's
   `target_commitish` field is often a branch name (`main`), and the Git
   Refs API returns the *tag-object* SHA for annotated tags — neither is
-  the commit you want. The workflow resolves the actual commit SHA via
+  the commit you want. The action resolves the actual commit SHA via
   `repos/<owner>/<repo>/commits/<tag>`, which handles lightweight and
-  annotated tags uniformly. In `branch_head` mode, `git ls-remote` on
-  the branch ref returns the commit directly.
+  annotated tags uniformly. In `github_branch_file` mode, the commit
+  comes from `repos/<owner>/<repo>/commits/<branch>`.
 - **Dispatch-then-commit ordering.** Downstream workflows are
   dispatched **before** the tracking file is committed — if dispatch
   fails, the marker is unchanged and the next scheduled run retries.
@@ -1612,21 +1501,27 @@ default), then re-prefixed by this workflow. Upstream tags must be
 SemVer (`X.Y.Z[-suffix]`); the release stage rejects calendar-versioned
 or otherwise non-SemVer tags.
 
-### Caller examples
+### Operator-config examples
 
-Two annotated templates ship with the hub — pick the one that matches
-your use case, copy it verbatim into a consumer repo as
-`.github/workflows/bos-launchpad.yml`, and fill in the `# TODO`
-placeholders.
+The kicker workflow at `.github/workflows/bos-launchpad.yml` is
+auto-written by the `bos_launchpad_release` / `bos_launchpad_cf_pages`
+[`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
+services — you don't author it by hand. Your only manual file is
+`.bos-launchpad.yaml` at the repo root. Two annotated starter
+configs ship with the hub:
 
 - **Upstream-tracked container release:**
-  [examples/bos-launchpad-release-example.yml](examples/bos-launchpad-release-example.yml).
+  [examples/bos-launchpad-release.example.yaml](examples/bos-launchpad-release.example.yaml).
   See [Quick start §2](#2-upstream-tracked-release-poll-upstream-then-run-the-same-pipeline)
-  for the inline minimal-shape walkthrough.
+  for the inline kicker walkthrough.
 - **Static-site Cloudflare Pages deploy:**
-  [examples/bos-launchpad-cloudflare-pages-example.yml](examples/bos-launchpad-cloudflare-pages-example.yml).
+  [examples/bos-launchpad-cf-pages.example.yaml](examples/bos-launchpad-cf-pages.example.yaml).
   See [Quick start §7](#7-cloudflare-pages-deploy-static-site-launchpad)
-  for the inline minimal-shape walkthrough.
+  for the inline kicker walkthrough.
+
+Full schema reference for `.bos-launchpad.yaml` is in the
+[schema section](#bos-launchpadyaml-schema-used-by-the-bos_launchpad_-services)
+below.
 
 ### Stage toggle policy (forward-compatibility guarantee)
 
@@ -1748,9 +1643,10 @@ appended after them and can override them or add additional keys.
 ## `sync-managed-files.yml` — reusable workflow
 
 Keep the dotfiles every consumer repo cares about — `.gitignore`,
-`.dockerignore`, `.editorconfig`, optionally `.gitattributes` — in
-sync with canonical content defined once in the hub. Two delivery
-modes are supported, picked per-service in [`sync.py`](.github/actions/sync-managed-files/sync.py):
+`.dockerignore`, `.editorconfig`, `.gitattributes`,
+`.github/dependabot.yml` — in sync with canonical content defined once
+in the hub. **Three** delivery modes are supported, picked per-service
+in [`sync.py`](.github/actions/sync-managed-files/sync.py):
 
 * **Section mode** (default for dotfiles) — only the text between
 
@@ -1761,38 +1657,427 @@ modes are supported, picked per-service in [`sync.py`](.github/actions/sync-mana
   ```
 
   is touched. Everything outside those markers is preserved verbatim,
-  including any user-authored rules in the same file.
+  including any user-authored rules in the same file. Files listed in
+  `SECTION_FILE_HEADERS` (currently `.github/dependabot.yml`) are
+  created with a top-level scaffold (`version: 2\nupdates:\n`) when
+  they don't already exist; existing files are left alone.
 
-* **Whole-file mode** (used by the `logger` service) — the target file
-  is overwritten outright with the canonical body, preceded by a
-  `# Managed by …` header comment so editors and `head` immediately
-  reveal the file is hub-owned. Use this when the entire file body is
-  authoritative (e.g. a shared shell library where there is no
-  meaningful per-consumer customization). A whole-file target may only
-  be claimed by one service, and may not also be a section target — a
-  conflict raises `RuntimeError` at sync time.
+* **Whole-file mode** (used by the `logger`, `prettier`,
+  `bos_launchpad_release`, and `bos_launchpad_cf_pages` services) —
+  the target file is overwritten outright with the canonical body,
+  preceded by a `# Managed by …` header comment so editors and `head`
+  immediately reveal the file is hub-owned. Use this when the entire
+  file body is authoritative (e.g. a shared shell library, a
+  formatter config, a thin kicker workflow that just calls a hub
+  reusable). Multiple services MAY target the same path (e.g. the two
+  `bos_launchpad_*` kickers both write
+  `.github/workflows/bos-launchpad.yml`); at most ONE may be enabled
+  per repo, enforced at parse time with a clear error message naming
+  both services and the contested path. A whole-file target may not
+  also be a section or init-if-missing target — that conflict raises
+  `RuntimeError` at import time.
+
+* **Init-if-missing mode** (used by the `gha_*` services) — the
+  target file is written ONCE on the first run if it does not exist,
+  preceded by an `# Initialized by …` header that explicitly states
+  the file is **safe to customize**. On subsequent runs the hub sees
+  the file present and does nothing — your edits are never
+  overwritten. Use this for starter templates (CI workflows, caller
+  workflow scaffolds) the consumer is expected to tune per repo.
+  Multiple services MAY target the same path (e.g. `gha_lint_node` /
+  `gha_lint_python` / `gha_lint_shell` all write
+  `.github/workflows/lint.yml`); at most ONE may be enabled per repo,
+  enforced at parse time with a clear error message naming both
+  services and the contested path.
 
 ### Services
 
 Pass the services your repo uses; pass nothing for the rest. Skipped
 services are **not** removed — they're simply ignored on this run.
 
-| Service           | Mode        | Files it contributes to                        | Contents (summary) |
-|-------------------|-------------|------------------------------------------------|--------------------|
-| `common`          | section     | `.gitignore`, `.editorconfig`                  | OS / editor noise, `.env*` + private-key ignores, LF + 2-space defaults. |
-| `docker`          | section     | `.dockerignore`                                | CI / git metadata, editor / OS noise, README / LICENSE / SECURITY.md, `.env*` and private keys. |
-| `balena`          | section     | `.dockerignore`                                | `!balena.yml` re-include (the hub renders this file into the build context before `balena push`). |
-| `node`            | section     | `.gitignore`, `.dockerignore`                  | `node_modules/`, `npm-debug.log*`, etc. |
-| `python`          | section     | `.gitignore`, `.dockerignore`                  | `__pycache__/`, `.venv/`, `.pytest_cache/`, etc. |
-| `lf_line_endings` | section     | `.gitattributes`                               | `* text=auto eol=lf` + binary-type marks. Opt-in (some repos legitimately need CRLF for Windows scripts). |
-| `logger`          | whole-file  | `root/usr/local/bin/log-functions.sh`          | Canonical shared logging library for s6-overlay init / svc scripts. Emits `<RFC3339 UTC> <tag>[<level>]: <msg>`. Supports both `log_info "x"` (function-per-level, `SVC_NAME`) and `log info "x"` (generic dispatcher, `LOG_TAG`) APIs so existing consumers keep working unchanged. Includes `LOG_LEVEL` gating, `log_kv`, and `log_pipe_cmd`. |
+| Service                | Mode             | Files it contributes to                          | Contents (summary) |
+|------------------------|------------------|--------------------------------------------------|--------------------|
+| `common`               | section          | `.gitignore`, `.editorconfig`                    | OS / editor noise, `.env*` + private-key ignores, LF + 2-space defaults. |
+| `docker`               | section          | `.dockerignore`                                  | CI / git metadata, editor / OS noise, README / LICENSE / SECURITY.md, `.env*` and private keys. |
+| `balena`               | section          | `.dockerignore`                                  | `!balena.yml` re-include (the hub renders this file into the build context before `balena push`). |
+| `node`                 | section          | `.gitignore`, `.dockerignore`                    | `node_modules/`, `npm-debug.log*`, etc. Don't enable for Marketplace Action repos — those have no Dockerfile and the `.dockerignore` becomes an orphan. |
+| `python`               | section          | `.gitignore`, `.dockerignore`                    | `__pycache__/`, `.venv/`, `.pytest_cache/`, etc. Same caveat as `node` re: orphan `.dockerignore` in non-Docker repos. |
+| `lf_line_endings`      | section          | `.gitattributes`                                 | `* text=auto eol=lf` + binary-type marks. Opt-in (some repos legitimately need CRLF for Windows scripts). |
+| `dependabot_actions`   | section          | `.github/dependabot.yml`                         | `package-ecosystem: github-actions` weekly schedule, grouped for `docker/*` and `actions/*` patterns. Recommended for every repo that uses GitHub Actions. Honors `dependabot_target_branch:` in `bos-managed-files.yaml` (see *Per-repo `bos-managed-files.yaml` config* below). |
+| `dependabot_npm`       | section          | `.github/dependabot.yml`                         | `package-ecosystem: npm` weekly schedule, grouped by `dev-dependencies` / `prod-dependencies`. Enable for Node Marketplace Action repos. Honors `dependabot_target_branch:`. |
+| `dependabot_pip`       | section          | `.github/dependabot.yml`                         | `package-ecosystem: pip` weekly schedule. Enable for Python Marketplace Action repos. Honors `dependabot_target_branch:`. |
+| `prettier`             | whole-file       | `.prettierrc.yaml`                               | Canonical Prettier config (semi, single-quote, trailing-comma, 100-char width, LF). YAML-flavored so the file can carry the "Managed by" header comment. |
+| `logger`               | whole-file       | `root/usr/local/bin/log-functions.sh`            | Canonical shared logging library for s6-overlay init / svc scripts. Emits `<RFC3339 UTC> <tag>[<level>]: <msg>`. Supports both `log_info "x"` (function-per-level, `SVC_NAME`) and `log info "x"` (generic dispatcher, `LOG_TAG`) APIs so existing consumers keep working unchanged. Includes `LOG_LEVEL` gating, `log_kv`, and `log_pipe_cmd`. |
+| `bos_launchpad_release` | whole-file      | `.github/workflows/bos-launchpad.yml`            | Hub-managed thin kicker for **container / Balena / GitHub-Release** workloads. Calls `bos-launchpad.yml@main` on a 6-hour cron + `main` push (paths-filtered) + `workflow_dispatch`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (schema below). Mutually exclusive with `bos_launchpad_cf_pages` — both target the same path. |
+| `bos_launchpad_cf_pages` | whole-file     | `.github/workflows/bos-launchpad.yml`            | Hub-managed thin kicker for **Cloudflare Pages** workloads. Calls `bos-launchpad.yml@main` on `main` push + `workflow_dispatch`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (schema below). Mutually exclusive with `bos_launchpad_release`. |
+| `gha_sync_commit`      | init-if-missing  | `.github/workflows/sync-managed-files.yml`       | Starter caller workflow that runs the hub's `sync-managed-files.yml` reusable in `commit` mode weekly. Carries a comment listing every known service so the maintainer can uncomment what their repo needs. |
+| `gha_sync_drift_check` | init-if-missing  | `.github/workflows/sync-drift-check.yml`         | PR-time drift gate that runs the same reusable in `check` mode against the dotfiles / dependabot / prettier targets. Fails the PR on drift. |
+| `gha_lint_node`        | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Node-based GitHub Action repos. Runs `actionlint` + `eslint` (`npm run lint`) + `prettier --check`. Mutually exclusive with `gha_lint_python` / `gha_lint_shell`. |
+| `gha_lint_python`      | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Python-based GitHub Action repos. Runs `actionlint` + `ruff check` + `pytest`. Mutually exclusive with `gha_lint_node` / `gha_lint_shell`. |
+| `gha_lint_shell`       | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for shell/bash-based GitHub Action repos. Runs `actionlint` + `shellcheck` + `bats`. Mutually exclusive with `gha_lint_node` / `gha_lint_python`. |
+| `license`              | init-if-missing  | `LICENSE`                                        | Multi-license: writes the canonical text for `license_type` in `bos-managed-files.yaml` (one of `apache-2.0`, `mit`, `bsd-3-clause`, `isc`; default `apache-2.0`). MIT / BSD-3-Clause / ISC carry `{{COPYRIGHT_YEAR_RANGE}}` and `{{COPYRIGHT_HOLDER}}` inline; Apache 2.0 is verbatim (per Apache convention, copyright lives in NOTICE). Written WITHOUT the "Initialized by hub" header so license-detection tools (GitHub linguist, FOSSA, etc.) match the canonical SHA. The hub will NEVER overwrite an existing LICENSE — switching license type after the first sync requires `git rm LICENSE` followed by re-sync (deliberate legal decision). Mutex with `license_apache2`. |
+| `license_apache2`      | init-if-missing  | `LICENSE`                                        | **Deprecated alias** kept for back-compat. ALWAYS emits Apache 2.0 regardless of `license_type` in config. Use `license` + `license_type: apache-2.0` for new repos. Mutex with `license`. |
+| `notice_apache2`       | init-if-missing  | `NOTICE`                                         | Apache 2.0-style NOTICE with placeholders rendered from `bos-managed-files.yaml` (schema below). Written WITHOUT the hub header (same reasoning as `license`). **Requires `license_type: apache-2.0` when used alongside `license`** — NOTICE files are an Apache 2.0 §4 distribution requirement and don't apply under MIT/BSD/ISC. The hub fails loud rather than silently producing a misleading NOTICE. |
+| `codeowners`           | init-if-missing  | `.github/CODEOWNERS`                             | Default CODEOWNERS with a catch-all `* @<team>` rule routing all PRs to the maintainers team. Placeholder rendered from `bos-managed-files.yaml`. Once present, the hub leaves the file alone — consumers add per-path overrides below the catch-all (last-match-wins). CODEOWNERS does NOT inherit from the org `.github` repo; each repo curates its own. |
+
+### `.bos-launchpad.yaml` schema (used by the `bos_launchpad_*` services)
+
+When you enable either `bos_launchpad_release` or `bos_launchpad_cf_pages`,
+the hub overwrites `.github/workflows/bos-launchpad.yml` with a thin
+"kicker" that calls the org's `bos-launchpad.yml@main` reusable
+meta-workflow. **All per-repo customization** (image name, upstream
+source, Balena type, Cloudflare project, …) is read at run-time from a
+**consumer-owned** `.bos-launchpad.yaml` file at the repo root. The
+hub never writes that file — you author it once and own it.
+
+The kicker pipes the file through `yq -o=json` (preinstalled on
+ubuntu-latest), validates it round-trips via Python's `json.loads`,
+emits it as a job output, then forwards every launchpad input via
+`${{ fromJson(needs.parse-config.outputs.cfg).<path>.<key> || '<default>' }}`.
+Missing keys cleanly fall through to the documented default — every
+section below is optional unless explicitly marked.
+
+**Schema (full reference — release flavor uses `upstream`, `stages`,
+`triggers`, `docker`, `scout`, `balena`, `companion_docker`,
+`release`, `platforms`; cf-pages flavor uses `stages` + `cloudflare`):**
+
+```yaml
+# .bos-launchpad.yaml — REQUIRED at repo root when either
+# `bos_launchpad_release` or `bos_launchpad_cf_pages` is enabled.
+# Schema docs: https://github.com/blackoutsecure/bos-automation-hub
+
+# ----- Upstream tracking (release flavor) -----
+upstream:
+  repo: ''                 # 'owner/repo' for github_* sources
+  source: 'github_release' # github_release | github_branch_file | github_tags | container_registry | npm | pypi | url
+  branch: ''               # for github_branch_file
+  version_file_path: 'version' # for github_branch_file
+  version_regex: ''        # optional capture-group regex
+  image_ref: ''            # for container_registry source
+  package_name: ''         # for npm / pypi
+  version_url: ''          # for url source
+  tag_pattern: ''          # for github_tags
+  track_file: '.github/upstream/tracked-release.json'
+
+# ----- Stage toggles (default: all false unless noted) -----
+stages:
+  docker: false
+  balena: false
+  github_release: false
+  companion_docker: false
+  cloudflare_pages: false  # cf-pages flavor; default true if section present
+
+# ----- Trigger gating (release flavor) -----
+triggers:
+  force_on_push: false     # `true` makes `git push` force a rebuild
+                           # even when upstream hasn't moved. Useful
+                           # for repos that build their own source
+                           # (e.g. docker-github-runner).
+
+# ----- Docker build & push -----
+docker:
+  image_name: ''
+  namespace_var: 'DOCKERHUB_NAMESPACE'   # name of vars.* lookup
+  extra_tags: ''
+  short_description: ''
+  latest: true             # default true (`!= false` semantics)
+  multi_arch: true
+  update_description: true
+
+# ----- Docker Scout vuln scan -----
+scout:
+  enable: true             # default true
+  command: 'cves'
+  severities: 'critical,high'
+  only_fixed: false
+  ignore_base: false
+  organization: ''
+  record_environment: ''
+  sarif_upload: true       # default true
+  exit_code: false
+  enable_repo: true        # default true
+
+# ----- Balena block publish -----
+balena:
+  block_name: ''
+  namespace_var: 'BALENA_NAMESPACE'
+  sync_yml: true           # default true
+  draft: false
+  generate_yml: false
+  type: 'sw.block'         # default 'sw.block'
+  repository_url: ''
+  logo_url: ''
+  default_device_type: ''
+  supported_device_types: |-
+    raspberrypi3-64
+    raspberrypi4-64
+    intel-nuc
+  description: ''          # multi-line markdown OK via |-
+  post_provisioning: ''    # multi-line markdown OK via |-
+
+# ----- Companion Docker image (optional sidecar) -----
+companion_docker:
+  image_name: ''
+  build_target: ''
+  short_description: ''
+
+# ----- GitHub Release publish -----
+release:
+  template_path: ''
+  extra_context: ''        # YAML / JSON map serialized as a string
+  generate_notes: true     # default true
+  files: ''
+  draft: false
+
+# ----- Shared -----
+platforms: 'linux/amd64,linux/arm64'
+
+# ----- Cloudflare Pages (cf-pages flavor) -----
+cloudflare:
+  project_name: ''
+  site_url: ''
+  deployment_environment: ''
+  public_dir: '.'
+  deploy_dir: './dist'
+  clean_deploy_dir: true   # default true
+  copy_files: |-           # one path per line — `|-` chomps trailing newline
+    index.html
+    robots.txt
+  copy_dirs: |-
+    assets
+  prebuild_command: ''
+  working_directory: ''
+  branch: ''
+  commit_message: ''
+  wrangler_version: ''
+  extra_wrangler_args: ''
+  runs_on: ''
+  checkout_fetch_depth: 0
+  purge_cache: true        # default true
+
+  # Cloudflare generators (default false — opt in per generator)
+  generate_sitemap: false
+  generate_robots: false
+  generate_security_txt: false
+  security_contact: ''
+  generate_manifest: false
+  manifest_name: ''
+  manifest_short_name: ''
+  manifest_description: ''
+  manifest_orientation: ''
+  manifest_theme_color: ''
+  manifest_background_color: ''
+  manifest_lang: ''
+  manifest_dir: ''
+  manifest_categories: ''
+  manifest_icons_dir: ''
+```
+
+**Repo-side `vars`:** the kicker defaults to looking up `vars.DOCKERHUB_NAMESPACE`
+and `vars.BALENA_NAMESPACE`; override the key names via
+`docker.namespace_var` and `balena.namespace_var` (the kicker resolves
+`vars[<expr>]` dynamically at run time).
+
+**Repo-side `secrets`:** the **release** kicker forwards
+`DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `BALENA_API_TOKEN`,
+`UPSTREAM_TOKEN` (last one optional, used only for private upstream
+repos). The **cf-pages** kicker forwards `CLOUDFLARE_API_TOKEN`,
+`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`.
+
+**Manual force:** every kicker exposes a `workflow_dispatch` input
+`force_run` (boolean). Checking it forces the release pipeline to run
+even when upstream hasn't moved, OR forces a cf-pages deploy past the
+hub's "only on default-branch pushes" gate.
+
+**Out-of-scope repos:** `blackoutmode/runner` has a hand-authored
+preflight job that has to gate the launchpad call. Don't enable
+either `bos_launchpad_*` service for that repo — keep its caller
+hand-authored.
+
+> **Migration tip:** see [examples/](examples/) for a worked
+> `.bos-launchpad.yaml` for each kicker flavor (release + cf-pages).
+
+### `bos-managed-files.yaml` schema (used by `license` / `notice_apache2` / `codeowners` / `dependabot_*`)
+
+Optional per-repo file at the repo root that supplies values for
+`{{KEY}}` placeholders rendered into the templated services. All
+keys are optional — when the file is absent OR a key is missing the
+hub falls back to org-canonical defaults. The file is parsed by a
+tiny stdlib-only flat-YAML reader: only `key: value` pairs are
+supported (no nesting, no lists, no multi-line scalars). Unknown
+keys, malformed lines, out-of-range years, unknown `license_type`,
+and invalid Git branch names fail the action.
+
+> **Visible filename (not a dotfile).** The config lives at
+> `bos-managed-files.yaml` — deliberately NOT a dotfile — so it shows
+> up in `ls`, file pickers, and code reviews without needing `ls -a`.
+
+```yaml
+# bos-managed-files.yaml
+# All keys optional. Comment lines (#) and inline comments are stripped.
+
+# Copyright holder rendered into LICENSE (MIT/BSD/ISC only) AND NOTICE.
+# Default: "Blackout Secure"
+copyright_holder: "Blackout Secure"
+
+# First-publication year for this repo. The hub computes
+# `COPYRIGHT_YEAR_RANGE` automatically:
+#   * unset OR equal to current year → "YYYY"
+#   * earlier year                   → "YYYY-current"
+# Must be between 1970 and the current year if set.
+# Default: "" (renders as just the current year)
+copyright_year_start: 2024
+
+# CODEOWNERS catch-all team. Must be a valid GitHub team slug or
+# username (prefix `@`). Last-match-wins per path, so consumers add
+# per-path overrides BELOW the catch-all rule.
+# Default: "@blackoutsecure/maintainers"
+maintainers_team: "@blackoutsecure/maintainers"
+
+# SPDX short identifier (lowercased) for the `license` service.
+# Supported: apache-2.0 | mit | bsd-3-clause | isc
+# Changing this does NOT rewrite an existing LICENSE — the `license`
+# service is init-if-missing; switching license type requires
+# `git rm LICENSE && <resync>` (deliberate legal decision).
+# Default: "apache-2.0"
+license_type: apache-2.0
+
+# Optional Dependabot target-branch override for ALL enabled
+# `dependabot_*` section services. When set, every ecosystem block
+# in `.github/dependabot.yml` gets a `target-branch: <value>` line
+# so Dependabot opens PRs against that branch instead of the repo
+# default. Useful for Marketplace Action repos that use the
+# dev/main split pattern (workflows + ongoing work live on `dev`;
+# `main` is the curated Marketplace artifact) — Dependabot itself
+# reads its config only from the default branch (`main`), so this
+# knob is the supported way to point PRs at `dev` without keeping
+# `dependabot.yml` on `main`.
+# Validated against `^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$`.
+# Default: "" (no `target-branch:` line — Dependabot uses the
+# repo default branch).
+dependabot_target_branch: dev
+```
+
+**Placeholder reference**
+
+| Placeholder              | Source                                            | Example output                  |
+|--------------------------|---------------------------------------------------|---------------------------------|
+| `{{COPYRIGHT_HOLDER}}`   | `copyright_holder` (default: `Blackout Secure`)   | `Blackout Secure`               |
+| `{{COPYRIGHT_YEAR_RANGE}}` | computed from `copyright_year_start` + current year | `2024-2026` or `2026`         |
+| `{{MAINTAINERS_TEAM}}`   | `maintainers_team` (default: `@blackoutsecure/maintainers`) | `@blackoutsecure/maintainers` |
+| `{{REPO_NAME}}`          | `GITHUB_REPOSITORY` (after the slash), else workspace basename | `docker-tar1090`           |
+| `{{REPO_OWNER}}`         | `GITHUB_REPOSITORY` (before the slash), else `blackoutsecure` | `blackoutsecure`              |
+| `{{DEPENDABOT_TARGET_BRANCH_LINE}}` | `dependabot_target_branch` (default: `""`) | `""` or `\n    target-branch: dev` |
+
+`{{KEY}}` markers in the canonical bodies are validated at module
+import time — an unknown placeholder name in any templated service
+body fails the action before any file is written, so typos cannot
+silently land in a consumer's committed file. The same import-time
+check walks every entry in `_LICENSE_REGISTRY` so unknown placeholders
+in MIT / BSD-3-Clause / ISC texts also fail fast.
+
+**License switching workflow**
+
+The `license` service is init-if-missing — changing `license_type`
+does NOT rewrite an existing `LICENSE` because re-licensing a
+distributed work is a legal decision that should be deliberate, not
+automated. To switch:
+
+1. Edit `bos-managed-files.yaml` → set new `license_type`.
+2. **STOP — first check whether your existing `LICENSE` is a
+   composite/forked file** (multiple Copyright holders, separator
+   lines, or significantly larger than canonical SPDX text). See the
+   "Composite LICENSE warning" section directly below. If yes, the
+   hub will emit a `::notice file=LICENSE::` annotation on every sync
+   when `license` is enabled — read it.
+3. `git rm LICENSE` (and `NOTICE` if dropping Apache 2.0).
+4. If dropping Apache, also remove `notice_apache2` from your
+   `services:` list (the hub will refuse to render NOTICE under
+   non-Apache `license_type`).
+5. Re-run the sync. The hub writes the new LICENSE; commit it.
+6. Update package metadata: `package.json` `"license"`,
+   `pyproject.toml` `[project] license`, etc. — these are NOT
+   managed by the hub.
+
+**Composite LICENSE warning (sub-licenses / forks / bundled upstream)**
+
+Many repos in the org carry **composite LICENSE files** — the
+maintainer's own license text PLUS appended sub-license sections for
+bundled upstream code or sub-components. Examples in this org:
+
+| Repo                | Top-level license  | Appended sub-licenses                       |
+|---------------------|--------------------|---------------------------------------------|
+| `docker-readsb`     | GPL-3.0+ (Docker packaging) | dump1090 (BSD-style, FlightAware), original dump1090 (Sanfilippo BSD) |
+| `docker-dump978`    | MIT (Docker packaging)      | dump978-fa (BSD-2-Clause, FlightAware)      |
+| `docker-graphs1090` | MIT (Docker packaging)      | graphs1090 upstream (MIT, wiedehopf)        |
+| `docker-tar1090`    | GPL-2.0+ (composite of tar1090 + dump1090 + Docker packaging) | (single composite file, no separators) |
+
+The `license` service is **safe by design** for these repos — the
+init-if-missing contract means the hub will NEVER overwrite an
+existing `LICENSE`. But two pitfalls remain:
+
+1. **Don't blindly `git rm LICENSE && resync` to switch
+   `license_type`** — the appended sub-licenses will be LOST,
+   replaced with just the canonical text for the new SPDX ID. Always
+   preserve the appended sections manually first (`grep -nE
+   '^Copyright|^-{20,}$' LICENSE` to find them).
+2. **Don't blindly enable `license` thinking the hub will manage
+   sub-licenses for you** — it won't. The hub only knows the four
+   single-license SPDX templates listed above. Sub-license content
+   stays in-repo and is the maintainer's responsibility.
+
+The hub detects composite LICENSE files via three heuristics
+(multiple distinct `Copyright (c) ...` lines, presence of
+`^-{20,}$` separator lines, or file size > 13000 bytes) and emits
+a `::notice file=LICENSE::` GitHub Actions annotation when `license`
+or `license_apache2` is enabled on such a repo. The notice fires on
+every sync run as a continuous heads-up. Behavior is unchanged —
+the file is never modified.
+
+**Why these three services don't inherit from `.github`**
+
+GitHub's [community-health inheritance](https://docs.github.com/communities/setting-up-your-project-for-healthy-contributions/creating-a-default-community-health-file)
+covers `README`, `CODE_OF_CONDUCT`, `CONTRIBUTING`, `GOVERNANCE`,
+`SECURITY`, `SUPPORT`, `FUNDING`, and the `ISSUE_TEMPLATE` /
+`PULL_REQUEST_TEMPLATE` / `DISCUSSION_TEMPLATE` directories. It does
+NOT cover `LICENSE` (every distributed work needs its own under
+copyright law; required for GitHub Marketplace listings), `NOTICE`
+(part of the Apache 2.0 distribution requirement under §4), or
+`CODEOWNERS` (used at PR-review time and resolved per-repo). For
+those three the hub centralizes the canonical content/template and
+delivers it on first sync; subsequent edits stay in-repo.
+
+**Roadmap: managed-mode for NOTICE and CODEOWNERS (deferred)**
+
+Two dynamic-update patterns are designed but not yet shipped — they
+deserve focused review on their own merits:
+
+- **NOTICE year-refresh** — every Jan 1, `{{COPYRIGHT_YEAR_RANGE}}`
+  in NOTICE should auto-bump (e.g. `2024-2025` → `2024-2026`)
+  without manual edits. Planned implementation: new
+  `notice_apache2_managed` service in `SERVICE_FILES` (whole-file
+  overwrite mode) sharing the NOTICE path with the existing
+  init-if-missing `notice_apache2`. Mutex per repo: pick one mode.
+- **CODEOWNERS team-rename propagation** — when `maintainers_team`
+  in `bos-managed-files.yaml` changes, the catch-all rule should
+  update without clobbering per-path overrides. Planned
+  implementation: new `codeowners_managed` service using
+  **section-mode** markers around just the catch-all line,
+  reusing the existing `apply_block()` mechanism. Per-path rules
+  below the marker pair survive untouched.
+
+LICENSE itself stays init-only (no managed-mode planned): changing
+a distributed work's LICENSE is a deliberate legal act, not
+something CI should automate. The init-if-missing semantics
+correctly model "hub provides the initial LICENSE, human owns
+subsequent changes."
 
 ### Modes
 
 | `mode:`  | Behaviour |
 |----------|-----------|
 | `commit` | (default) Write changes and push to the current branch using `shared/commit-and-push`, with rebase-retry on concurrent commits. |
-| `check`  | Compute drift only; print a unified diff in the job log; exit non-zero if any block drifted. Use in a PR caller to enforce that consumers commit canonical blocks. |
+| `check`  | Compute drift only; print a unified diff in the job log; exit non-zero if any block drifted. Use in a PR caller to enforce that consumers commit canonical blocks. Init-if-missing files are reported as drift on the FIRST run only (file would be created); subsequent runs see the file present and emit no change. |
 
 ### Minimal caller
 
@@ -1849,13 +2134,264 @@ jobs:
       mode: check
 ```
 
+### Marketplace Action repo enrollment
+
+GitHub Marketplace requires that the **default branch of an Action
+repo contain zero workflow files under `.github/workflows/`**. This
+is a hard prerequisite for publishing or remaining listed — source:
+[Publishing actions in GitHub Marketplace](https://docs.github.com/en/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace).
+The rule scope is `.github/workflows/*.yml` only; `.github/dependabot.yml`,
+`.github/CODEOWNERS`, etc. are unaffected.
+
+The hub solves this with a **two-branch model**:
+
+* **`main` (default branch)** — the published-to-Marketplace surface.
+  Contains `action.yml`, `src/`, `dist/`, README, LICENSE, NOTICE,
+  and nothing under `.github/workflows/`. Only the
+  [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote)
+  (invoked from [`release-promote.yml`](.github/workflows/release-promote.yml))
+  ever writes to this branch.
+* **`dev` (working branch)** — the day-to-day development surface.
+  Contains everything `main` has PLUS `.github/workflows/*.yml` (the
+  release caller, the guard caller, lint workflows, etc.). All PRs
+  target `dev`; CI runs on `dev`.
+
+When the operator wants to publish, they trigger the release caller
+on `dev`. The hub:
+
+1. Promotes an **allowlisted** set of paths from `dev` to `main` via
+   [`release-promote.yml`](.github/workflows/release-promote.yml). The
+   underlying [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote)
+   hard-rejects any allowlist entry that directly references
+   `.github/workflows` or a path under it. Listing a PARENT directory
+   (most commonly bare `.github`, to bring across `dependabot.yml`,
+   `CODEOWNERS`, `ISSUE_TEMPLATE/`, etc.) is allowed — the
+   `.github/workflows/` subtree is silently stripped from the staged
+   tree before commit, with a `::notice` listing the filtered files.
+2. Tags `main` at the promoted SHA.
+3. Calls [`github-release.yml`](.github/workflows/github-release.yml)
+   to render notes + create the Release, which is what triggers
+   Marketplace pickup.
+
+The promote is **wipe-and-replay**: anything on `main` that is NOT
+in the merged allowlist (`allowlist_paths` + the toggles + any
+`extra_sync_paths`) is REMOVED by the promote commit. The workflow
+surfaces two outputs to make this visible:
+
+* `removed_paths` — every path the promote deleted from `main`.
+* `removed_violations` — the subset that matched known
+  Marketplace-prohibited patterns (currently `.github/workflows/**`).
+  Non-empty means drift was caught — the job summary highlights it
+  as a warning so an operator notices and tightens the platform-level
+  rule that should have prevented the drift.
+
+PR-time fast feedback is provided by
+[`marketplace-repo-guard.yml`](.github/workflows/marketplace-repo-guard.yml),
+which fails any PR whose diff or post-merge tree state would put a
+workflow file onto `main`. Platform-level enforcement (the layer that
+catches direct pushes, UI merges, GraphQL writes, and force-pushes)
+is configured via the org ruleset under
+[`scripts/marketplace-repo/`](scripts/marketplace-repo/).
+
+The guard also exposes a symmetric **`required_paths`** input — a
+newline-separated list of paths that MUST exist on the protected
+branch AND must not be deleted by a PR. Recommended baseline for
+Marketplace Action repos is `.github/dependabot.yml`, `action.yml`,
+`LICENSE`, and `README.md`. The check runs in both directions:
+
+* **Tree-state direction** — fails the run if a required path is
+  currently absent from the protected branch (catches drift, e.g.
+  someone accidentally dropped `dependabot.yml` from `main` outside
+  the release flow).
+* **PR-diff direction** — fails the PR if its diff DELETES a
+  required path (catches the inverse regression where removing
+  `dependabot.yml` from `dev` would silently cascade to `main` on
+  the next promote and break Dependabot).
+
+The guard emits `missing_required` and `removed_required` outputs
+alongside the existing `violations` output, and surfaces all three
+in the job summary with per-failure remediation hints. Together with
+`blocked_paths`, this gives the guard a fully symmetric MUST-NOT-EXIST
+plus MUST-EXIST policy surface for the protected branch. See the
+[`bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)
+caller for a recommended baseline.
+
+#### Auto-sync of `.github/*` files to `main`
+
+Most `.github/*` files (everything except `.github/workflows/*.yml`)
+are allowed on a Marketplace repo's default branch. Some of them
+**only work when present on the default branch** — most notably
+`.github/dependabot.yml`, which Dependabot reads exclusively from
+the default branch. A `dev`-only `dependabot.yml` is ignored by
+Dependabot entirely.
+
+`release-promote.yml` exposes opt-in toggles for the safe-on-`main`
+files so they're auto-copied on every promote without each one
+needing to be listed manually in `allowlist_paths`:
+
+* **`include_dependabot_config: true` (default)** — auto-copies
+  `.github/dependabot.yml` if present on `dev`. Silently skipped if
+  absent. Leave on; this is the standard setup for Marketplace Action
+  repos that use Dependabot.
+* **`include_github_metadata: false` (default off)** — when `true`,
+  also auto-copies `.github/CODEOWNERS`, `.github/FUNDING.yml`,
+  `.github/SECURITY.md`, `.github/CONTRIBUTING.md`,
+  `.github/ISSUE_TEMPLATE/`, `.github/PULL_REQUEST_TEMPLATE.md`, and
+  `.github/PULL_REQUEST_TEMPLATE/`. Each is silently skipped if
+  absent. Off by default because most repos curate these explicitly
+  via `allowlist_paths`; flip on if you want all of them auto-synced.
+* **`extra_sync_paths: ''`** — free-form newline-separated extra
+  paths with the same hard-blocks but missing-on-`dev` entries are
+  silently skipped. Use for paths that may legitimately be absent on
+  some forks/snapshots.
+
+Recommended `.github/dependabot.yml` shape on `dev` (route
+Dependabot PRs to `dev` where CI runs, not to `main` which would
+only trip the marketplace guard):
+
+```yaml
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule: { interval: "weekly" }
+    target-branch: "dev"
+```
+
+The `dependabot_actions` / `dependabot_npm` / `dependabot_pip`
+services in `sync-managed-files` produce this layout for you on
+`dev`; the release caller propagates it to `main`.
+
+#### What is auto-setup vs manual setup
+
+| Setup item                                              | Auto-setup-able? | How                                                                                  |
+|---------------------------------------------------------|------------------|--------------------------------------------------------------------------------------|
+| PR-time block on workflow-file additions to `main`      | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (guard stage auto-routes for `pull_request_target`). |
+| PR-time `check` + branding preview + (opt-in) name check | **Yes**         | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (ci stage auto-routes for `pull_request`/`push`). |
+| PR-time block on deletion of `.github/dependabot.yml` (or other required files) | **Yes** | Same launchpad guard stage — default `required_paths` covers action.yml/LICENSE/NOTICE/README.md/dependabot; override `required_paths` on the caller to extend or replace. |
+| Hard-block on workflow paths during `dev -> main` promotion | **Yes**       | Baked into the [bos-marketplace-kit `promote` Action](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/promote) — cannot be disabled. |
+| `dev -> main` promotion + tag + Release publish         | **Yes**          | Drop `bos-marketplace-launchpad.example.yaml` on `dev` (release stage auto-routes for `workflow_dispatch` mode `release`). |
+| Auto-sync of `.github/dependabot.yml` to `main`         | **Yes**          | `include_dependabot_config: true` on the release caller (default on).                |
+| Auto-sync of `.github/CODEOWNERS` / `FUNDING.yml` / `ISSUE_TEMPLATE/` / `PULL_REQUEST_TEMPLATE.md` / `SECURITY.md` / `CONTRIBUTING.md` to `main` | **Yes** | `include_github_metadata: true` on the release caller (default off). |
+| Removal of Marketplace-violating files from `main` during promote | **Yes** | Inherent to wipe-and-replay; surfaced via `removed_violations` workflow output and job summary. |
+| Platform-level block on direct `main` writes (org-wide) | **Manual (one-time)** | `scripts/marketplace-repo/bootstrap-ruleset.sh blackoutsecure scripts/marketplace-repo/main-protection-ruleset.json`. Requires org admin. |
+| Platform-level block on direct `main` writes (per-repo) | **Manual (one-time)** | `scripts/marketplace-repo/bootstrap-branch-protection.sh <owner/repo> main`. Requires repo admin. Weaker (no `file_path_restriction`); relies on the in-PR guard. |
+| Setting default branch to `main`                        | **Manual (one-time)** | UI: Settings → Branches → default branch.                                       |
+| Creating the `dev` branch initially                     | **Manual (one-time)** | `git push origin main:dev`.                                                     |
+| First Marketplace publish acceptance                    | **Manual (one-time)** | Maintainer ticks "Publish to Marketplace" in the first Release UI; subsequent releases auto-publish. |
+
+#### Per-repo enrollment steps
+
+> **Two `bos-*-launchpad` reusables, two different domains.** The hub
+> ships parallel meta-workflows for the org's two repo families:
+>
+> * [`bos-launchpad.yml`](.github/workflows/bos-launchpad.yml) —
+>   **container / site** delivery (upstream monitor → Docker → Balena
+>   → GitHub Release; or Cloudflare Pages on push). Drives the
+>   `docker-*` family and `blackoutsecure-site`. Config-driven via
+>   `.bos-launchpad.yaml` + `sync-managed-files`-rendered caller.
+> * [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml) —
+>   **Marketplace Action publishing** (CI + guard + release). Drives
+>   `bos-sitemap-generator`, `bos-upstream-watcher`,
+>   `bos-nginx-config-validator`. Driven by a ~60-line thin caller
+>   on the consumer's `dev` branch (see
+>   [`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml)).
+>
+> Both follow the same shape — hub-side reusable, thin consumer
+> caller, all orchestration logic in the hub. They share no inputs,
+> no stages, and no event model; use the one that matches your repo
+> family.
+
+1. **Set the default branch to `main`** (UI: Settings → Branches).
+2. **Push `dev`**: `git push origin main:dev`.
+3. **On `dev`**, add the thin Marketplace Launchpad caller:
+   * `.github/workflows/bos-marketplace-launchpad.yml` — copy from
+     [`examples/bos-marketplace-launchpad.example.yaml`](examples/bos-marketplace-launchpad.example.yaml).
+     ~60 lines: event triggers + concurrency + a single `uses:` job
+     forwarding event context to the hub-side
+     [`bos-marketplace-launchpad.yml`](.github/workflows/bos-marketplace-launchpad.yml)
+     reusable, which composes the three single-purpose Marketplace
+     reusables (`marketplace-action-ci.yml` + `marketplace-repo-guard.yml`
+     + `release-promote.yml`) and routes each event-type internally.
+     Per-repo customization happens via the `with:` block on that one
+     job — typically just `runtime_artifact_dir: 'dist'` (JS Actions)
+     or `'src'` (composite Actions). All other inputs default to the
+     Marketplace minimum (`action.yml`, `LICENSE`, `NOTICE`,
+     `README.md`, `.github/dependabot.yml`); see the hub reusable for
+     the full overridable input list.
+4. **Enroll a sync-managed-files caller on `dev`** (NOT on `main`)
+   with the service set from the table below.
+5. **Apply platform-level enforcement** — once per org via
+   `scripts/marketplace-repo/bootstrap-ruleset.sh`, OR once per repo
+   via `scripts/marketplace-repo/bootstrap-branch-protection.sh`.
+6. **First release**: trigger the `bos-marketplace-launchpad.yml`
+   workflow from the Actions tab with mode `release` and the tag
+   (e.g. `v1.0.0`). The first time, also visit the Release in the
+   UI and tick "Publish to GitHub Marketplace". Subsequent releases
+   auto-publish.
+
+#### Service sets
+
+Service sets are split into **safe-on-`main`** (these write only to
+files allowed on a Marketplace repo's default branch) and
+**dev-branch-only** (these emit or modify `.github/workflows/*.yml`
+and would break Marketplace publishing if applied to `main`).
+
+The recommended setup is to enroll a sync-managed-files caller **on
+the `dev` branch** with both columns merged — `dev` carries
+everything. `main` is built only via `release-promote.yml`, which by
+design copies only the allowlisted paths and never workflow files.
+
+Do NOT enroll a sync-managed-files caller on `main` for Marketplace
+Action repos. The promote pipeline IS the way `main` gets updated.
+
+| Repo type                | Safe on `main` (via promotion if listed)                                    | Dev-branch only (workflow-emitting)                                       |
+|--------------------------|------------------------------------------------------------------------------|---------------------------------------------------------------------------|
+| Node Marketplace Action  | `common` `lf_line_endings` `dependabot_actions` `dependabot_npm` `prettier`  | `gha_sync_commit` `gha_sync_drift_check` `gha_lint_node`                  |
+| Python Marketplace Action| `common` `lf_line_endings` `dependabot_actions` `dependabot_pip`             | `gha_sync_commit` `gha_sync_drift_check` `gha_lint_python`                |
+| Shell Marketplace Action | `common` `lf_line_endings` `dependabot_actions`                              | `gha_sync_commit` `gha_sync_drift_check` `gha_lint_shell`                 |
+
+Notes:
+
+* `dependabot_*` services write `.github/dependabot.yml`, which is
+  **not** under `.github/workflows/` and is therefore Marketplace-safe.
+  They appear in the "safe on `main`" column. The file is
+  auto-propagated to `main` by the release caller via
+  `include_dependabot_config: true` (default) — critical because
+  Dependabot reads its config only from the default branch.
+* `gha_sync_commit`, `gha_sync_drift_check`, and `gha_lint_*` services
+  emit files under `.github/workflows/` and MUST stay confined to `dev`.
+  They are categorically incompatible with Marketplace publishing on
+  `main`.
+* `prettier` writes `.prettierrc.yaml`, also Marketplace-safe.
+* `node` / `python` / `docker` / `balena` / `logger` services target
+  container-build files (`.dockerignore`, `balena.yml`, s6-overlay)
+  that don't apply to Marketplace Action repos. Leave them disabled.
+
+#### First-sync cleanup
+
+Section services append the canonical block to existing files. If your
+hand-authored `.editorconfig` (or `.gitattributes`, etc.) already has
+content that overlaps with the canonical block, the result after the
+first sync will contain BOTH versions — the hand-authored block above
+the canonical block. EditorConfig / `.gitattributes` are last-match-wins
+so the canonical block takes effect, but the duplication is ugly. The
+one-time fix is: after the first sync commit lands, open the file,
+delete the hand-authored duplicates, keep only repo-specific
+extensions (e.g. `[*.sh] indent_size = 4`) outside the markers. The
+hub never touches anything outside its markers, so cleanup is
+permanent.
+
 ### Adding a new service
 
 Open [`sync.py`](.github/actions/sync-managed-files/sync.py), then:
 
 * **Section service** — add the block constant, register it in
   `SERVICE_BLOCKS`, and add a row to the table above. The block must
-  end with a newline so the close marker sits on its own line.
+  end with a newline so the close marker sits on its own line. If the
+  file requires a top-level scaffold (e.g. YAML / JSON header) for
+  the markered blocks to be syntactically valid in a fresh file, add
+  an entry to `SECTION_FILE_HEADERS`.
 
 * **Whole-file service** — add the canonical body as a Python
   triple-quoted string (use a raw string `r"""…"""` if it contains
@@ -1863,11 +2399,19 @@ Open [`sync.py`](.github/actions/sync-managed-files/sync.py), then:
   the target repo-relative path, and add a row to the table above. A
   whole-file path may only be claimed by one service — sync.py raises
   `RuntimeError` at import time if a path is double-registered or
-  appears in both `SERVICE_BLOCKS` and `SERVICE_FILES`.
+  appears in more than one mode.
 
-In both cases run the action's self-test in
+* **Init-if-missing service** — add the starter body (with a
+  leading explanatory comment is conventional), register it in
+  `SERVICE_INIT_FILES`, and add a row. Multiple services MAY claim
+  the same path here (intentional — see `gha_lint_*`); the
+  parse-time check in `parse_services()` then prevents a single repo
+  from enabling more than one of them.
+
+In all three cases run the action's self-test in
 [`.github/actions/sync-managed-files/`](.github/actions/sync-managed-files/)
-to confirm idempotency (a second run must produce zero drift).
+to confirm idempotency (a second run on a fully-synced repo must
+produce zero drift).
 
 ---
 

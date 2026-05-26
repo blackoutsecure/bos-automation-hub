@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=https://json.schemastore.org/none
+#
+# bos-managed-files.yaml — per-repo placeholder values for the
+# bos-automation-hub `license`, `notice_apache2`, and `codeowners`
+# sync services.
+#
+# Consumed by: blackoutsecure/bos-automation-hub/.github/actions/
+#              sync-managed-files/sync.py
+# Docs:        bos-automation-hub README → "`bos-managed-files.yaml` schema"
+#
+# Place this file at the repo ROOT (sibling to `LICENSE` / `NOTICE`)
+# as `bos-managed-files.yaml` — a VISIBLE filename, NOT a dotfile, so
+# it shows up in `ls`, file pickers, and code reviews without needing
+# `ls -a`.
+#
+# All keys are OPTIONAL — when this file is absent OR a key is
+# missing, the hub uses org-canonical defaults shown in parentheses.
+#
+# Flat YAML only: one `key: value` per line. No nesting, no lists,
+# no multi-line scalars. Comment lines (#) and inline comments are
+# stripped. Unknown keys, malformed lines, and out-of-range years
+# fail the sync.
+
+# Copyright holder rendered into LICENSE (MIT/BSD/ISC only — Apache
+# 2.0 LICENSE has no copyright slot; the Apache convention puts that
+# in NOTICE) AND into NOTICE.
+# Default: "Blackout Secure"
+copyright_holder: "Blackout Secure"
+
+# First-publication year for this repo. The hub computes
+# `COPYRIGHT_YEAR_RANGE` automatically:
+#   * unset OR equal to current year → "YYYY"        (e.g. "2026")
+#   * earlier year                   → "YYYY-current" (e.g. "2024-2026")
+# Must be between 1970 and the current year if set.
+# Default: "" (renders as just the current year)
+copyright_year_start: 2024
+
+# CODEOWNERS catch-all team — used in the default `* @<team>` rule.
+# Must be a valid GitHub team slug (prefix `@`) or username. Consumers
+# add per-path overrides BELOW the catch-all in the generated
+# `.github/CODEOWNERS` (CODEOWNERS uses last-match-wins semantics).
+# Default: "@blackoutsecure/maintainers"
+maintainers_team: "@blackoutsecure/maintainers"
+
+# SPDX short identifier (lowercased) for the `license` service. Picks
+# which canonical text the hub renders into `LICENSE`. Supported:
+#
+#   apache-2.0   — Apache License 2.0 (default; verbatim 201-line text,
+#                  no placeholders — copyright lives in NOTICE per
+#                  Apache convention).
+#   mit          — MIT License (~20 lines, `{{COPYRIGHT_YEAR_RANGE}}`
+#                  and `{{COPYRIGHT_HOLDER}}` inline).
+#   bsd-3-clause — BSD 3-Clause "Modified" License (~30 lines).
+#   isc          — ISC License (~15 lines, MIT-equivalent but with
+#                  distinct SPDX ID).
+#
+# NOTE: changing `license_type` does NOT rewrite an existing LICENSE
+# file — the `license` service is init-if-missing, so the hub only
+# writes LICENSE on the FIRST sync. Switching license type after the
+# fact requires `git rm LICENSE` followed by re-sync (deliberate
+# action; legal change requires human decision).
+#
+# COMPOSITE LICENSE WARNING: if your repo's existing LICENSE bundles
+# sub-licenses for upstream/forked code (multiple Copyright lines,
+# separator-of-dashes between sections, or notably larger than ~11KB
+# canonical), the hub detects this and emits a
+# `::notice file=LICENSE::` annotation on every sync. The file is
+# NEVER overwritten by the hub, BUT a careless `git rm LICENSE`
+# would lose the appended sub-licenses — preserve them manually
+# before deleting. Examples in this org: docker-readsb (GPL +
+# dump1090 BSD), docker-dump978 (MIT + FlightAware BSD-2),
+# docker-graphs1090 (MIT + upstream MIT), docker-tar1090
+# (composite GPL-2.0+).
+#
+# NOTE: the legacy `license_apache2` service IGNORES this setting and
+# always emits Apache 2.0 (back-compat for early adopters). New
+# consumers should use `license` + this key instead.
+#
+# NOTE: enabling `notice_apache2` REQUIRES `license_type: apache-2.0`
+# — NOTICE files are an Apache 2.0 §4 distribution requirement and
+# don't apply under MIT/BSD/ISC. The hub fails loud rather than
+# silently producing a misleading NOTICE.
+#
+# Default: "apache-2.0"
+license_type: apache-2.0
+

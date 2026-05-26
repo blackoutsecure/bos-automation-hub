@@ -18,17 +18,19 @@ machines on macOS at login.
 
 ## How the Install Script Works
 
-1. Renders a helper script at `/usr/local/bin/bos-utm-vm-autostart` that:
+1. **Pre-flight audit** (runs at the start of every `apply` and `--check`). Inspects each install target location and prints a PASS/FAIL report covering: OS, `UTM.app` install, `utmctl` reachability, helper script presence / content / executable bit / ownership, LaunchAgent plist presence / content / ownership. Failing rows include a "(will install)" / "(will replace)" / "(will fix)" hint so you can see — before any disk write — exactly what an apply will change.
+2. Renders a helper script at `/usr/local/bin/bos-utm-vm-autostart` that:
    - Resolves `utmctl` from `/usr/local/bin`, `/opt/homebrew/bin`, or `/Applications/UTM.app/Contents/MacOS/`.
    - Waits up to `UTM_AUTOSTART_BOOT_TIMEOUT` seconds for `UTM.app` to be running (UTM.app itself is expected to launch at login via its own Login Item — see "Prerequisite" below).
-   - Resolves the start list (either a baked-in explicit list or a regex match against `utmctl list` output — see "Choosing which VMs to autostart" below).
+   - Resolves the start list using one of three modes — `list` (a fixed set of VM names), `regex` (a POSIX ERE re-evaluated against `utmctl list` at every login), or `auto` (try the explicit list first; fall back to the regex if no explicit names match anything in `utmctl list`). See [Selection mode](#selection-mode--list-regex-or-auto) below.
    - For each VM in order, optionally skips it if its current status is not `stopped`, then calls `utmctl start "<vm name>"` with `UTM_AUTOSTART_DELAY_SECONDS` between starts.
-   - Logs every step to `/tmp/bos-utm-vm-autostart.log`.
+   - Logs every step to `/var/log/bos-utm-vm-autostart.log` (the same file the installer writes to, so every install run and every login-time helper run lands in one place).
    - Supports `bos-utm-vm-autostart --dry-run` to print the resolved start list (with current per-VM status) without invoking `utmctl start`.
-2. Renders a system-wide LaunchAgent at `/Library/LaunchAgents/app.blackoutsecure.utm-vm-autostart.plist` that runs the helper at every user login (`RunAtLoad`).
-3. Sets ownership (`root:wheel`) and permissions (`0755` helper, `0644` plist) on both files and `plutil -lint`s the plist before exiting.
-4. If a user is already logged in at the console, the LaunchAgent is best-effort `launchctl bootstrap`-ed into their GUI domain so changes take effect immediately; otherwise it loads at next login.
-5. Re-runs are idempotent: helper + plist content are byte-compared against the rendered desired state and only rewritten on drift.
+   - **Runtime-only** — the helper deliberately does *no* self-integrity / install-state checks. Its only job at login is to start the configured VMs. File / permission integrity is the installer's job (re-run `install-utm-vm-autostart.sh` to repair drift).
+3. Renders a system-wide LaunchAgent at `/Library/LaunchAgents/app.blackoutsecure.utm-vm-autostart.plist` that runs the helper at every user login (`RunAtLoad`).
+4. Sets ownership (`root:wheel`) and permissions (`0755` helper, `0644` plist) on both files and `plutil -lint`s the plist before exiting.
+5. If a user is already logged in at the console, the LaunchAgent is best-effort `launchctl bootstrap`-ed into their GUI domain so changes take effect immediately; otherwise it loads at next login.
+6. Re-runs are idempotent: the pre-flight audit shows what's drifted, helper + plist content are byte-compared against the rendered desired state, and only files that actually differ are rewritten. Permissions and ownership are unconditionally re-asserted as defense in depth against external `chmod`/`chown`.
 
 ## Why a single helper + one LaunchAgent (instead of one LaunchAgent per VM)
 
@@ -42,21 +44,79 @@ All configuration is supplied via environment variables read at install
 time and baked into the generated helper script. Re-run the installer
 to change them.
 
-### Selection model — set one of:
+### Selection mode — `list`, `regex`, or `auto`
+
+The helper picks VMs to start in one of three modes. Set
+`UTM_AUTOSTART_MODE` to force `list` or `regex`, or leave it on the
+default `auto` to accept either input — or both — and resolve at every
+login against the live `utmctl list` output.
+
+| `UTM_AUTOSTART_MODE` value | Behaviour |
+|---|---|
+| `auto` _(default)_ | Accept `UTM_AUTOSTART_VMS`, `UTM_AUTOSTART_MATCH`, or **both** (this is the only mode that allows both). At every login the helper: **(1)** tries the explicit list first, counting only names that actually exist in `utmctl list`; **(2)** if no list names matched, falls back to the regex; **(3)** if both yielded nothing, logs `"No VMs specified/found via either method..."` and exits 0. Missing list names are logged individually so you can spot typos. |
+| `list` | Force list mode. Requires `UTM_AUTOSTART_VMS` (or a baked-in `defaultvms`). Errors fast if `UTM_AUTOSTART_MATCH` is also set. **Strict** — passes every name to `utmctl start` verbatim; missing names produce a `utmctl` error in the log (no silent skip). |
+| `regex` | Force regex mode. Requires `UTM_AUTOSTART_MATCH` to be set. Errors fast if `UTM_AUTOSTART_VMS` is also set. |
+
+When to force a mode instead of using `auto`:
+
+- **`list`** — when you want missing VMs to fail loudly. `auto` silently skips list names that don't exist in `utmctl list` (so a typo just falls through to the regex); `list` mode makes them visible as `utmctl` errors per VM.
+- **`regex`** — when you've baked in a `defaultvms` and want to **prevent** it from short-circuiting the regex. In `auto` mode, a non-empty list (including `defaultvms`) is tried first.
+- Either forced mode also fails-fast if both env vars are supplied by mistake (CI/MDM ambiguity guard), which `auto` deliberately allows.
+
+There is also a `defaultmode` variable at the top of the installer
+(default `auto`) — flip it to `list` or `regex` to bake in the
+deployment's preferred mode.
+
+At every helper run, regardless of mode, a debug summary line is
+written to the log so you can confirm what was resolved:
+
+```
+... | Detected 2 VM(s) for autostart (via regex): prod-api, prod-web
+```
+
+In `auto` mode you'll also see one of:
+
+```
+... | Auto mode: trying explicit list first (3 candidate name(s) baked in)
+... |   auto/list: 'ghost-vm' not present in 'utmctl list' (skipped)
+... | Auto mode: explicit list matched 2 existing VM(s).
+```
+
+or, on fallback:
+
+```
+... | Auto mode: none of the explicit names exist in 'utmctl list'; falling back to regex.
+... | Auto mode: trying regex MATCH='^prod-' EXCLUDE='-dev$'
+... | Auto mode: regex matched 2 VM(s).
+```
+
+or, on total miss:
+
+```
+... | No VMs specified/found via either method (explicit list candidates=1, regex MATCH='^nope-' EXCLUDE=''). Nothing to autostart.
+```
+
+### Selection inputs
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `UTM_AUTOSTART_VMS` | _(unset)_ | **Explicit list.** Newline- or comma-separated VM names, started in the order given. Highest precedence. Predictable, version-controlled. |
-| `UTM_AUTOSTART_MATCH` | _(unset)_ | **Dynamic match.** POSIX ERE regex tested against the name column of `utmctl list` at every login. Picks up renames and new VMs automatically with no installer re-run. |
-| `UTM_AUTOSTART_EXCLUDE` | _(unset)_ | Optional ERE; dynamic-mode names matching this are skipped (only relevant with `UTM_AUTOSTART_MATCH`). |
+| `UTM_AUTOSTART_VMS` | _(unset)_ | **Explicit name list.** Newline- or comma-separated VM names, started in the order given. Predictable, version-controlled. Used by `list` mode and by `auto` mode's first-attempt resolution. |
+| `UTM_AUTOSTART_MATCH` | _(unset)_ | **Regex.** POSIX ERE tested against the name column of `utmctl list` at every login. Picks up renames and new VMs automatically with no installer re-run. Used by `regex` mode and by `auto` mode's fallback resolution. |
+| `UTM_AUTOSTART_EXCLUDE` | _(unset)_ | Optional ERE; names matching this are skipped during regex resolution (`regex` mode and `auto` mode's regex fallback). Does **not** apply to list resolution. |
 
-When `UTM_AUTOSTART_VMS` is set, the regex variables are ignored. When
-neither env var is set, the installer falls back to the `defaultvms`
-variable defined in the variables block at the top of the installer
-(empty by default). If `defaultvms` is also empty, the installer aborts
-with a helpful error rather than silently doing nothing — so you must
-either pass an env var at install time **or** edit `defaultvms` once to
-bake in a deployment-specific fallback list.
+In `auto` mode you may set `UTM_AUTOSTART_VMS` and `UTM_AUTOSTART_MATCH`
+simultaneously — the helper will try the explicit list first and fall
+back to the regex if the list yielded nothing (see
+[Selection mode](#selection-mode--list-regex-or-auto)). Forced `list`
+and `regex` modes reject the conflict at install time.
+
+When `UTM_AUTOSTART_MODE=auto` and neither selection env var is set,
+the installer falls back to the `defaultvms` variable defined in the
+variables block at the top of the installer (empty by default). If
+`defaultvms` is also empty, the installer warns loudly but still
+installs the helper + LaunchAgent — every login will log
+`"No VMs specified/found via either method..."` until a selection
+input is provided.
 
 ### Runtime tuning — always honored
 
@@ -72,7 +132,7 @@ bake in a deployment-specific fallback list.
 
 From most predictable to most dynamic:
 
-1. **Explicit list (env var)** — best when you have a small, stable set
+1. **List mode (env var)** — best when you have a small, stable set
    of VMs you want to manage from source control or your MDM script.
 
    ```bash
@@ -120,10 +180,39 @@ From most predictable to most dynamic:
         bash ./macos/application-management/utm-vm-autostart/install-utm-vm-autostart.sh
    ```
 
-At every login, the helper re-runs `utmctl list`, applies the regex,
-and (by default) skips any VM that isn’t in `stopped` state. There’s no
-daemon to restart and no installer re-run when you add or rename VMs
-in the UTM GUI.
+6. **List with regex fallback** (`auto` mode) — pin a known-good baseline
+   of explicitly-named VMs, and let a regex auto-pick up additional VMs
+   if the baseline list drifts (e.g. VMs renamed in the UTM GUI, fleet
+   roll-out where some Macs don't have the baseline VMs yet):
+
+   ```bash
+   # Prefer the explicit baseline; if no baseline names exist in
+   # 'utmctl list', fall back to anything matching '^prod-':
+   sudo UTM_AUTOSTART_MODE=auto \
+        UTM_AUTOSTART_VMS=$'web-vm\napi-vm\ndb-vm' \
+        UTM_AUTOSTART_MATCH='^prod-' \
+        UTM_AUTOSTART_EXCLUDE='-dev$' \
+        bash ./macos/application-management/utm-vm-autostart/install-utm-vm-autostart.sh
+   ```
+
+   The audit / `--check` output for this configuration shows both
+   sections so you can confirm both inputs are wired:
+
+   ```
+   Mode: auto  (try explicit list first; fall back to regex if no list names exist)
+   Explicit VMs:
+       - web-vm
+       - api-vm
+       - db-vm
+   Include regex: ^prod-
+   Exclude regex: -dev$
+   ```
+
+At every login, the helper re-runs `utmctl list`, applies the configured
+selection (list, regex, or list-then-regex in `auto` mode), and (by
+default) skips any VM that isn’t in `stopped` state. There’s no daemon
+to restart and no installer re-run when you add or rename VMs in the
+UTM GUI.
 
 ### Choosing which users to autostart for
 
@@ -172,14 +261,28 @@ Once installed, ask the helper exactly what it would do at next login:
 /usr/local/bin/bos-utm-vm-autostart --dry-run
 ```
 
-Sample output (dynamic mode, `MATCH='^prod-'`,
+Sample output (regex mode, `MATCH='^prod-'`,
 `SKIP_RUNNING=true`, one VM already running):
 
 ```
 ... | UTM.app detected after 0s; using /Applications/UTM.app/Contents/MacOS/utmctl
-... | ==== UTM VM autostart run begin (mode=dynamic, dry_run=true) ====
+... | ==== UTM VM autostart run begin (mode=regex, dry_run=true) ====
+... | Detected 2 VM(s) for autostart (via regex): prod-db-01, prod-web-01
 ... | Skipping (status=started): prod-web-01
 ... | DRY-RUN would start (status=stopped): prod-db-01
+... | ==== UTM VM autostart run end ====
+```
+
+Sample output (auto mode with `VMS=web-vm,api-vm` and `MATCH='^prod-'`,
+where `web-vm` was renamed in the UTM GUI to `web-vm-new`):
+
+```
+... | ==== UTM VM autostart run begin (mode=auto, dry_run=true) ====
+... | Auto mode: trying explicit list first (2 candidate name(s) baked in)
+... |   auto/list: 'web-vm' not present in 'utmctl list' (skipped)
+... | Auto mode: explicit list matched 1 existing VM(s).
+... | Detected 1 VM(s) for autostart (via list): api-vm
+... | DRY-RUN would start (status=stopped): api-vm
 ... | ==== UTM VM autostart run end ====
 ```
 
@@ -200,9 +303,7 @@ Configure UTM as a Login Item once, per user:
 |---|---|---|---|
 | `/usr/local/bin/bos-utm-vm-autostart` | `root:wheel` | `0755` | Helper script run by the LaunchAgent |
 | `/Library/LaunchAgents/app.blackoutsecure.utm-vm-autostart.plist` | `root:wheel` | `0644` | System-wide LaunchAgent (runs per-user at login) |
-| `/tmp/bos-utm-vm-autostart.log` | (login user) | `0644` | Per-run helper log (`stdout` + helper `log()` lines) |
-| `/tmp/bos-utm-vm-autostart.err.log` | (login user) | `0644` | LaunchAgent `stderr` |
-| `/var/log/installutmvmautostart.log` | `root:wheel` | `0644` | Installer log (apply + check modes) |
+| `/var/log/bos-utm-vm-autostart.log` | `root:wheel` | `0666` | Shared log: installer (apply / `--check` / `--uninstall`) **and** every per-user helper run (`stdout` + helper `log()` lines + LaunchAgent `stderr`). World-writable so the per-user LaunchAgent context can append. |
 
 ## Deployment
 
@@ -221,7 +322,7 @@ sudo UTM_AUTOSTART_VMS=$'ubuntu-server-24.04\ndebian-12-dev' \
      bash ./macos/application-management/utm-vm-autostart/install-utm-vm-autostart.sh
 ```
 
-- All installer activity is logged to `/var/log/installutmvmautostart.log`.
+- All installer **and** helper activity is logged to `/var/log/bos-utm-vm-autostart.log`.
 - Monitor the exit code in your MDM console:
   - `0` — success (installed or already in desired state)
   - `1` — failure (review log for details; includes "no VMs configured")
@@ -241,6 +342,13 @@ sudo UTM_AUTOSTART_VMS=$'my-vm-one\nmy-vm-two' \
 sudo UTM_AUTOSTART_VMS=$'my-vm-one\nmy-vm-two' \
      bash ./macos/application-management/utm-vm-autostart/install-utm-vm-autostart.sh --check
 ```
+
+`--check` runs the same pre-flight audit that `apply` runs (file
+locations, content, ownership, permissions) but exits without
+writing anything. Exit code `2` means drift was detected; re-run
+without `--check` to reconcile. `apply` always shows the audit
+first too, so you can see what it's about to change before any
+file is written.
 
 ## Uninstall
 

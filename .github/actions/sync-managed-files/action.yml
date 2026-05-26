@@ -1,23 +1,65 @@
 name: Sync managed dotfiles
 description: >-
   Ensure standardized "managed" sections exist in well-known dotfiles
-  (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`) for
-  each enabled service, AND deliver canonical whole files (e.g.
-  `root/usr/local/bin/log-functions.sh`) for whole-file services. For
+  (`.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`,
+  `.github/dependabot.yml`) for each enabled section service, AND
+  deliver canonical whole files (e.g. `root/usr/local/bin/log-functions.sh`,
+  `.prettierrc.yaml`, hub-managed thin kicker workflows in
+  `.github/workflows/`) for whole-file services, AND initialize starter
+  templates (`.github/workflows/*.yml`, `LICENSE`, `NOTICE`,
+  `.github/CODEOWNERS`) on first run for init-if-missing services. For
   section services, content between the `>>> bos-automation-hub:<svc>
-  >>>` / `<<< bos-automation-hub:<svc> <<<` markers is kept in sync with
-  the canonical blocks defined in `sync.py`; everything outside the
-  markers is left untouched. For whole-file services, the target file
-  is overwritten outright with the canonical body (preceded by a
-  hub-managed header comment). Disabled services are skipped entirely
-  — existing blocks / files for them are NOT touched.
+  >>>` / `<<< bos-automation-hub:<svc> <<<` markers is kept in sync
+  with the canonical blocks defined in `sync.py`; everything outside
+  the markers is left untouched. For whole-file services, the target
+  file is overwritten outright with the canonical body (preceded by a
+  hub-managed header comment). For init-if-missing services, the
+  target file is written ONCE when missing and NEVER overwritten
+  afterwards (preceded by an "Initialized by" header, EXCEPT for
+  `license` / `license_apache2` / `notice_apache2` which are
+  committed verbatim so license-detection tools recognize them).
+  Templated init services (`license`, `notice_apache2`, `codeowners`)
+  render `{{KEY}}` placeholders from per-repo
+  `bos-managed-files.yaml` at sync time. The `license` service
+  additionally resolves its canonical text from `_LICENSE_REGISTRY`
+  based on `license_type:` in that config file (apache-2.0 / mit /
+  bsd-3-clause / isc). Disabled services are skipped entirely —
+  existing blocks / files for them are NOT touched.
 
 inputs:
   services:
     description: >-
-      Newline- or whitespace-separated list of enabled services. Known
-      values: `common`, `docker`, `balena`, `node`, `python`,
-      `lf_line_endings`, `logger`. Unknown values fail the action.
+      Newline- or whitespace-separated list of enabled services.
+      Section: `common`, `docker`, `balena`, `node`, `python`,
+      `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
+      `dependabot_pip`. Whole-file: `logger`, `prettier`,
+      `bos_launchpad_release`, `bos_launchpad_cf_pages` (at most one
+      `bos_launchpad_*` per repo — both target the same
+      `.github/workflows/bos-launchpad.yml`; the enabled kicker reads
+      per-repo customization from `.bos-launchpad.yaml`).
+      Init-if-missing: `gha_sync_commit`, `gha_sync_drift_check`,
+      `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
+      one `gha_lint_*` per repo — all three target the same
+      `.github/workflows/lint.yml`), `license` (multi-license; picks
+      from `_LICENSE_REGISTRY` by `license_type:` in
+      `bos-managed-files.yaml`, supports apache-2.0 / mit /
+      bsd-3-clause / isc), `license_apache2` (deprecated alias
+      that always emits Apache 2.0; mutex with `license`),
+      `notice_apache2` (Apache 2.0 NOTICE; requires `license_type:
+      apache-2.0` when used with `license`), `codeowners`
+      (`.github/CODEOWNERS` with a default catch-all rule). The
+      license/notice/codeowners services render
+      `{{COPYRIGHT_HOLDER}}` / `{{COPYRIGHT_YEAR_RANGE}}` /
+      `{{MAINTAINERS_TEAM}}` / `{{REPO_NAME}}` / `{{REPO_OWNER}}`
+      placeholders from optional `bos-managed-files.yaml` at the
+      repo root (all keys default to org-canonical values when
+      absent). The `dependabot_*` section services additionally
+      consume an optional `dependabot_target_branch:` knob from
+      the same config file — when set (e.g. to `dev` for
+      Marketplace Action repos using the dev/main split), every
+      enabled ecosystem block gets a `target-branch:` override so
+      Dependabot opens PRs against that branch instead of the
+      repo default. Unknown values fail the action.
     required: true
   dry_run:
     description: >-
