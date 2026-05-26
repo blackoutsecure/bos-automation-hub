@@ -4,6 +4,9 @@
 # stage-level reusable workflows into one end-to-end loop so consumer repos
 # can drive a full pipeline from a thin ~15-line caller:
 #
+#   0. repo-code-scan.yml             — run repository security / posture
+#                                       scan gate (optional toggle,
+#                                       default on).
 #   1. monitor-upstream-release.yml   — poll upstream version, commit a
 #                                       tracking file, emit `changed` flag.
 #                                       Skipped when `upstream_repo` is empty.
@@ -137,6 +140,23 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: string
         default: ''
+
+      # ----- Security scan gate --------------------------------------------
+      enable_repo_code_scan:
+        description: 'Run repository code-scan gate before all other launchpad stages.'
+        required: false
+        type: boolean
+        default: true
+      code_scan_advanced_scanning:
+        description: 'Enable advanced posture probes (PS002/PS003) for the code-scan gate when SCANNING_PAT is available.'
+        required: false
+        type: boolean
+        default: false
+      code_scan_require_pat:
+        description: 'Fail the code-scan gate if advanced scanning is requested but SCANNING_PAT is missing.'
+        required: false
+        type: boolean
+        default: false
 
       # ----- Release pipeline: stage toggles -------------------------------
       # Policy: every stage toggle defaults to `false`. Callers must
@@ -722,6 +742,25 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Stage 0 — repository security / posture scan gate.
+  #
+  # This stage runs before monitor/release/pages and blocks all downstream
+  # launchpad stages on failure. Leave it on for universal "kicker" coverage.
+  # ---------------------------------------------------------------------------
+  code-scan:
+    name: Repository code scan
+    if: ${{ inputs.enable_repo_code_scan }}
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/repo-code-scan.yml
+    with:
+      advanced_scanning: ${{ inputs.code_scan_advanced_scanning }}
+      require_pat:       ${{ inputs.code_scan_require_pat }}
+    secrets: inherit
+
+  # ---------------------------------------------------------------------------
   # Stage 1 — detect upstream change (commits tracking file on the default branch).
   # `target_workflows` is left empty so we chain to the release job via `needs:`
   # instead of dispatching a separate workflow run (no DISPATCH_TOKEN needed).
@@ -756,12 +795,16 @@ jobs:
     # silently-skipped job (which is what the prior `upstream_repo`-only gate
     # did to `source: container_image` callers — every downstream job was
     # skipped with zero diagnostics).
+    needs: code-scan
     if: >-
       ${{
-        inputs.upstream_repo != ''
-        || inputs.image_ref    != ''
-        || inputs.package_name != ''
-        || inputs.version_url  != ''
+        (needs.code-scan.result == 'success' || needs.code-scan.result == 'skipped')
+        && (
+          inputs.upstream_repo != ''
+          || inputs.image_ref    != ''
+          || inputs.package_name != ''
+          || inputs.version_url  != ''
+        )
       }}
     permissions:
       contents: write   # commit the tracking file
@@ -907,7 +950,12 @@ jobs:
   # ---------------------------------------------------------------------------
   cloudflare-pages:
     name: Cloudflare Pages deploy
-    if: ${{ inputs.cloudflare_pages }}
+    needs: code-scan
+    if: >-
+      ${{
+        inputs.cloudflare_pages
+        && (needs.code-scan.result == 'success' || needs.code-scan.result == 'skipped')
+      }}
     permissions:
       contents: read
     uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
