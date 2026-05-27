@@ -15,10 +15,17 @@
 #
 # Hosted in the hub so a single bump of the `@v1` kit pin (or the
 # `github/codeql-action` SHA pins) here propagates to every caller that
-# opts in. Filename is intentionally generic (`repo-security-scan`) so
-# both launchpads — the Marketplace publishing launchpad AND the
-# container / site delivery launchpad — and direct callers (kit
-# `codeql.yml` files) all consume one wrapper.
+# opts in. Both launchpads — the Marketplace publishing launchpad
+# (`bos-launchpad-marketplace.yml`) AND the container / site delivery
+# launchpad (`bos-launchpad-release.yml`) — plus direct callers (kit
+# `bos-launchpad-code-scan.yml` files in producer repos like
+# `bos-marketplace-kit` and `bos-code-scanning-kit`) all consume this
+# one wrapper. Naming convention is `bos-launchpad-<domain>.yml` to
+# match the rest of the launchpad-family reusables. A byte-identical
+# `repo-security-scan.yml` duplicate that pre-dated the naming
+# convention was removed May 27 2026 — if you find lingering
+# references to that name in old branches or external docs, they
+# should point here.
 #
 # Caller hosting model: SARIF gets uploaded to the CALLER repo's Security
 # tab — `actions/checkout` clones the caller repo, then the kit / CodeQL

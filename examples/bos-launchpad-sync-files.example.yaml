@@ -1,0 +1,67 @@
+# .bos-launchpad.yaml — sync-files flavor example
+#
+# Copy to `.bos-launchpad.yaml` at your repo root and customize.
+# Required when the `bos_launchpad_sync_files` service is enabled in
+# your sync-managed-files caller — this is the META-kicker that
+# wraps the same `sync-managed-files.yml` reusable that writes the
+# kicker itself.
+#
+# Schema reference (full): see the "`.bos-launchpad.yaml` schema"
+# section in the hub README.
+# https://github.com/blackoutsecure/bos-automation-hub
+#
+# Note: this block can coexist with `release:` / `cloudflare:` blocks
+# in the same `.bos-launchpad.yaml`. A repo may enable all three
+# kickers — they write different workflow files and are NOT mutex.
+
+# ----- Managed-files sync -----
+sync_files:
+  # REQUIRED: which service bundles to keep in sync from the hub.
+  # Common starter sets (mix and match):
+  #   common              — base .editorconfig / .gitattributes / etc.
+  #   docker              — Dockerfile lint config + .dockerignore
+  #   balena              — balena.yml scaffold (balena fleets only)
+  #   logger              — s6-overlay logger conf (sdr-enthusiasts pattern)
+  #   lf_line_endings     — force LF in .gitattributes for portability
+  #
+  # The hub README has the canonical list under
+  # "sync-managed-files services".
+  services:
+    - common
+    - docker
+    - balena
+    - logger
+    - lf_line_endings
+
+  # ----- Optional overrides (all have sensible defaults) -----
+
+  # mode: 'commit' (default) = the reusable commits drift back to
+  # the default branch. 'check' = open a PR or fail if drift found
+  # (no auto-commit). Workflow-dispatch input overrides this.
+  mode: 'commit'
+
+  # commit_message: shown on the auto-commit when `mode: commit`
+  # detects drift. Default is shown — set if you want a different
+  # subject line (e.g. to match a Conventional Commits scope).
+  commit_message: 'chore: sync managed files from bos-automation-hub'
+
+  # git_user_name / git_user_email: identity for the auto-commit.
+  # Defaults below use the github-actions[bot] identity, which is
+  # what GitHub displays for Actions-authored commits in PR diffs.
+  # Override if you front the bot behind a GitHub App or want
+  # commits signed under a different identity.
+  git_user_name: 'github-actions[bot]'
+  git_user_email: '41898282+github-actions[bot]@users.noreply.github.com'
+
+  # push_retries: how many times to retry `git push` on failure
+  # (transient lock contention, parallel pushes, etc.). Default 3.
+  push_retries: 3
+
+  # runs_on: runner label or JSON array string of labels. Default
+  # 'ubuntu-latest'. Self-hosted example:
+  #   runs_on: '["self-hosted","linux","x64"]'
+  runs_on: 'ubuntu-latest'
+
+  # timeout_minutes: hard cap on the sync job. Default 5. Bump if
+  # you sync many services and saw timeouts in practice.
+  timeout_minutes: 5

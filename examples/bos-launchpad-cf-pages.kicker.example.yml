@@ -1,0 +1,154 @@
+# =============================================================================
+# SNAPSHOT — DO NOT EDIT. Auto-extracted from the hub's sync-managed-files
+#   action; the canonical source lives in
+#   `.github/actions/sync-managed-files/sync.py` as the Python string
+#   constant _BOS_LAUNCHPAD_CF_PAGES_YML.
+#
+# Purpose: shows what the hub writes into a consumer repo's
+#   `.github/workflows/bos-launchpad-cf-pages.yml` when the `bos_launchpad_cf_pages`
+#   service is enabled in that repo's `bos-managed-files.yaml`. Read this
+#   file to understand the kicker contract; do NOT copy it by hand into a
+#   consumer repo — the hub will overwrite any hand-authored copy on the
+#   next sync (and silently drift from the example here if you do).
+#
+# Per-repo customization happens in `.bos-launchpad.yaml` at the consumer
+# repo root, NOT in this file. See the matching data-file example:
+#   * release flavor    → `examples/bos-launchpad-release.example.yaml`
+#   * cf-pages flavor   → `examples/bos-launchpad-cf-pages.example.yaml`
+#   * sync-files flavor → `examples/bos-launchpad-sync-files.example.yaml`
+#
+# To refresh this snapshot after editing the constant in sync.py:
+#   python3 scripts/sync-kicker-examples-from-sync.py
+# =============================================================================
+
+# Blackout Secure Launchpad — Cloudflare Pages kicker (hub-managed).
+#
+# Calls `bos-launchpad-release.yml` in blackoutsecure/bos-automation-hub. Reads
+# per-repo customization from `.bos-launchpad.yaml` at the repo root.
+#
+# CUSTOMIZE via `.bos-launchpad.yaml` — NOT this file. The hub
+# overwrites this workflow in place on every sync; hand-edits are
+# lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
+#
+# Required secrets:
+#   CLOUDFLARE_API_TOKEN — Account → Cloudflare Pages → Edit, plus
+#     Zone → Cache Purge → Purge and Zone → Zone → Read when
+#     `cloudflare.purge_cache: true` (the default). Zone:Read also
+#     lets the purge step auto-resolve the zone ID from the site URL.
+#   CLOUDFLARE_ACCOUNT_ID — optional; auto-resolved via `GET /accounts`
+#   CLOUDFLARE_ZONE_ID    — optional; auto-resolved from site URL
+name: Blackout Secure Launchpad
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force: deploy even when the auto gate would skip'
+        type: boolean
+        default: false
+
+# No top-level `concurrency:` — the hub workflow owns per-project
+# Cloudflare Pages serialization; both sides would deadlock.
+permissions:
+  contents: read
+
+jobs:
+  parse-config:
+    name: Parse .bos-launchpad.yaml
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      cfg: ${{ steps.read.outputs.cfg }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Convert .bos-launchpad.yaml to JSON
+        id: read
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f .bos-launchpad.yaml ]]; then
+            echo "::error file=.bos-launchpad.yaml::Required config file not found. See https://github.com/blackoutsecure/bos-automation-hub for the schema."
+            exit 1
+          fi
+          if ! cfg="$(yq -o=json -I=0 '.' .bos-launchpad.yaml)"; then
+            echo "::error file=.bos-launchpad.yaml::YAML parse error (see preceding yq output)."
+            exit 1
+          fi
+          if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
+            echo "::error file=.bos-launchpad.yaml::Resulting JSON did not parse — yq emitted invalid output."
+            exit 1
+          fi
+          {
+            echo "cfg<<__BOS_EOF__"
+            echo "$cfg"
+            echo "__BOS_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+  launchpad:
+    name: Cloudflare Pages
+    needs: parse-config
+    permissions:
+      # GHA validates nested reusable-workflow permissions STATICALLY
+      # at workflow-call time, so the full superset declared by leaf
+      # jobs in the launchpad (monitor, release, github-release,
+      # cloudflare-pages) must be granted here even though only the
+      # cloudflare-pages stage runs at runtime.
+      contents:        write
+      actions:         write
+      pull-requests:   write
+      security-events: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
+    with:
+      # ----- Cloudflare Pages stage -----
+      cloudflare_pages:                     ${{ fromJson(needs.parse-config.outputs.cfg).stages.cloudflare_pages != false }}
+      cloudflare_project_name:              ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.project_name || '' }}
+      cloudflare_deployment_environment:    ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.deployment_environment || '' }}
+      cloudflare_site_url:                  ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.site_url || '' }}
+      cloudflare_public_dir:                ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.public_dir || '.' }}
+      cloudflare_deploy_dir:                ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.deploy_dir || './dist' }}
+      cloudflare_clean_deploy_dir:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.clean_deploy_dir != false }}
+      # `|-` chomps the trailing newline so multi-line caller values
+      # (one path per line) stay byte-stable through the kicker →
+      # launchpad → deploy-cloudflare-pages chain.
+      cloudflare_copy_files: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.copy_files || '' }}
+      cloudflare_copy_dirs: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.copy_dirs || '' }}
+      cloudflare_prebuild_command:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.prebuild_command || '' }}
+      cloudflare_working_directory:         ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.working_directory || '' }}
+      cloudflare_branch:                    ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.branch || '' }}
+      cloudflare_commit_message:            ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.commit_message || '' }}
+      cloudflare_wrangler_version:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.wrangler_version || '' }}
+      cloudflare_extra_wrangler_args:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.extra_wrangler_args || '' }}
+      # Force gating: manual dispatch + `force_run` checkbox forces a
+      # deploy past the hub's "only on default-branch pushes" default.
+      cloudflare_deploy:                    ${{ github.event_name == 'workflow_dispatch' && inputs.force_run && 'true' || '' }}
+      cloudflare_runs_on:                   ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.runs_on || '' }}
+      cloudflare_checkout_fetch_depth:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.checkout_fetch_depth || 0 }}
+      cloudflare_purge_cache:               ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.purge_cache != false }}
+
+      # ----- Generators -----
+      cloudflare_generate_sitemap:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_sitemap == true }}
+      cloudflare_generate_robots:           ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_robots == true }}
+      cloudflare_generate_security_txt:     ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_security_txt == true }}
+      cloudflare_security_contact:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.security_contact || '' }}
+      cloudflare_generate_manifest:         ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_manifest == true }}
+      cloudflare_manifest_name:             ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_name || '' }}
+      cloudflare_manifest_short_name:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_short_name || '' }}
+      cloudflare_manifest_description:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_description || '' }}
+      cloudflare_manifest_orientation:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_orientation || '' }}
+      cloudflare_manifest_theme_color:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_theme_color || '' }}
+      cloudflare_manifest_background_color: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_background_color || '' }}
+      cloudflare_manifest_lang:             ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_lang || '' }}
+      cloudflare_manifest_dir:              ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_dir || '' }}
+      cloudflare_manifest_categories:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_categories || '' }}
+      cloudflare_manifest_icons_dir:        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_icons_dir || '' }}
+    secrets:
+      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}

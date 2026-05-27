@@ -38,7 +38,13 @@ inputs:
       `.github/workflows/bos-launchpad-release.yml` and
       `bos_launchpad_cf_pages` writes
       `.github/workflows/bos-launchpad-cf-pages.yml`; the enabled
-      kicker reads per-repo customization from `.bos-launchpad.yaml`).
+      kicker reads per-repo customization from `.bos-launchpad.yaml`),
+      `bos_launchpad_sync_files` (delivers the meta-kicker at
+      `.github/workflows/bos-launchpad-sync-files.yml` that calls
+      `sync-managed-files.yml@main` on a schedule, reading its
+      `services:` list from the `sync_files:` block of
+      `.bos-launchpad.yaml`; orthogonal to the release / cf-pages
+      kickers — a repo may enable any combination).
       Init-if-missing: `gha_sync_commit`, `gha_sync_drift_check`,
       `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
       one `gha_lint_*` per repo — all three target the same

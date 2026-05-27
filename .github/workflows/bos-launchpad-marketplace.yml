@@ -15,8 +15,9 @@
 #                                       Routed for `pull_request`, `push`,
 #                                       and `workflow_dispatch` mode
 #                                       `name-check`.
-#   2. bos-launchpad-code-scan.yml         — opt-in security scanning stage.
-#                                       Wraps the published
+#   2. bos-launchpad-code-scan.yml         — consolidated security scanning
+#                                       stage (ON by default). Wraps the
+#                                       published
 #                                       `blackoutsecure/bos-code-scanning-
 #                                       kit@v1` Marketplace Action
 #                                       (posture audit + bundled scanners:
@@ -27,11 +28,12 @@
 #                                       the caller's Security tab via
 #                                       independent uploads. Routed for
 #                                       `pull_request` + `push`. Gated by
-#                                       `enable_security_scan` input;
-#                                       CodeQL within the stage is further
-#                                       gated by `security_scan_codeql_
-#                                       languages` being non-empty. Shared
-#                                       with the delivery `bos-launchpad`.
+#                                       `enable_security_scan` input
+#                                       (default `true`); CodeQL within
+#                                       the stage is further gated by
+#                                       `security_scan_codeql_languages`
+#                                       being non-empty. Shared with the
+#                                       delivery `bos-launchpad`
 #                                       reusable so a single wrapper bump
 #                                       propagates everywhere.
 #   3. marketplace-repo-guard.yml     — PR-time block on workflow files or
@@ -61,10 +63,10 @@
 # Per-job permissions are scoped least-privilege at the sub-reusable level:
 #   * ci            — `contents: read` only.
 #   * security_scan — `security-events: write`, `contents: read`,
-#                     `actions: read` (only when
-#                     `enable_security_scan: true`). Covers BOTH the kit
-#                     composite sub-job AND the CodeQL matrix sub-job
-#                     inside the wrapper.
+#                     `actions: read` (ON by default; only suppressed
+#                     when the caller passes `enable_security_scan:
+#                     false`). Covers BOTH the kit composite sub-job
+#                     AND the CodeQL matrix sub-job inside the wrapper.
 #   * guard         — `contents: read`, `pull-requests: read`.
 #   * release       — `contents: write`.
 #
@@ -312,10 +314,10 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         type: string
         default: 'skip'
 
-      # ----- Security scan stage (opt-in) -----
-      # When `enable_security_scan: true`, the launchpad runs the
-      # consolidated `bos-launchpad-code-scan.yml` wrapper against the
-      # consumer kit on the same events as `ci` (pull_request + push to
+      # ----- Security scan stage (ON by default) -----
+      # When `enable_security_scan` is true (the default), the launchpad
+      # runs the consolidated `bos-launchpad-code-scan.yml` wrapper against
+      # the consumer kit on the same events as `ci` (pull_request + push to
       # dev). The wrapper has TWO independent sub-jobs:
       #   * `scan`   — the published `blackoutsecure/bos-code-scanning-
       #               kit@v1` composite: posture audit + bundled scanners
@@ -342,13 +344,30 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
       # `launchpad` job's `permissions:` block) REGARDLESS of whether
       # `enable_security_scan` is set. GitHub validates the nested-job
       # permission cascade at workflow-load time, BEFORE evaluating the
-      # job's `if:` gate. Omitting the grants when `enable_security_scan:
-      # false` produces a hard load-time failure:
+      # job's `if:` gate. Omitting the grants — even when the caller
+      # explicitly sets `enable_security_scan: false` to disable the
+      # stage — produces a hard load-time failure:
       #   The nested job 'security_scan' is requesting
       #   'actions: read, security-events: write', but is only allowed
       #   'actions: none, security-events: none'.
       enable_security_scan:
-        description: 'Enable consolidated security scanning (kit composite + CodeQL) via the launchpad. Default `false`. NOTE: caller MUST grant `security-events: write` + `actions: read` at workflow level UNCONDITIONALLY (even when this input is `false`) — GitHub validates the nested `security_scan` job''s permission cascade statically, before the `if:` gate.'
+        description: 'Enable consolidated security scanning (kit composite + CodeQL) via the launchpad. Default `true`. NOTE: caller MUST grant `security-events: write` + `actions: read` at workflow level UNCONDITIONALLY (even when this input is `false`) — GitHub validates the nested `security_scan` job''s permission cascade statically, before the `if:` gate.'
+        required: false
+        type: boolean
+        default: true
+      security_scan_use_advanced_pat:
+        description: >-
+          Forwarded to the code-scan wrapper as `use_advanced_pat`. When
+          `true` AND the caller forwards a non-empty `scanning_pat`
+          secret (typically via `secrets: inherit` from a caller that
+          defines `secrets.SCANNING_PAT`), the kit composite runs the
+          elevated posture probes PS001 (code scanning default-setup),
+          PS002 (secret scanning enabled), and PS003 (Dependabot
+          alerts enabled) which require `repo` + admin scope beyond
+          what the default `GITHUB_TOKEN` grants. When `false` (default)
+          or the secret is empty, those probes are surfaced as `skip`
+          findings and the rest of the scan still runs with the
+          baseline `GITHUB_TOKEN`.
         required: false
         type: boolean
         default: false
@@ -538,6 +557,27 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         type: string
         default: ''
 
+    secrets:
+      scanning_pat:
+        description: >-
+          PAT forwarded to the consolidated security-scan stage's kit
+          composite, used for the elevated posture probes PS001/PS002/
+          PS003 (code-scanning default-setup, secret-scanning enablement,
+          Dependabot alerts enablement) which need `repo` + admin scope
+          beyond the default `GITHUB_TOKEN`. Optional. Ignored unless
+          `inputs.security_scan_use_advanced_pat` is `true`. Easiest
+          pass-through from the caller: declare `secrets: inherit` on
+          the launchpad `uses:` block and define `SCANNING_PAT` as an
+          org or repo secret. Fine-grained PAT minimum permissions on
+          each target repo:
+            * Code scanning alerts: Read   (PS001)
+            * Secret scanning alerts: Read (PS002)
+            * Dependabot alerts: Read      (PS003)
+            * Administration: Read         (for branch-protection probes)
+          Classic PAT equivalent: `repo` scope, granted by an org owner
+          or repo admin.
+        required: false
+
 jobs:
   # ---------------------------------------------------------------------------
   # Stage 1 — Marketplace Action CI (PR-time check + branding + name-check).
@@ -627,6 +667,17 @@ jobs:
       enable_upload:        ${{ inputs.security_scan_enable_upload }}
       codeql_languages:     ${{ inputs.security_scan_codeql_languages }}
       codeql_queries:       ${{ inputs.security_scan_codeql_queries }}
+      use_advanced_pat:     ${{ inputs.security_scan_use_advanced_pat }}
+    secrets:
+      # Optional pass-through. The code-scan reusable only consults this
+      # when `use_advanced_pat` is `true`; otherwise the kit composite
+      # falls back to the runner's default `github.token`. `secrets:`
+      # block on a reusable-job invocation may NOT use `secrets: inherit`
+      # syntax when forwarding into another reusable, so the assignment
+      # is explicit. Callers forward via `secrets: inherit` at the OUTER
+      # `uses:` block, which is what makes `secrets.scanning_pat`
+      # resolvable here.
+      scanning_pat: ${{ secrets.scanning_pat }}
 
   # ---------------------------------------------------------------------------
   # Stage 2 — Marketplace repo compliance guard.

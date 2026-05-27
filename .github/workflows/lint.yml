@@ -27,6 +27,10 @@ on:
       - '**/*.yaml'
       - '**/*.sh'
       - '.shellcheckrc'
+      # Kicker drift guard: any edit to either side of the
+      # snapshot-vs-source pair must re-run the drift check.
+      - '.github/actions/sync-managed-files/sync.py'
+      - 'scripts/sync-kicker-examples-from-sync.py'
   pull_request:
     paths:
       - '**/*.md'
@@ -34,6 +38,8 @@ on:
       - '**/*.yaml'
       - '**/*.sh'
       - '.shellcheckrc'
+      - '.github/actions/sync-managed-files/sync.py'
+      - 'scripts/sync-kicker-examples-from-sync.py'
   workflow_dispatch:
 
 permissions:
@@ -99,3 +105,23 @@ jobs:
           #        .yamllint.yml        (yamllint)
           #        .shellcheckrc        (shellcheck)
           severity: 'warn'
+
+  kicker-examples-drift:
+    # Fails fast if `examples/bos-launchpad-*.kicker.example.yml` is out
+    # of sync with the kicker constants in
+    # `.github/actions/sync-managed-files/sync.py`. Those snapshots are
+    # documentation-only renders of what the hub writes into consumer
+    # repos; when they drift, contributors reading the example get a
+    # silently-wrong picture of the contract. Refresh locally with
+    # `python3 scripts/sync-kicker-examples-from-sync.py`.
+    name: kicker example snapshot drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Verify snapshots match sync.py
+        run: python3 scripts/sync-kicker-examples-from-sync.py --check
+

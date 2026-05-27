@@ -166,9 +166,9 @@ jobs:
       # require_security_devops:      'skip'   # MS001
       # require_scorecard:            'skip'   # SR001
 
-      # ----- Consolidated security scan (opt-in) -----
-      # Adds a `security_scan` stage that runs in parallel with `ci` on
-      # `pull_request` + `push` events. Wraps the published
+      # ----- Consolidated security scan (ON by default) -----
+      # `security_scan` runs in parallel with `ci` on `pull_request` +
+      # `push` events. Wraps the published
       # `blackoutsecure/bos-code-scanning-kit@v1` composite (posture +
       # bundled scanners: actionlint / gitleaks / shellcheck + unified
       # SARIF upload) AND `github/codeql-action` (matrix-parallel
@@ -177,24 +177,60 @@ jobs:
       # PERMISSIONS REQUIREMENT (STATIC, UNCONDITIONAL):
       # The CALLER workflow MUST grant the following at workflow level
       # AND in this `launchpad:` job's `permissions:` block, REGARDLESS
-      # of whether `enable_security_scan` is set or true. GitHub
-      # validates the nested `security_scan` job's permission cascade
-      # statically at workflow-load time, BEFORE evaluating the `if:`
-      # gate, so omitting these grants while leaving the input default
-      # (`false`) ALSO breaks the workflow:
+      # of whether `enable_security_scan` is left at the default `true`
+      # or explicitly disabled. GitHub validates the nested
+      # `security_scan` job's permission cascade statically at workflow-
+      # load time, BEFORE evaluating the `if:` gate, so omitting these
+      # grants while disabling the stage ALSO breaks the workflow:
       #   security-events: write
       #   actions:         read
       #
-      # enable_security_scan:               true
-      # security_scan_fail_on:              fail            # `fail` (default) gates the build; `never` audits only.
+      # Default: enabled. Override to disable:
+      # enable_security_scan:               false
+      #
+      # Other forwarded knobs (all optional; defaults shown):
+      # security_scan_fail_on:              fail            # `fail` gates the build on findings; `never` audits only.
       # security_scan_enable_kit_composite: true            # Set `false` for CodeQL-only mode (producer-kit pattern).
       # security_scan_enable_posture:       true
       # security_scan_enable_scanners:      true
       # security_scan_enable_upload:        true
       # security_scan_codeql_languages:     '["python", "actions"]'   # Empty (default) skips CodeQL entirely. JSON array with DOUBLE-QUOTED strings — `[python, actions]` is rejected by `fromJSON`.
       # security_scan_codeql_queries:       'security-and-quality'
+      #
+      # ----- Advanced posture probes (PS001/PS002/PS003) -----
+      # The kit's elevated posture probes (code-scanning default-setup,
+      # secret-scanning enablement, Dependabot alerts enablement) hit
+      # repo-admin API endpoints that the default `GITHUB_TOKEN` cannot
+      # reach. They surface as `skip` findings without an admin-scoped
+      # PAT. To upgrade them to real pass/fail:
+      #
+      # 1. Create a PAT (fine-grained recommended) with these minimums
+      #    on each target repo:
+      #      * Code scanning alerts:   Read   (PS001)
+      #      * Secret scanning alerts: Read   (PS002)
+      #      * Dependabot alerts:      Read   (PS003)
+      #      * Administration:         Read   (branch-protection probes)
+      #    Classic PAT equivalent: `repo` scope, granted by an org
+      #    owner or repo admin.
+      # 2. Store it as an org or repo secret named `SCANNING_PAT`.
+      # 3. On the launchpad `uses:` block below, declare
+      #    `secrets: inherit` so the secret is forwarded to the nested
+      #    `security_scan` reusable, and uncomment the input toggle:
+      #
+      # security_scan_use_advanced_pat: true
 
       # ----- Release dispatch inputs (ignored for non-release events) -----
       tag_name:      ${{ inputs.tag_name || '' }}
       dry_run:       ${{ inputs.dry_run || false }}
       release_draft: ${{ inputs.draft || false }}
+
+    # ----- Secret pass-through (uncomment when SCANNING_PAT is set) -----
+    # Required ONLY when `security_scan_use_advanced_pat: true` above
+    # AND your org/repo has a `SCANNING_PAT` secret defined. Without
+    # this line, the secret is not forwarded to the nested
+    # `security_scan` reusable and PS001/PS002/PS003 surface as `skip`
+    # findings (the rest of the scan still runs with `github.token`).
+    # `secrets: inherit` is the simplest form; if your repo carries
+    # other secrets you don't want exposed to the launchpad, use the
+    # explicit form `secrets: { scanning_pat: ${{ secrets.SCANNING_PAT }} }`.
+    # secrets: inherit

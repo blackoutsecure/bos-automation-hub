@@ -1239,6 +1239,141 @@ jobs:
 """
 
 
+_BOS_LAUNCHPAD_SYNC_FILES_YML = """\
+# Blackout Secure Launchpad — sync-managed-files kicker (hub-managed).
+#
+# Calls `sync-managed-files.yml` in blackoutsecure/bos-automation-hub.
+# Reads per-repo customization from `.bos-launchpad.yaml` at the repo
+# root (the `sync_files:` block).
+#
+# CUSTOMIZE via `.bos-launchpad.yaml` — NOT this file. The hub
+# overwrites this workflow in place on every sync; hand-edits are
+# lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
+#
+# This kicker REPLACES the hand-authored `sync-managed-files.yml`
+# caller pattern. Once `bos_launchpad_sync_files` is enabled, retire
+# any pre-existing `.github/workflows/sync-managed-files.yml` caller
+# in the consumer repo to avoid two scheduled workflows racing on
+# `git push`. The hub's reusable still lives at
+# `.github/workflows/sync-managed-files.yml` — only the *caller*
+# pattern moves to this kicker.
+name: Blackout Secure Launchpad (sync managed files)
+
+on:
+  schedule:
+    # Weekly Monday 14:29 UTC. The hub's reusable normalizes / commits
+    # any drift since the last run; consumers don't need staggered
+    # minutes the way 1-min jobs do — GHA's scheduled-run jitter
+    # absorbs cross-repo collisions for short pipelines.
+    - cron: '29 14 * * 1'
+  push:
+    branches: [main]
+    # Push-trigger only on data-file edits — the workflow file itself
+    # is hub-managed, and source dotfile edits (`.gitignore` etc.)
+    # are caught by the consumer's separate `sync-drift-check.yml`
+    # PR-time job if present.
+    paths:
+      - '.bos-launchpad.yaml'
+      - 'bos-managed-files.yaml'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode: commit drift back, or check-only'
+        type: choice
+        options: [commit, check]
+        default: commit
+
+# No top-level `concurrency:` — the hub workflow owns serialization.
+# Declaring it on both sides triggers a GHA self-deadlock.
+permissions:
+  contents: read
+
+jobs:
+  parse-config:
+    name: Parse .bos-launchpad.yaml
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      cfg: ${{ steps.read.outputs.cfg }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Convert .bos-launchpad.yaml to JSON
+        id: read
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f .bos-launchpad.yaml ]]; then
+            echo "::error file=.bos-launchpad.yaml::Required config file not found. See https://github.com/blackoutsecure/bos-automation-hub for the schema."
+            exit 1
+          fi
+          if ! cfg="$(yq -o=json -I=0 '.' .bos-launchpad.yaml)"; then
+            echo "::error file=.bos-launchpad.yaml::YAML parse error (see preceding yq output)."
+            exit 1
+          fi
+          if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
+            echo "::error file=.bos-launchpad.yaml::Resulting JSON did not parse — yq emitted invalid output."
+            exit 1
+          fi
+          # Sanity-check `sync_files.services` is a non-empty list.
+          # The reusable also validates this, but failing here points
+          # the operator at the data file instead of the kicker run.
+          # `# shellcheck disable=SC2016` — the embedded python uses
+          # bash-special characters (backticks, `${}`-looking braces
+          # via f-strings) that shellcheck mis-flags as broken bash
+          # expansion. They are correct python literals.
+          # shellcheck disable=SC2016
+          if ! echo "$cfg" | python3 -c '
+          import json, sys
+          cfg = json.loads(sys.stdin.read())
+          sf = (cfg or {}).get("sync_files") or {}
+          svcs = sf.get("services")
+          if not isinstance(svcs, list) or not svcs:
+              print("::error file=.bos-launchpad.yaml::sync_files.services must be a non-empty YAML list of service names.", file=sys.stderr)
+              sys.exit(1)
+          for s in svcs:
+              if not isinstance(s, str) or not s.strip():
+                  print("::error file=.bos-launchpad.yaml::sync_files.services entry is not a non-blank string: " + repr(s), file=sys.stderr)
+                  sys.exit(1)
+          '; then
+            exit 1
+          fi
+          {
+            echo "cfg<<__BOS_EOF__"
+            echo "$cfg"
+            echo "__BOS_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+  sync:
+    name: Sync managed dotfiles
+    needs: parse-config
+    permissions:
+      # `contents: write` required for `mode: commit`; harmless in
+      # `mode: check`. The reusable's leaf job declares the same.
+      contents: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
+    with:
+      # `join(<list>, ' ')` forwards the YAML list as a space-separated
+      # string — the reusable's `parse_services` accepts whitespace OR
+      # newline separation, so no `\\n` trickery is needed.
+      services: ${{ join(fromJson(needs.parse-config.outputs.cfg).sync_files.services, ' ') }}
+      # Mode precedence: workflow_dispatch input → data-file default →
+      # `commit`. Scheduled and push events never carry an input so
+      # they fall through to the data-file default.
+      mode: ${{ inputs.mode || fromJson(needs.parse-config.outputs.cfg).sync_files.mode || 'commit' }}
+      # Outer YAML quotes required: the default literal contains a
+      # `:` which YAML would otherwise treat as a nested mapping.
+      commit_message: "${{ fromJson(needs.parse-config.outputs.cfg).sync_files.commit_message || 'chore: sync managed files from bos-automation-hub' }}"
+      git_user_name:   ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.git_user_name || 'github-actions[bot]' }}
+      git_user_email:  ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.git_user_email || '41898282+github-actions[bot]@users.noreply.github.com' }}
+      push_retries:    ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.push_retries || 3 }}
+      runs_on:         ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.runs_on || 'ubuntu-latest' }}
+      timeout_minutes: ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.timeout_minutes || 5 }}
+"""
+
+
 # --------------------------------------------------------------------------- #
 # Templated whole-file canonical content (LICENSE / NOTICE / CODEOWNERS)      #
 # --------------------------------------------------------------------------- #
@@ -2056,6 +2191,9 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     },
     "bos_launchpad_cf_pages": {
         ".github/workflows/bos-launchpad-cf-pages.yml": _BOS_LAUNCHPAD_CF_PAGES_YML,
+    },
+    "bos_launchpad_sync_files": {
+        ".github/workflows/bos-launchpad-sync-files.yml": _BOS_LAUNCHPAD_SYNC_FILES_YML,
     },
 }
 

@@ -1,0 +1,210 @@
+# =============================================================================
+# SNAPSHOT — DO NOT EDIT. Auto-extracted from the hub's sync-managed-files
+#   action; the canonical source lives in
+#   `.github/actions/sync-managed-files/sync.py` as the Python string
+#   constant _BOS_LAUNCHPAD_RELEASE_YML.
+#
+# Purpose: shows what the hub writes into a consumer repo's
+#   `.github/workflows/bos-launchpad-release.yml` when the `bos_launchpad_release`
+#   service is enabled in that repo's `bos-managed-files.yaml`. Read this
+#   file to understand the kicker contract; do NOT copy it by hand into a
+#   consumer repo — the hub will overwrite any hand-authored copy on the
+#   next sync (and silently drift from the example here if you do).
+#
+# Per-repo customization happens in `.bos-launchpad.yaml` at the consumer
+# repo root, NOT in this file. See the matching data-file example:
+#   * release flavor    → `examples/bos-launchpad-release.example.yaml`
+#   * cf-pages flavor   → `examples/bos-launchpad-cf-pages.example.yaml`
+#   * sync-files flavor → `examples/bos-launchpad-sync-files.example.yaml`
+#
+# To refresh this snapshot after editing the constant in sync.py:
+#   python3 scripts/sync-kicker-examples-from-sync.py
+# =============================================================================
+
+# Blackout Secure Launchpad — release kicker (hub-managed).
+#
+# Calls `bos-launchpad-release.yml` in blackoutsecure/bos-automation-hub. Reads
+# per-repo customization from `.bos-launchpad.yaml` at the repo root.
+#
+# CUSTOMIZE via `.bos-launchpad.yaml` — NOT this file. The hub
+# overwrites this workflow in place on every sync; hand-edits are
+# lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
+#
+# Required vars   (names overridable via `.bos-launchpad.yaml`):
+#   DOCKERHUB_NAMESPACE, BALENA_NAMESPACE
+# Required secrets:
+#   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
+#   UPSTREAM_TOKEN (optional — only for private upstream repos)
+name: Blackout Secure Launchpad
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'   # stagger off :00 to dodge org cron pile-ups
+  push:
+    branches: [main]
+    # Source paths that should trigger the workflow on commit. Whether
+    # push events actually FORCE a rebuild is controlled by
+    # `triggers.force_on_push` in `.bos-launchpad.yaml` (default
+    # `false`: a push that doesn't move upstream is a no-op release).
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'root/**'
+      - 'build/**'
+      - 'scripts/**'
+      - '.github/upstream/**'
+      - '.bos-launchpad.yaml'
+      - '.github/workflows/bos-launchpad-release.yml'
+  workflow_dispatch:
+    inputs:
+      force_run:
+        description: 'Force: run pipeline even if upstream unchanged'
+        type: boolean
+        default: false
+
+# No top-level `concurrency:` — the hub workflow owns serialization.
+# Declaring it on both sides triggers a GHA self-deadlock.
+permissions:
+  contents: read
+
+jobs:
+  parse-config:
+    name: Parse .bos-launchpad.yaml
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      cfg: ${{ steps.read.outputs.cfg }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Convert .bos-launchpad.yaml to JSON
+        id: read
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f .bos-launchpad.yaml ]]; then
+            echo "::error file=.bos-launchpad.yaml::Required config file not found. See https://github.com/blackoutsecure/bos-automation-hub for the schema."
+            exit 1
+          fi
+          # yq is preinstalled on ubuntu-latest GitHub-hosted runners.
+          # `-I=0` emits compact (single-line) JSON to keep the GHA
+          # output payload small and avoid heredoc edge cases.
+          if ! cfg="$(yq -o=json -I=0 '.' .bos-launchpad.yaml)"; then
+            echo "::error file=.bos-launchpad.yaml::YAML parse error (see preceding yq output)."
+            exit 1
+          fi
+          # Round-trip through python's JSON parser as a sanity check —
+          # catches any yq quirk that produces non-conformant JSON.
+          if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
+            echo "::error file=.bos-launchpad.yaml::Resulting JSON did not parse — yq emitted invalid output."
+            exit 1
+          fi
+          # Heredoc framing tolerates literal newlines inside string
+          # values even though we asked yq for compact JSON.
+          {
+            echo "cfg<<__BOS_EOF__"
+            echo "$cfg"
+            echo "__BOS_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Release
+    needs: parse-config
+    permissions:
+      contents:        write   # monitor tracking-file commit + GitHub Release publish
+      actions:         write   # nested monitor (`gh workflow run`)
+      pull-requests:   write   # nested Docker Scout PR annotations
+      security-events: write   # nested Docker Scout SARIF upload
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
+    with:
+      # ----- Monitor stage -----
+      upstream_repo:     ${{ fromJson(needs.parse-config.outputs.cfg).upstream.repo || '' }}
+      source:            ${{ fromJson(needs.parse-config.outputs.cfg).upstream.source || 'github_release' }}
+      upstream_branch:   ${{ fromJson(needs.parse-config.outputs.cfg).upstream.branch || '' }}
+      version_file_path: ${{ fromJson(needs.parse-config.outputs.cfg).upstream.version_file_path || 'version' }}
+      version_regex:     ${{ fromJson(needs.parse-config.outputs.cfg).upstream.version_regex || '' }}
+      image_ref:         ${{ fromJson(needs.parse-config.outputs.cfg).upstream.image_ref || '' }}
+      package_name:      ${{ fromJson(needs.parse-config.outputs.cfg).upstream.package_name || '' }}
+      version_url:       ${{ fromJson(needs.parse-config.outputs.cfg).upstream.version_url || '' }}
+      tag_pattern:       ${{ fromJson(needs.parse-config.outputs.cfg).upstream.tag_pattern || '' }}
+      track_file:        ${{ fromJson(needs.parse-config.outputs.cfg).upstream.track_file || '.github/upstream/tracked-release.json' }}
+      # Force gating: schedule NEVER forces; push forces only when the
+      # data file opts in via `triggers.force_on_push: true`; dispatch
+      # honours the operator checkbox.
+      force_run: ${{ (github.event_name == 'push' && fromJson(needs.parse-config.outputs.cfg).triggers.force_on_push == true) || (github.event_name == 'workflow_dispatch' && inputs.force_run) }}
+
+      # ----- Stage toggles -----
+      docker:           ${{ fromJson(needs.parse-config.outputs.cfg).stages.docker == true }}
+      balena:           ${{ fromJson(needs.parse-config.outputs.cfg).stages.balena == true }}
+      github_release:   ${{ fromJson(needs.parse-config.outputs.cfg).stages.github_release == true }}
+      companion_docker: ${{ fromJson(needs.parse-config.outputs.cfg).stages.companion_docker == true }}
+
+      # ----- Docker stage -----
+      image_name:                ${{ fromJson(needs.parse-config.outputs.cfg).docker.image_name || '' }}
+      # `vars[<expr>]` does dynamic key lookup against the `vars`
+      # context. Default `DOCKERHUB_NAMESPACE` matches the historic
+      # caller convention; override via `docker.namespace_var`.
+      dockerhub_namespace:       ${{ vars[fromJson(needs.parse-config.outputs.cfg).docker.namespace_var || 'DOCKERHUB_NAMESPACE'] }}
+      docker_extra_tags:         ${{ fromJson(needs.parse-config.outputs.cfg).docker.extra_tags || '' }}
+      docker_short_description:  ${{ fromJson(needs.parse-config.outputs.cfg).docker.short_description || '' }}
+      # `!= false` semantics: missing key → null → null != false → true.
+      # Match the launchpad's own default (true) for these flags.
+      docker_latest:             ${{ fromJson(needs.parse-config.outputs.cfg).docker.latest != false }}
+      docker_multi_arch:         ${{ fromJson(needs.parse-config.outputs.cfg).docker.multi_arch != false }}
+      docker_update_description: ${{ fromJson(needs.parse-config.outputs.cfg).docker.update_description != false }}
+      docker_force: ${{ (github.event_name == 'push' && fromJson(needs.parse-config.outputs.cfg).triggers.force_on_push == true) || (github.event_name == 'workflow_dispatch' && inputs.force_run) }}
+
+      # ----- Docker Scout -----
+      docker_enable_scout:             ${{ fromJson(needs.parse-config.outputs.cfg).scout.enable != false }}
+      docker_scout_command:            ${{ fromJson(needs.parse-config.outputs.cfg).scout.command || 'cves' }}
+      docker_scout_severities:         ${{ fromJson(needs.parse-config.outputs.cfg).scout.severities || 'critical,high' }}
+      docker_scout_only_fixed:         ${{ fromJson(needs.parse-config.outputs.cfg).scout.only_fixed == true }}
+      docker_scout_ignore_base:        ${{ fromJson(needs.parse-config.outputs.cfg).scout.ignore_base == true }}
+      docker_scout_organization:       ${{ fromJson(needs.parse-config.outputs.cfg).scout.organization || '' }}
+      docker_scout_record_environment: ${{ fromJson(needs.parse-config.outputs.cfg).scout.record_environment || '' }}
+      docker_scout_sarif_upload:       ${{ fromJson(needs.parse-config.outputs.cfg).scout.sarif_upload != false }}
+      docker_scout_exit_code:          ${{ fromJson(needs.parse-config.outputs.cfg).scout.exit_code == true }}
+      docker_scout_enable_repo:        ${{ fromJson(needs.parse-config.outputs.cfg).scout.enable_repo != false }}
+
+      # ----- Balena stage -----
+      block_name:                 ${{ fromJson(needs.parse-config.outputs.cfg).balena.block_name || '' }}
+      balena_namespace:           ${{ vars[fromJson(needs.parse-config.outputs.cfg).balena.namespace_var || 'BALENA_NAMESPACE'] }}
+      balena_sync_yml:            ${{ fromJson(needs.parse-config.outputs.cfg).balena.sync_yml != false }}
+      balena_draft:               ${{ fromJson(needs.parse-config.outputs.cfg).balena.draft == true }}
+      balena_force: ${{ (github.event_name == 'push' && fromJson(needs.parse-config.outputs.cfg).triggers.force_on_push == true) || (github.event_name == 'workflow_dispatch' && inputs.force_run) }}
+      balena_generate_yml:        ${{ fromJson(needs.parse-config.outputs.cfg).balena.generate_yml == true }}
+      balena_type:                ${{ fromJson(needs.parse-config.outputs.cfg).balena.type || 'sw.block' }}
+      balena_repository_url:      ${{ fromJson(needs.parse-config.outputs.cfg).balena.repository_url || '' }}
+      balena_logo_url:            ${{ fromJson(needs.parse-config.outputs.cfg).balena.logo_url || '' }}
+      balena_default_device_type: ${{ fromJson(needs.parse-config.outputs.cfg).balena.default_device_type || '' }}
+      # `|-` chomps the trailing newline that a plain `|` block would
+      # add at each forwarding hop, so multi-line caller values stay
+      # byte-stable through the kicker → launchpad → release.yml chain.
+      balena_description: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).balena.description || '' }}
+      balena_post_provisioning: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).balena.post_provisioning || '' }}
+      balena_supported_device_types: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).balena.supported_device_types || '' }}
+
+      # ----- Companion Docker stage -----
+      companion_image_name:               ${{ fromJson(needs.parse-config.outputs.cfg).companion_docker.image_name || '' }}
+      companion_build_target:             ${{ fromJson(needs.parse-config.outputs.cfg).companion_docker.build_target || '' }}
+      companion_docker_short_description: ${{ fromJson(needs.parse-config.outputs.cfg).companion_docker.short_description || '' }}
+
+      # ----- GitHub Release stage -----
+      release_template_path:  ${{ fromJson(needs.parse-config.outputs.cfg).release.template_path || '' }}
+      release_extra_context:  ${{ fromJson(needs.parse-config.outputs.cfg).release.extra_context || '' }}
+      generate_release_notes: ${{ fromJson(needs.parse-config.outputs.cfg).release.generate_notes != false }}
+      release_files:          ${{ fromJson(needs.parse-config.outputs.cfg).release.files || '' }}
+      release_draft:          ${{ fromJson(needs.parse-config.outputs.cfg).release.draft == true }}
+
+      # ----- Shared -----
+      platforms: ${{ fromJson(needs.parse-config.outputs.cfg).platforms || 'linux/amd64,linux/arm64' }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
+      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
+      UPSTREAM_TOKEN:     ${{ secrets.UPSTREAM_TOKEN }}

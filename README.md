@@ -125,7 +125,7 @@ is also validated by preflight on the source variable.
 | [.github/workflows/release.yml](.github/workflows/release.yml) | Reusable **meta-workflow** | Tag-driven end-to-end release pipeline that orchestrates `docker-build-push.yml` → `balena-block-publish.yml` → `github-release.yml`. Each stage is independently togglable. |
 | [.github/workflows/bos-launchpad-release.yml](.github/workflows/bos-launchpad-release.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Launchpad). **Container mode:** composes `monitor-upstream-release.yml` → `release.yml` to detect a new upstream release and run the full Docker → Balena → GitHub Release pipeline against the new version. **Static-site mode:** runs `deploy-cloudflare-pages.yml` on every push for continuous Cloudflare Pages deploys. Both modes can run side-by-side in the same call. Opt-in `security_scan` stage (`enable_security_scan: true`, see [`bos-launchpad-code-scan.yml`](.github/workflows/bos-launchpad-code-scan.yml)) runs in parallel as an advisory check — findings surface in the Security tab and (when `security_scan_fail_on: fail`) mark the workflow run failed, but do NOT block the deploy stages. |
 | [.github/workflows/deploy-cloudflare-pages.yml](.github/workflows/deploy-cloudflare-pages.yml) | Reusable workflow | Stage a static-site build, optionally generate `sitemap.xml` / `robots.txt` / `security.txt` / Web App Manifest, and deploy to Cloudflare Pages via `cloudflare/wrangler-action`. |
-| [.github/workflows/sync-managed-files.yml](.github/workflows/sync-managed-files.yml) | Reusable workflow | Keep standardized "managed" sections of `.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, and `.github/dependabot.yml` in sync — plus canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows) and init-once starter workflows (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`). Pluggable per-service: section (`common`, `docker`, `balena`, `node`, `python`, `lf_line_endings`, `dependabot_actions`, `dependabot_npm`, `dependabot_pip`), whole-file (`logger`, `prettier`, `bos_launchpad_release` \| `bos_launchpad_cf_pages`), init-if-missing (`gha_sync_commit`, `gha_sync_drift_check`, `gha_lint_node` \| `gha_lint_python` \| `gha_lint_shell`). Two modes: `commit` (write + push) and `check` (PR drift-check). Disabled services are skipped entirely — their existing blocks / files are never touched. |
+| [.github/workflows/sync-managed-files.yml](.github/workflows/sync-managed-files.yml) | Reusable workflow | Keep standardized "managed" sections of `.gitignore`, `.dockerignore`, `.editorconfig`, `.gitattributes`, and `.github/dependabot.yml` in sync — plus canonical whole files (`root/usr/local/bin/log-functions.sh`, `.prettierrc.yaml`, hub-managed launchpad kicker workflows) and init-once starter workflows (`.github/workflows/sync-managed-files.yml`, `sync-drift-check.yml`, `lint.yml`). Pluggable per-service: section (`common`, `docker`, `balena`, `node`, `python`, `lf_line_endings`, `dependabot_actions`, `dependabot_npm`, `dependabot_pip`), whole-file (`logger`, `prettier`, `bos_launchpad_release` \| `bos_launchpad_cf_pages` \| `bos_launchpad_sync_files`), init-if-missing (`gha_sync_commit`, `gha_sync_drift_check`, `gha_lint_node` \| `gha_lint_python` \| `gha_lint_shell`). Two modes: `commit` (write + push) and `check` (PR drift-check). Disabled services are skipped entirely — their existing blocks / files are never touched. |
 | [.github/workflows/nginx-config-validate.yml](.github/workflows/nginx-config-validate.yml) | Reusable workflow | PR / push CI gate for repos with an in-repo nginx config tree (e.g. `docker-tar1090`, `docker-graphs1090`, `docker-dump978`). Renders `*.conf.template` files via `envsubst` with caller-supplied placeholder values and runs `nginx -t -c /etc/nginx/nginx.conf` inside the official `nginx:alpine` image. Catches syntax errors, unresolved directives, and missing `include` targets at merge time instead of at container start. |
 | [.github/actions/shared/resolve-docker-image-tags/action.yml](.github/actions/shared/resolve-docker-image-tags/action.yml) | Composite action | Resolves an image version from a Dockerfile `ARG`, version file, git tag, or commit SHA and emits a deduplicated tag list. |
 | [.github/actions/shared/resolve-release-context/action.yml](.github/actions/shared/resolve-release-context/action.yml) | Composite action | Shared "publish-on-default-branch" gate + version/`build_date` selection used by both reusable workflows. |
@@ -1503,11 +1503,13 @@ or otherwise non-SemVer tags.
 
 ### Operator-config examples
 
-The kicker workflow at `.github/workflows/bos-launchpad-release.yml` is
-auto-written by the `bos_launchpad_release` / `bos_launchpad_cf_pages`
+The kicker workflows at `.github/workflows/bos-launchpad-release.yml`,
+`bos-launchpad-cf-pages.yml`, and `bos-launchpad-sync-files.yml` are
+auto-written by the `bos_launchpad_release` / `bos_launchpad_cf_pages` /
+`bos_launchpad_sync_files`
 [`sync-managed-files`](#sync-managed-filesyml--reusable-workflow)
-services — you don't author it by hand. Your only manual file is
-`.bos-launchpad.yaml` at the repo root. Two annotated starter
+services — you don't author them by hand. Your only manual file is
+`.bos-launchpad.yaml` at the repo root. Three annotated starter
 configs ship with the hub:
 
 - **Upstream-tracked container release:**
@@ -1518,6 +1520,27 @@ configs ship with the hub:
   [examples/bos-launchpad-cf-pages.example.yaml](examples/bos-launchpad-cf-pages.example.yaml).
   See [Quick start §7](#7-cloudflare-pages-deploy-static-site-launchpad)
   for the inline kicker walkthrough.
+- **Managed-files sync (meta-kicker):**
+  [examples/bos-launchpad-sync-files.example.yaml](examples/bos-launchpad-sync-files.example.yaml).
+  Hub-managed replacement for the hand-authored
+  `sync-managed-files.yml` caller pattern — wraps the same reusable
+  that writes the kicker itself.
+
+Read-only snapshots of the kicker workflows themselves (i.e. exactly
+what `sync-managed-files` writes into the consumer repo) are checked in
+alongside the operator-config examples, for reference / code-review use
+only:
+
+- [examples/bos-launchpad-release.kicker.example.yml](examples/bos-launchpad-release.kicker.example.yml)
+- [examples/bos-launchpad-cf-pages.kicker.example.yml](examples/bos-launchpad-cf-pages.kicker.example.yml)
+- [examples/bos-launchpad-sync-files.kicker.example.yml](examples/bos-launchpad-sync-files.kicker.example.yml)
+
+These snapshots are regenerated by
+[`scripts/sync-kicker-examples-from-sync.py`](scripts/sync-kicker-examples-from-sync.py)
+and CI-guarded against drift via the `kicker example snapshot drift`
+job in [.github/workflows/lint.yml](.github/workflows/lint.yml). Do not
+hand-edit them; do not copy them into a consumer repo — the hub
+overwrites the kicker in place on every sync.
 
 Full schema reference for `.bos-launchpad.yaml` is in the
 [schema section](#bos-launchpadyaml-schema-used-by-the-bos_launchpad_-services)
@@ -1663,7 +1686,8 @@ in [`sync.py`](.github/actions/sync-managed-files/sync.py):
   they don't already exist; existing files are left alone.
 
 * **Whole-file mode** (used by the `logger`, `prettier`,
-  `bos_launchpad_release`, and `bos_launchpad_cf_pages` services) —
+  `bos_launchpad_release`, `bos_launchpad_cf_pages`, and
+  `bos_launchpad_sync_files` services) —
   the target file is overwritten outright with the canonical body,
   preceded by a `# Managed by …` header comment so editors and `head`
   immediately reveal the file is hub-owned. Use this when the entire
@@ -1714,7 +1738,8 @@ services are **not** removed — they're simply ignored on this run.
 | `logger`               | whole-file       | `root/usr/local/bin/log-functions.sh`            | Canonical shared logging library for s6-overlay init / svc scripts. Emits `<RFC3339 UTC> <tag>[<level>]: <msg>`. Supports both `log_info "x"` (function-per-level, `SVC_NAME`) and `log info "x"` (generic dispatcher, `LOG_TAG`) APIs so existing consumers keep working unchanged. Includes `LOG_LEVEL` gating, `log_kv`, and `log_pipe_cmd`. |
 | `bos_launchpad_release` | whole-file      | `.github/workflows/bos-launchpad-release.yml`            | Hub-managed thin kicker for **container / Balena / GitHub-Release** workloads. Calls `bos-launchpad-release.yml@main` on a 6-hour cron + `main` push (paths-filtered) + `workflow_dispatch`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (schema below). Semantically mutually exclusive with `bos_launchpad_cf_pages` — each kicker writes its own file but a repo should enable only one delivery flavor. |
 | `bos_launchpad_cf_pages` | whole-file     | `.github/workflows/bos-launchpad-cf-pages.yml`           | Hub-managed thin kicker for **Cloudflare Pages** workloads. Calls `bos-launchpad-release.yml@main` on `main` push + `workflow_dispatch`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (schema below). Semantically mutually exclusive with `bos_launchpad_release`. |
-| `gha_sync_commit`      | init-if-missing  | `.github/workflows/sync-managed-files.yml`       | Starter caller workflow that runs the hub's `sync-managed-files.yml` reusable in `commit` mode weekly. Carries a comment listing every known service so the maintainer can uncomment what their repo needs. |
+| `bos_launchpad_sync_files` | whole-file   | `.github/workflows/bos-launchpad-sync-files.yml`         | Hub-managed thin kicker for **continuous managed-files sync** — the META-kicker that wraps the same `sync-managed-files.yml` reusable that writes itself. Calls the reusable on a weekly cron + `main` push (paths-filtered to `.bos-launchpad.yaml` / `bos-managed-files.yaml`) + `workflow_dispatch` (with a `mode` choice input). Reads per-repo customization from the `sync_files:` block in `.bos-launchpad.yaml` at the repo root (schema below). **Not mutex** with `bos_launchpad_release` / `bos_launchpad_cf_pages` — a repo may enable all three. Replaces the hand-authored `sync-managed-files.yml` caller pattern (`gha_sync_commit` remains as the init-if-missing starter for repos that prefer the manual flavor). |
+| `gha_sync_commit`      | init-if-missing  | `.github/workflows/sync-managed-files.yml`       | Starter caller workflow that runs the hub's `sync-managed-files.yml` reusable in `commit` mode weekly. Carries a comment listing every known service so the maintainer can uncomment what their repo needs. Treat as a one-shot scaffold — once a repo settles on a service list, prefer migrating to `bos_launchpad_sync_files` (hub-managed kicker reading `.bos-launchpad.yaml`) and retiring this file. |
 | `gha_sync_drift_check` | init-if-missing  | `.github/workflows/sync-drift-check.yml`         | PR-time drift gate that runs the same reusable in `check` mode against the dotfiles / dependabot / prettier targets. Fails the PR on drift. |
 | `gha_lint_node`        | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Node-based GitHub Action repos. Runs `actionlint` + `eslint` (`npm run lint`) + `prettier --check`. Mutually exclusive with `gha_lint_python` / `gha_lint_shell`. |
 | `gha_lint_python`      | init-if-missing  | `.github/workflows/lint.yml`                     | Lint starter for Python-based GitHub Action repos. Runs `actionlint` + `ruff check` + `pytest`. Mutually exclusive with `gha_lint_node` / `gha_lint_shell`. |
@@ -1726,12 +1751,18 @@ services are **not** removed — they're simply ignored on this run.
 
 ### `.bos-launchpad.yaml` schema (used by the `bos_launchpad_*` services)
 
-When you enable either `bos_launchpad_release` or `bos_launchpad_cf_pages`,
+When you enable any of `bos_launchpad_release`,
+`bos_launchpad_cf_pages`, or `bos_launchpad_sync_files`,
 the hub overwrites the corresponding kicker file
-(`.github/workflows/bos-launchpad-release.yml` for the release flavor or
-`.github/workflows/bos-launchpad-cf-pages.yml` for the Cloudflare Pages
-flavor) with a thin "kicker" that calls the org's `bos-launchpad-release.yml@main` reusable
-meta-workflow. **All per-repo customization** (image name, upstream
+(`.github/workflows/bos-launchpad-release.yml` for the release flavor,
+`.github/workflows/bos-launchpad-cf-pages.yml` for the Cloudflare
+Pages flavor, or `.github/workflows/bos-launchpad-sync-files.yml` for
+the sync-files flavor) with a thin "kicker" that calls the
+corresponding org-level reusable workflow
+(`bos-launchpad-release.yml@main` or `sync-managed-files.yml@main`).
+The `bos_launchpad_sync_files` kicker is orthogonal to the other
+two: a repo may enable all three. The `release` and `cf_pages`
+flavors remain semantically mutually exclusive with each other. **All per-repo customization** (image name, upstream
 source, Balena type, Cloudflare project, …) is read at run-time from a
 **consumer-owned** `.bos-launchpad.yaml` file at the repo root. The
 hub never writes that file — you author it once and own it.
@@ -1745,11 +1776,13 @@ section below is optional unless explicitly marked.
 
 **Schema (full reference — release flavor uses `upstream`, `stages`,
 `triggers`, `docker`, `scout`, `balena`, `companion_docker`,
-`release`, `platforms`; cf-pages flavor uses `stages` + `cloudflare`):**
+`release`, `platforms`; cf-pages flavor uses `stages` + `cloudflare`;
+sync-files flavor uses `sync_files`):**
 
 ```yaml
-# .bos-launchpad.yaml — REQUIRED at repo root when either
-# `bos_launchpad_release` or `bos_launchpad_cf_pages` is enabled.
+# .bos-launchpad.yaml — REQUIRED at repo root when any of
+# `bos_launchpad_release`, `bos_launchpad_cf_pages`, or
+# `bos_launchpad_sync_files` is enabled.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 
 # ----- Upstream tracking (release flavor) -----
@@ -1838,6 +1871,22 @@ release:
 # ----- Shared -----
 platforms: 'linux/amd64,linux/arm64'
 
+# ----- Managed-files sync (sync-files flavor) -----
+# REQUIRED when `bos_launchpad_sync_files` is enabled.
+sync_files:
+  services: []              # REQUIRED non-empty list of service
+                            # names — e.g. ['common', 'docker',
+                            # 'balena', 'logger', 'lf_line_endings'].
+                            # The kicker fails fast at parse time
+                            # if missing / empty / non-list.
+  mode: 'commit'            # commit | check; workflow_dispatch input wins
+  commit_message: 'chore: sync managed files from bos-automation-hub'
+  git_user_name:  'github-actions[bot]'
+  git_user_email: '41898282+github-actions[bot]@users.noreply.github.com'
+  push_retries:    3
+  runs_on:         'ubuntu-latest'   # or JSON-array string e.g. '["self-hosted","linux","x64"]'
+  timeout_minutes: 5
+
 # ----- Cloudflare Pages (cf-pages flavor) -----
 cloudflare:
   project_name: ''
@@ -1888,7 +1937,9 @@ and `vars.BALENA_NAMESPACE`; override the key names via
 `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `BALENA_API_TOKEN`,
 `UPSTREAM_TOKEN` (last one optional, used only for private upstream
 repos). The **cf-pages** kicker forwards `CLOUDFLARE_API_TOKEN`,
-`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`.
+`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`. The **sync-files**
+kicker forwards no secrets — it relies on the default `GITHUB_TOKEN`
+that the reusable's leaf job receives via `permissions: contents: write`.
 
 **Manual force:** every kicker exposes a `workflow_dispatch` input
 `force_run` (boolean). Checking it forces the release pipeline to run
@@ -1897,11 +1948,14 @@ hub's "only on default-branch pushes" gate.
 
 **Out-of-scope repos:** `blackoutmode/runner` has a hand-authored
 preflight job that has to gate the launchpad call. Don't enable
-either `bos_launchpad_*` service for that repo — keep its caller
-hand-authored.
+`bos_launchpad_release` or `bos_launchpad_cf_pages` for that repo —
+keep its delivery caller hand-authored. (`bos_launchpad_sync_files`
+is orthogonal and safe to enable for that repo, since the sync
+pipeline has no preflight to preserve.)
 
 > **Migration tip:** see [examples/](examples/) for a worked
-> `.bos-launchpad.yaml` for each kicker flavor (release + cf-pages).
+> `.bos-launchpad.yaml` for each kicker flavor (release + cf-pages
+> + sync-files).
 
 ### `bos-managed-files.yaml` schema (used by `license` / `notice_apache2` / `codeowners` / `dependabot_*`)
 

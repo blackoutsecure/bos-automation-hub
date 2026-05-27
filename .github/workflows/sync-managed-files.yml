@@ -37,9 +37,14 @@ on:
           `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
           `dependabot_pip`. Whole-file: `logger`, `prettier`,
           `bos_launchpad_release`, `bos_launchpad_cf_pages` (at most
-          one `bos_launchpad_*` per repo — both target the same
-          `.github/workflows/bos-launchpad-release.yml`; the enabled kicker
-          reads per-repo customization from `.bos-launchpad.yaml`).
+          one of these two per repo — semantically mutex even though
+          they target different files; the enabled kicker reads
+          per-repo customization from `.bos-launchpad.yaml`),
+          `bos_launchpad_sync_files` (delivers the meta-kicker that
+          calls THIS reusable on a schedule, reading its `services:`
+          list from `.bos-launchpad.yaml`'s `sync_files:` block —
+          NOT mutex with the release / cf-pages kickers; a repo may
+          enable any combination).
           Init-if-missing: `gha_sync_commit`, `gha_sync_drift_check`,
           `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
           one `gha_lint_*` per repo — they all target the same
