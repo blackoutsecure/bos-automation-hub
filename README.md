@@ -515,6 +515,139 @@ If you'd rather skip the launchpad and call
 directly, the [Minimal caller](#minimal-caller-organisation-shared-pattern)
 example in that section still works — same workflow, same inputs.
 
+### 7. Advanced posture probes — `SCANNING_PAT` org secret
+
+The kit composite inside
+[`bos-launchpad-code-scan.yml`](.github/workflows/bos-launchpad-code-scan.yml)
+runs a posture audit covering GitHub Advanced Security (GHAS)
+settings (`PS001` code-scanning default-setup, `PS002` secret-scanning
+enablement, `PS003` Dependabot alerts enablement) and branch
+protection (`PS020`–`PS024`). The default `GITHUB_TOKEN` granted to a
+workflow run does **not** carry the scopes needed for the GHAS
+settings probes — those probes return `skip` rather than `pass` /
+`fail` unless the caller forwards a personal access token with `repo`
++ `admin:org` (classic) or the fine-grained equivalents.
+
+The reusables read the elevated token from a **single org-wide secret
+named `SCANNING_PAT`** so every consumer kit can opt in without
+re-provisioning per repo. Once the secret exists in the org, flip
+`use_advanced_pat: true` (or its launchpad alias) on any caller and
+add `secrets: inherit` to the outer `uses:` block — every other layer
+is already wired and ignores the toggle when the secret is absent
+(no-op rather than hard failure).
+
+**One-time org setup**
+
+1. **Generate the PAT** at
+   <https://github.com/settings/tokens> (pick one):
+
+   - **Classic PAT** with scopes `repo` + `admin:org`. Simplest;
+     covers every current and future GHAS probe.
+   - **Fine-grained PAT** scoped to the orgs that own the repos
+     you'll scan (e.g. `blackoutsecure`, `blackoutmode`) with
+     repository permissions: `Administration: Read-only`,
+     `Code scanning alerts: Read-only`, `Contents: Read-only`,
+     `Dependabot alerts: Read-only`, `Metadata: Read-only`,
+     `Secret scanning alerts: Read-only`.
+
+   For SAML SSO orgs, click **Configure SSO** next to the token after
+   generation and authorize each org you intend to scan — otherwise
+   the probes get back `403 SAML SSO required` and the kit logs a
+   targeted hint instead of falling back to `skip`.
+
+2. **Store the PAT as the org secret `SCANNING_PAT`** in every org
+   that owns scanned repos:
+
+   ```sh
+   gh secret set SCANNING_PAT --org blackoutsecure --visibility all
+   gh secret set SCANNING_PAT --org blackoutmode   --visibility all
+   # you'll be prompted to paste the token
+   ```
+
+   Prefer `--visibility selected --repos <csv>` if you want to limit
+   which repos can read it. The name **must** be uppercase
+   `SCANNING_PAT` at the secret-store level — the reusables reference
+   `secrets.scanning_pat` (GHA secret matching is case-insensitive),
+   so the lowercase form inside the workflow YAML is intentional.
+
+3. **Opt in at the caller** by adding `secrets: inherit` to the
+   launchpad `uses:` block and flipping the relevant toggle:
+
+   | Caller surface                                                                                                       | Toggle input                            |
+   | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+   | [`bos-launchpad-code-scan.yml`](.github/workflows/bos-launchpad-code-scan.yml) (direct)                              | `use_advanced_pat: true`                |
+   | [`bos-launchpad-release.yml`](.github/workflows/bos-launchpad-release.yml)                                           | `security_scan_use_advanced_pat: true`  |
+   | [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml)                                   | `security_scan_use_advanced_pat: true`  |
+   | Producer-kit caller (e.g. `bos-code-scanning-kit`, `bos-marketplace-kit`)                                            | dispatch input `advanced_scanning: true` (paired with `require_pat`) |
+
+4. **Verify** by triggering a `workflow_dispatch` on any consumer's
+   code-scan caller with `advanced_scanning: true` (and
+   `require_pat: true` on the producer kits' preflight, which
+   fails-fast if the secret is missing). PS001/PS002/PS003 should
+   report `pass` or `fail` instead of `skip` in the run summary.
+
+5. **Rotate annually** (or per your security policy). Re-run the
+   `gh secret set SCANNING_PAT --org <org>` command with the new
+   token; nothing else changes because callers reference the secret
+   by name. Consider provisioning the PAT from a non-human GitHub
+   account (e.g. a dedicated `bos-bot` machine user) so rotation
+   isn't coupled to any individual contributor's offboarding.
+
+### 8. Release-time gating — `require_workflow_success`
+
+The marketplace launchpad's nested `ci` and `security_scan` jobs run
+on `pull_request` / `push` events (the PR-time gates), but are
+**skipped on the `release` dispatch itself** — releases are tagged
+via `workflow_dispatch + mode: release`, which routes only to the
+`release` job. Without an explicit hard gate, a maintainer could
+dispatch a release against a `dev` branch whose latest commit broke
+CI or self-scan and the release would still publish.
+
+[`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml)
+exposes the optional input **`require_workflow_success`** — a
+comma-separated list of workflow filenames that MUST have a
+successful run on `source_branch` HEAD before the `release` job is
+allowed to execute. The dedicated `verify-required-checks` preflight
+resolves the HEAD SHA, queries each workflow's runs via
+`gh api .../actions/workflows/<filename>/runs?head_sha=<sha>`, and
+fails the dispatch with a precise annotation pointing at any
+workflow that's missing, in-progress, or non-`success` at that SHA.
+
+```yaml
+# kit's bos-launchpad-marketplace.yml kicker
+jobs:
+  launchpad:
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-marketplace.yml@main
+    with:
+      # … per-repo context inputs …
+
+      # Block release dispatch unless these three workflows are green
+      # at `dev` HEAD. List filenames as they appear on disk —
+      # whitespace is trimmed, empty entries ignored. Each named
+      # workflow MUST trigger on `push: dev` so the gate has a run
+      # to find at every commit.
+      require_workflow_success: 'tests.yml,self-scan.yml,codeql.yml'
+```
+
+Behavior notes:
+
+- **Opt-in.** Empty string (default) skips the preflight entirely —
+  no behavior change for callers that don't set this input.
+- **Dry-run bypass.** `dry_run: true` skips the preflight so
+  maintainers can validate the release pipeline against a red
+  branch. Real releases (non-dry) always gate.
+- **Skipped-dep semantics.** The `release` job declares
+  `needs: [verify-required-checks]`. GHA treats a skipped dependency
+  as satisfied, so `release` still runs when the preflight is
+  skipped (opt-out callers + dry-runs).
+- **No extra secrets.** The preflight uses the `GITHUB_TOKEN` with
+  the launchpad's existing `actions: read` + `contents: read`
+  grants. Works against private repos.
+- **Filename, not display name.** Pass the on-disk filename
+  (`tests.yml`), not the workflow's `name:` field (`Test · Python
+  CLI`). The GitHub API workflow ID accepts either, but matching by
+  filename is robust against name-field edits.
+
 ### Topology
 
 The reusable workflows split cleanly into **trigger**, **orchestrator**,

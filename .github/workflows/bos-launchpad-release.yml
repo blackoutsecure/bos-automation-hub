@@ -699,6 +699,22 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: string
         default: security-and-quality
+      security_scan_use_advanced_pat:
+        description: >-
+          Forwarded to the kit composite as `use_advanced_pat`. When `true`
+          AND `secrets.scanning_pat` is non-empty, the elevated posture
+          probes (PS001 code-scanning default-setup, PS002 secret-scanning
+          enablement, PS003 Dependabot alerts) authenticate with the
+          forwarded PAT instead of the default `GITHUB_TOKEN` — they
+          otherwise return `skip` because `GITHUB_TOKEN` lacks the
+          required `repo` + `admin:org` scopes. No-op when the secret is
+          empty (the kit transparently falls back to `GITHUB_TOKEN`), so
+          flipping this on a repo whose org has not provisioned
+          `SCANNING_PAT` is safe rather than a hard failure. Default
+          `false`. Ignored when `security_scan_enable_kit_composite: false`.
+        required: false
+        type: boolean
+        default: false
 
       # ----- Shared / advanced ---------------------------------------------
       platforms:
@@ -756,6 +772,26 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           `monitor-upstream-release.yml`. Required when `upstream_repo` is a
           **private** repo outside the caller. See that workflow for scope
           details. Falls back to `GITHUB_TOKEN`.
+        required: false
+      scanning_pat:
+        description: >-
+          Optional PAT forwarded to the consolidated security-scan stage's
+          kit composite for the elevated posture probes PS001/PS002/PS003
+          (code-scanning default-setup, secret-scanning enablement,
+          Dependabot alerts enablement) which need `repo` + `admin:org`
+          beyond the default `GITHUB_TOKEN`. Ignored unless
+          `inputs.security_scan_use_advanced_pat` is `true`. Easiest
+          pass-through from the caller: declare `secrets: inherit` on the
+          launchpad `uses:` block and define `SCANNING_PAT` as an org or
+          repo secret. Fine-grained PAT minimum permissions on each target
+          repo:
+            * Code scanning alerts: Read   (PS001)
+            * Secret scanning alerts: Read (PS002)
+            * Dependabot alerts: Read      (PS003)
+            * Administration: Read         (for branch-protection probes)
+          Classic PAT equivalent: `repo` + `admin:org` scopes (the latter
+          granted by an org owner), authorized for any SAML SSO orgs the
+          PAT will scan against.
         required: false
 
     outputs:
@@ -839,6 +875,17 @@ jobs:
       enable_upload:        ${{ inputs.security_scan_enable_upload }}
       codeql_languages:     ${{ inputs.security_scan_codeql_languages }}
       codeql_queries:       ${{ inputs.security_scan_codeql_queries }}
+      use_advanced_pat:     ${{ inputs.security_scan_use_advanced_pat }}
+    secrets:
+      # Optional pass-through. The code-scan reusable only consults this
+      # when `use_advanced_pat` is `true`; otherwise the kit composite
+      # falls back to the runner's default `github.token`. `secrets:`
+      # block on a reusable-job invocation may NOT use `secrets: inherit`
+      # syntax when forwarding into another reusable, so the assignment
+      # is explicit. Callers forward via `secrets: inherit` at the OUTER
+      # `uses:` block, which is what makes `secrets.scanning_pat`
+      # resolvable here.
+      scanning_pat: ${{ secrets.scanning_pat }}
 
   # ---------------------------------------------------------------------------
   # Stage 1 — detect upstream change (commits tracking file on the default branch).

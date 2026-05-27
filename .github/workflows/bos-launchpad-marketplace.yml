@@ -557,6 +557,29 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         type: string
         default: ''
 
+      # ----- Release-time hard gate (optional) -----------------------------
+      require_workflow_success:
+        description: >-
+          Optional comma-separated list of workflow filenames (e.g.
+          `tests.yml,self-scan.yml,codeql.yml`) that MUST have a green
+          (`conclusion == success`) run on `source_branch` HEAD before
+          the `release` job is allowed to execute. Empty (default)
+          disables the gate. Trimmed whitespace + empty entries are
+          ignored. Only consulted when
+          `inputs.event_name == 'workflow_dispatch'` AND
+          `inputs.dispatched_mode == 'release'` AND
+          `inputs.dry_run != true` (dry runs always bypass the gate so
+          maintainers can preview the release pipeline against a red
+          branch). The preflight job reads workflow run status via the
+          `GITHUB_TOKEN` and `actions:read` permission — no extra
+          secret required. A workflow with no run at the HEAD SHA (e.g.
+          never triggered, or triggered but not yet finished) counts
+          as a gate failure with a precise annotation pointing to the
+          missing workflow.
+        required: false
+        type: string
+        default: ''
+
     secrets:
       scanning_pat:
         description: >-
@@ -708,6 +731,111 @@ jobs:
       checkout_ref:       ${{ inputs.guard_checkout_ref }}
 
   # ---------------------------------------------------------------------------
+  # Stage 2.5 — Release-time hard gate (optional, opt-in via
+  # `require_workflow_success`). Verifies that every named workflow has a
+  # successful run on `source_branch` HEAD before the release stage is
+  # allowed to execute. Closes the gap between PR-time CI/security gates
+  # (which the maintainer can implicitly bypass by dispatching a release
+  # against a red dev branch) and the actual publish action.
+  #
+  # The job is `if:`-gated to ONLY release dispatches (skipped on PR / push
+  # / name-check), and is also bypassed on `dry_run: true` so maintainers
+  # can preview the release pipeline against a red branch without the
+  # gate firing. A skipped preflight satisfies the downstream `needs:` —
+  # so PR / push / name-check / dry-run flows still reach `release` (or
+  # skip it for the right reason).
+  #
+  # Runs on `ubuntu-latest` rather than a self-hosted runner because the
+  # gate must be the most-available infra in the org (otherwise a runner
+  # outage would block ALL releases across every kit using this
+  # launchpad). The job only makes 2 + N GitHub API calls — no compute
+  # weight — so hosted-runner spend is negligible.
+  # ---------------------------------------------------------------------------
+  verify-required-checks:
+    name: Verify required checks
+    if: >-
+      inputs.event_name == 'workflow_dispatch'
+      && inputs.dispatched_mode == 'release'
+      && inputs.dry_run != true
+      && inputs.require_workflow_success != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # `actions: read` so `gh api .../actions/workflows/*/runs` works
+      # against private repos. `contents: read` so the branch HEAD SHA
+      # lookup works against private repos.
+      contents: read
+      actions: read
+    steps:
+      - name: Verify each required workflow is green at source_branch HEAD
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED: ${{ inputs.require_workflow_success }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Resolve the HEAD SHA of source_branch (typically `dev`). We
+          # check workflow runs against this exact SHA — not "latest run
+          # on the branch" — so a release dispatched immediately after a
+          # commit that hasn't finished CI yet correctly fails the gate.
+          head_sha=$(gh api "repos/${REPO}/branches/${SOURCE_BRANCH}" \
+            --jq '.commit.sha')
+          if [ -z "${head_sha}" ] || [ "${head_sha}" = "null" ]; then
+            echo "::error::Failed to resolve HEAD SHA for branch '${SOURCE_BRANCH}'."
+            exit 1
+          fi
+          echo "::notice::Verifying required workflows at ${SOURCE_BRANCH}@${head_sha:0:7}"
+
+          failed=0
+          # POSIX-portable CSV split that trims whitespace and ignores
+          # empty entries (lets callers spread the list across multiple
+          # lines / pad with spaces for readability).
+          IFS=',' read -ra wf_list <<< "${REQUIRED}"
+          for raw_wf in "${wf_list[@]}"; do
+            wf="$(echo "${raw_wf}" | tr -d '[:space:]')"
+            [ -z "${wf}" ] && continue
+
+            # `workflows/<filename>/runs?head_sha=...` returns runs
+            # triggered for the exact SHA, regardless of event type.
+            # `per_page=1` is enough — we only need the latest attempt.
+            latest_json=$(gh api \
+              "repos/${REPO}/actions/workflows/${wf}/runs?head_sha=${head_sha}&per_page=1" \
+              --jq '.workflow_runs[0] // empty' 2>/dev/null || true)
+
+            if [ -z "${latest_json}" ]; then
+              echo "::error::No run found for workflow '${wf}' at ${SOURCE_BRANCH}@${head_sha:0:7}. Trigger it (push, PR, or workflow_dispatch) and wait for it to finish before dispatching the release."
+              failed=1
+              continue
+            fi
+
+            conclusion=$(jq -r '.conclusion // "in_progress"' <<< "${latest_json}")
+            status=$(jq -r '.status // "unknown"' <<< "${latest_json}")
+            run_url=$(jq -r '.html_url // ""' <<< "${latest_json}")
+
+            if [ "${status}" != "completed" ]; then
+              echo "::error::Workflow '${wf}' is still ${status} at ${SOURCE_BRANCH}@${head_sha:0:7}. Wait for it to finish before dispatching the release. See ${run_url}"
+              failed=1
+              continue
+            fi
+
+            if [ "${conclusion}" != "success" ]; then
+              echo "::error::Workflow '${wf}' did NOT succeed at ${SOURCE_BRANCH}@${head_sha:0:7} (conclusion=${conclusion}). Fix it before releasing. See ${run_url}"
+              failed=1
+              continue
+            fi
+
+            echo "::notice::OK · ${wf} green at ${SOURCE_BRANCH}@${head_sha:0:7} · ${run_url}"
+          done
+
+          if [ "${failed}" -ne 0 ]; then
+            echo "::error::Release gate failed. One or more required workflows are not green at ${SOURCE_BRANCH}@${head_sha:0:7}."
+            exit 1
+          fi
+          echo "::notice::Release gate passed — all required workflows green at ${SOURCE_BRANCH}@${head_sha:0:7}."
+
+  # ---------------------------------------------------------------------------
   # Stage 3 — Marketplace-compliant release (dev → main promote + GH Release).
   # Fires on:
   #   * workflow_dispatch + dispatched_mode == 'release'
@@ -716,9 +844,16 @@ jobs:
   # `target_branch` NOT in the merged allowlist is REMOVED on this commit —
   # this is what keeps `.github/workflows/**` off the default branch (along
   # with the hard-block in the underlying `promote` Action).
+  #
+  # `needs: [verify-required-checks]` hard-gates the release on the
+  # preflight job's success. A skipped preflight (caller did not set
+  # `require_workflow_success`, or `dry_run: true`) satisfies the
+  # `needs:` dependency in GHA — so opt-out / dry-run flows behave
+  # identically to pre-gate behavior.
   # ---------------------------------------------------------------------------
   release:
     name: Release ${{ inputs.tag_name }}
+    needs: [verify-required-checks]
     if: inputs.event_name == 'workflow_dispatch' && inputs.dispatched_mode == 'release'
     permissions:
       contents: write
