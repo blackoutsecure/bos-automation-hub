@@ -21,7 +21,7 @@ machines on macOS at login.
 1. **Pre-flight audit** (runs at the start of every `apply` and `--check`). Inspects each install target location and prints a PASS/FAIL report covering: OS, `UTM.app` install, `utmctl` reachability, helper script presence / content / executable bit / ownership, LaunchAgent plist presence / content / ownership. Failing rows include a "(will install)" / "(will replace)" / "(will fix)" hint so you can see — before any disk write — exactly what an apply will change.
 2. Renders a helper script at `/usr/local/bin/bos-utm-vm-autostart` that:
    - Resolves `utmctl` from `/usr/local/bin`, `/opt/homebrew/bin`, or `/Applications/UTM.app/Contents/MacOS/`.
-   - Waits up to `UTM_AUTOSTART_BOOT_TIMEOUT` seconds for `UTM.app` to be running (UTM.app itself is expected to launch at login via its own Login Item — see "Prerequisite" below).
+   - With `UTM_AUTOSTART_LAUNCH_APP=true` (the default), launches `UTM.app` itself in the background (`open -ga /Applications/UTM.app`) if it isn't already running, then waits up to `UTM_AUTOSTART_BOOT_TIMEOUT` seconds for it to appear in the process list. With `LAUNCH_APP=false`, the helper does *not* launch the app and only waits — `UTM.app` must be the user's Login Item for autostart to work.
    - Resolves the start list using one of three modes — `list` (a fixed set of VM names), `regex` (a POSIX ERE re-evaluated against `utmctl list` at every login), or `auto` (try the explicit list first; fall back to the regex; and — when neither selector was configured AND `UTM_AUTOSTART_DYNAMIC_FALLBACK` is on (the default) — autostart **every** VM `utmctl list` returns). See [Selection mode](#selection-mode--list-regex-or-auto) below.
    - For each VM in order, optionally skips it if its current status is not `stopped`, then calls `utmctl start "<vm name>"` with `UTM_AUTOSTART_DELAY_SECONDS` between starts.
    - Logs every step to `/var/log/bos-utm-vm-autostart.log` (the same file the installer writes to, so every install run and every login-time helper run lands in one place).
@@ -132,6 +132,7 @@ If `defaultvms` is also empty (the out-of-the-box state):
 |---|---|---|
 | `UTM_AUTOSTART_DELAY_SECONDS` | `5` | Delay between successive VM starts |
 | `UTM_AUTOSTART_BOOT_TIMEOUT` | `60` | Max seconds to wait for `UTM.app` to be running before aborting the run |
+| `UTM_AUTOSTART_LAUNCH_APP` | `true` | At login, if `UTM.app` isn't already running, have the helper launch it in the background (`open -ga /Applications/UTM.app`) before the boot-timeout wait. Removes the per-user "Open at Login" prerequisite, so a fresh install autostarts VMs for every user without any per-user setup. Set to `false` for the legacy opt-in behaviour where only users who explicitly added `UTM.app` to their Login Items get autostart. |
 | `UTM_AUTOSTART_WAIT_POLL_INTERVAL` | `1` | Seconds between `pgrep` polls while waiting for `UTM.app`. Lower = faster detection (slightly more CPU); higher = less CPU on slow hardware. Must be a positive integer |
 | `UTM_AUTOSTART_SKIP_RUNNING` | `true` | Skip VMs whose `utmctl list` status is not `stopped` (true/false). Keeps re-runs safe — you can `launchctl kickstart` the agent without disturbing running VMs |
 | `UTM_AUTOSTART_USER_EXCLUDE` | _(unset)_ | Comma- or newline-separated list of macOS usernames whose login should **not** trigger autostart. The helper detects `$(id -un)` early in its run and exits 0 immediately (no UTM.app wait, no `utmctl` call) when the current user is on the list. Useful on shared Macs with guest, kiosk, demo, or service accounts. Usernames are validated at install time (`[a-zA-Z_][a-zA-Z0-9_.-]*`). |
@@ -228,11 +229,16 @@ UTM GUI.
 The system-wide LaunchAgent triggers at **every** user login on the
 Mac. There are two complementary opt-out mechanisms:
 
-1. **Per-user "Open at Login"** — implicit. A user who doesn't have
-   `/Applications/UTM.app` in their Login Items will still trigger the
-   LaunchAgent, but the helper will wait `UTM_AUTOSTART_BOOT_TIMEOUT`
-   seconds for `UTM.app`, time out, log an error, and exit non-zero.
-   See [Prerequisite — UTM.app must launch at login](#prerequisite--utmapp-must-launch-at-login).
+1. **`UTM_AUTOSTART_LAUNCH_APP=false` + per-user "Open at Login"** —
+   implicit, opt-in per user. With `LAUNCH_APP=false`, the helper
+   waits for `UTM.app` but does **not** launch it, so a user who
+   hasn't added `/Applications/UTM.app` to their Login Items will
+   trigger the LaunchAgent, time out after `UTM_AUTOSTART_BOOT_TIMEOUT`
+   seconds, log an error, and exit non-zero. With the default
+   `LAUNCH_APP=true` this lever is disabled and **every** user logging
+   into the Mac gets VM autostart — use `UTM_AUTOSTART_USER_EXCLUDE`
+   below to gate which users participate.
+   See [Configuring UTM.app launch](#configuring-utmapp-launch).
 
 2. **`UTM_AUTOSTART_USER_EXCLUDE`** — explicit. A clean, fast no-op for
    accounts you know should never run VMs. The helper checks the
@@ -295,16 +301,26 @@ where `web-vm` was renamed in the UTM GUI to `web-vm-new`):
 ... | ==== UTM VM autostart run end ====
 ```
 
-## Prerequisite — UTM.app must launch at login
+## Configuring UTM.app launch
 
 `utmctl` is a thin client that talks to the running `UTM.app` process; it
-cannot start VMs on its own. The helper script waits for `UTM.app` to
-appear in the process list before issuing any `start` commands.
+cannot start VMs on its own, so the helper has to make sure `UTM.app`
+is running before issuing any `start` commands.
 
-Configure UTM as a Login Item once, per user:
+By default (`UTM_AUTOSTART_LAUNCH_APP=true`), the helper handles this
+itself: it runs `open -ga /Applications/UTM.app` at the start of every
+login-time invocation, which launches `UTM.app` in the background
+(`-g` keeps focus on whatever the user is actually doing) and then
+waits for the process to appear. No per-user Login Item configuration
+is required.
 
-`System Settings → General → Login Items → "Open at Login" → +` → select
-`/Applications/UTM.app`.
+If you want the legacy opt-in behaviour — where only users who
+explicitly added `UTM.app` to their Login Items get autostart —
+install with `UTM_AUTOSTART_LAUNCH_APP=false` and configure UTM as a
+Login Item once, per user:
+
+`System Settings → General → Login Items → "Open at Login" → +` →
+select `/Applications/UTM.app`.
 
 ## Files Installed
 
