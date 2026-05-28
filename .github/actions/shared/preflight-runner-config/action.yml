@@ -7,8 +7,18 @@ description: >-
   queuing indefinitely against an unmatched label.
 
   The caller passes the variable values explicitly (composite actions
-  cannot read `vars.*` directly; only the calling workflow can). For each
-  required variable, this action enforces:
+  cannot read `vars.*` directly; only the calling workflow can).
+
+  Convention: callers should forward **all three** runner vars
+  (`default_runner`, `runner_x64`, `runner_arm64`) even when the
+  workflow only consumes one. The `require_*` flags alone gate
+  enforcement; forwarding everything makes the log accurately reflect
+  the org/repo's full runner-var state ("here's what GHA actually sees
+  from this caller scope") instead of showing "empty (not required)"
+  for inputs the workflow chose not to pass — which is misleading when
+  the var is actually set at the org level.
+
+  For each required variable, this action enforces:
 
     * non-empty
     * shape: bare label matching `^[A-Za-z0-9][A-Za-z0-9._-]*$`, OR a

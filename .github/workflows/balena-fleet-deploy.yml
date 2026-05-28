@@ -151,8 +151,12 @@ jobs:
     steps:
       - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
         with:
+          # Forward all three runner vars so the log shows the full
+          # org-var state, not just the ones this workflow enforces.
+          # The `require_*` flags determine which must be set.
           default_runner: ${{ vars.DEFAULT_RUNNER }}
           runner_x64: ${{ vars.RUNNER_X64 }}
+          runner_arm64: ${{ vars.RUNNER_ARM64 }}
           require_runner_x64: 'true'
 
   plan:
