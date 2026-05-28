@@ -402,9 +402,25 @@ jobs:
         run: .bos-hub/.github/scripts/openwrt/resolve-spec.sh
 
       - name: Install host build dependencies
+        # Portable across runner shapes:
+        #   * GitHub-hosted ubuntu-* (non-root `runner` user + NOPASSWD sudo) -> uses sudo
+        #   * Self-hosted as root                                              -> calls apt-get directly
+        #   * Self-hosted as non-root with sudo installed                      -> uses sudo
+        # Hard-fails (with a CI-visible annotation) when neither root nor sudo
+        # is available so the failure mode is "fix your runner image" rather
+        # than the historic confusing `sudo: command not found` (exit 127).
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          set -euo pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            SUDO=""
+          elif command -v sudo >/dev/null 2>&1; then
+            SUDO=sudo
+          else
+            echo "::error title=Host deps install::Neither root nor sudo available on this runner. Either run the runner as root or install sudo + a NOPASSWD drop-in for the runner user (see blackoutsecure/docker-github-runner/root/etc/sudoers.d/10-abc-nopasswd)."
+            exit 1
+          fi
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends \
             build-essential ccache file gawk gettext git \
             libelf-dev libncurses5-dev libssl-dev \
             python3 python3-setuptools python3-dev \

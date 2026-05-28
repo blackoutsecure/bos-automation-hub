@@ -53,6 +53,16 @@ done <<< "${spec}"
 [ -s /tmp/spec.tsv ] || { gh_error "PACKAGES_SPEC produced zero packages"; exit 1; }
 
 gh_group "Resolved spec (/tmp/spec.tsv)"
-tr "${SPEC_SEP}" '\t' < /tmp/spec.tsv | column -ts $'\t' 2>/dev/null \
-  || tr "${SPEC_SEP}" '\t' < /tmp/spec.tsv
+# Render the SPEC_SEP-delimited TSV as aligned columns when `column(1)` is
+# available, otherwise fall back to tab-separated. The previous form was
+# `tr ... | column -ts ... 2>/dev/null || tr ...` which:
+#   1. Triggered a spurious `tr: write error: Broken pipe` when `column`
+#      was missing (the `|| tr ...` fired before `tr` finished flushing).
+#   2. Hid real `column` failures behind the silent `2>/dev/null`.
+# Probe once, then run a single non-piped command.
+if command -v column >/dev/null 2>&1; then
+  tr "${SPEC_SEP}" '\t' < /tmp/spec.tsv | column -ts $'\t'
+else
+  tr "${SPEC_SEP}" '\t' < /tmp/spec.tsv
+fi
 gh_endgroup
