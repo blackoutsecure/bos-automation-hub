@@ -584,7 +584,16 @@ jobs:
       && (needs.balena.result == 'success' || needs.balena.result == 'skipped')
     needs: [resolve, docker, docker-companion, balena]
     permissions:
+      # `contents: write` to publish the GitHub Release tag/body.
+      # `models: read` cascades to the nested `github-release.yml`
+      # `publish` job so the renderer can call the GitHub Models
+      # inference API when AI-changelog support is enabled. GitHub
+      # Actions validates the permission cascade at workflow-load
+      # time — the grant is required regardless of whether the
+      # caller actually enables AI changelog. See
+      # `render-release-notes/action.yml` for the renderer details.
       contents: write
+      models: read
     uses: blackoutsecure/bos-automation-hub/.github/workflows/github-release.yml@main
     with:
       tag_name:               ${{ needs.resolve.outputs.tag_name }}

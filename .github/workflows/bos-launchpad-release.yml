@@ -1102,6 +1102,10 @@ jobs:
                                # at workflow-call time regardless of runtime path.
       security-events: write   # nested docker-build-push declares this for SARIF
                                # upload to the GHAS code-scanning dashboard.
+      models:          read    # cascades to `release.yml` -> `github-release.yml`
+                               # `publish` job for the AI changelog step.
+                               # Validated at workflow-load time regardless of
+                               # whether the caller enables AI changelog.
     uses: ./.github/workflows/release.yml
     with:
       tag_name:                        v${{ needs.monitor.outputs.upstream_version }}
