@@ -1,5 +1,7 @@
 ## {{ release_name }}
 
+{{ changelog_section }}
+
 {{ image_section }}
 
 ### Build information

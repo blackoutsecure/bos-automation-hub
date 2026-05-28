@@ -589,6 +589,25 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         required: false
         type: string
         default: ''
+      release_ai_changelog:
+        description: >-
+          `'true'` to summarize the commit log (between the previous
+          tag and `source_branch` HEAD) via GitHub Models inference in
+          the rendered release body. Falls back to a deterministic bash
+          grouping by conventional-commit prefix on any AI failure —
+          releases never block on AI availability. Opt-in by design so
+          existing kits keep their current release bodies until each
+          maintainer flips this on per-repo.
+        required: false
+        type: string
+        default: 'false'
+      release_ai_model:
+        description: >-
+          GitHub Models model identifier (e.g. `openai/gpt-4o-mini`).
+          Only consulted when `release_ai_changelog == 'true'`.
+        required: false
+        type: string
+        default: 'openai/gpt-4o-mini'
 
       # ----- Release-time hard gate (optional) -----------------------------
       require_workflow_success:
@@ -912,3 +931,5 @@ jobs:
       release_make_latest:       ${{ inputs.release_make_latest }}
       release_generate_notes:    ${{ inputs.release_generate_notes }}
       release_files:             ${{ inputs.release_files }}
+      release_ai_changelog:      ${{ inputs.release_ai_changelog }}
+      release_ai_model:          ${{ inputs.release_ai_model }}

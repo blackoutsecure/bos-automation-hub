@@ -78,6 +78,39 @@ name: GitHub Release (reusable)
         required: false
         type: string
         default: ''
+      previous_tag:
+        description: >-
+          Previous release tag for changelog generation (e.g. `v1.0.0`).
+          Forwarded verbatim to `render-release-notes`. Empty disables
+          the changelog section.
+        required: false
+        type: string
+        default: ''
+      source_branch:
+        description: >-
+          Source branch the feature commits live on (typically `dev`).
+          Forwarded to `render-release-notes`. The changelog summarizes
+          commits between `previous_tag` and the HEAD of this branch.
+          Empty disables the changelog section.
+        required: false
+        type: string
+        default: ''
+      ai_changelog:
+        description: >-
+          `'true'` to summarize the commit log via GitHub Models
+          inference. Requires the calling workflow to grant
+          `models: read`. Falls back to a deterministic bash grouping
+          on any AI failure — releases never block on AI availability.
+        required: false
+        type: string
+        default: 'false'
+      ai_model:
+        description: >-
+          GitHub Models model identifier (e.g. `openai/gpt-4o-mini`).
+          Only consulted when `ai_changelog == 'true'`.
+        required: false
+        type: string
+        default: 'openai/gpt-4o-mini'
     outputs:
       release_id:
         description: 'GitHub Release ID.'
@@ -126,7 +159,14 @@ jobs:
     runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 10
     permissions:
+      # `contents: write` to publish the GitHub Release; `models: read`
+      # so the render-release-notes step can call the GitHub Models
+      # inference API when `ai_changelog: 'true'`. Granting `models:
+      # read` unconditionally is fine — it's a no-op when AI is off, and
+      # opt-in everywhere upstream so this default never makes the
+      # workflow more permissive than the caller asked for.
       contents: write
+      models: read
     outputs:
       release_id: ${{ steps.release.outputs.id }}
       release_url: ${{ steps.release.outputs.url }}
@@ -177,6 +217,10 @@ jobs:
           platforms: ${{ inputs.platforms }}
           template_path: ${{ inputs.template_path }}
           extra_context: ${{ inputs.extra_context }}
+          previous_tag: ${{ inputs.previous_tag }}
+          source_branch: ${{ inputs.source_branch }}
+          ai_changelog: ${{ inputs.ai_changelog }}
+          ai_model: ${{ inputs.ai_model }}
 
       - name: Resolve prerelease flag
         id: prerelease

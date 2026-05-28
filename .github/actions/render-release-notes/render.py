@@ -20,6 +20,7 @@ def main() -> int:
         "build_date":        os.environ["BUILD_DATE"],
         "image_section":     os.environ.get("IMAGE_SECTION", ""),
         "platforms_section": os.environ.get("PLATFORMS_SECTION", ""),
+        "changelog_section": os.environ.get("CHANGELOG_SECTION", ""),
     }
 
     extra: dict[str, str] = {}

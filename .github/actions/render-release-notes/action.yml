@@ -36,7 +36,8 @@ inputs:
       Supported placeholders: `{{ release_name }}`, `{{ version }}`,
       `{{ tag_name }}`, `{{ short_sha }}`, `{{ commit_url }}`,
       `{{ build_date }}`, `{{ image_section }}`, `{{ platforms_section }}`,
-      `{{ extra_section }}`, plus any keys passed via `extra_context`.
+      `{{ changelog_section }}`, `{{ extra_section }}`, plus any keys
+      passed via `extra_context`.
     required: false
     default: ''
   extra_context:
@@ -49,6 +50,39 @@ inputs:
     description: 'Where to write the rendered Markdown.'
     required: false
     default: /tmp/release-notes.md
+  previous_tag:
+    description: >-
+      Previous release tag (e.g. `v1.0.0`). Required for changelog
+      generation; empty disables the changelog section entirely (e.g.
+      first release of a kit).
+    required: false
+    default: ''
+  source_branch:
+    description: >-
+      Branch the actual feature work lives on (typically `dev`). The
+      changelog summarizes commits between `previous_tag` and the HEAD
+      of this branch (NOT the squashed `release:` commit on `main`).
+      Empty disables the changelog section.
+    required: false
+    default: ''
+  ai_changelog:
+    description: >-
+      When `'true'`, attempt to summarize the commit list via GitHub
+      Models inference (`openai/gpt-4o-mini` by default). Requires the
+      calling workflow to grant `models: read`. On any AI failure
+      (permission, rate limit, network, malformed response) the action
+      silently falls back to a deterministic bash grouping by
+      conventional-commit prefix — releases never block on AI
+      availability. Default `'false'` (opt-in).
+    required: false
+    default: 'false'
+  ai_model:
+    description: >-
+      GitHub Models model identifier (e.g. `openai/gpt-4o-mini`,
+      `meta/llama-3.1-8b-instruct`). Only consulted when
+      `ai_changelog == 'true'`.
+    required: false
+    default: 'openai/gpt-4o-mini'
 
 outputs:
   body_path:
@@ -61,6 +95,252 @@ outputs:
 runs:
   using: composite
   steps:
+    # -------------------------------------------------------------------------
+    # Generate the changelog section (commits between `previous_tag` and the
+    # HEAD of `source_branch`).
+    #
+    # Why source_branch and not the tag's target_commitish?
+    #   The marketplace release pipeline squashes the entire dev → main
+    #   delta into ONE commit per release (`release: vX.Y.Z`). So the log
+    #   between two release tags on `main` is one meta-commit per release
+    #   — useless for changelogs. The actual feature commits live on
+    #   `dev` (or whichever `source_branch` was promoted).
+    #
+    # Why GitHub Compare API and not `git log`?
+    #   The publish job checks out the new tag's commit on `main` only
+    #   (`fetch-depth: 1` by default). Re-fetching the source branch +
+    #   the previous tag with full history would be slow and brittle.
+    #   The Compare API returns the commit list directly in one HTTP
+    #   call, no git plumbing required.
+    #
+    # AI fallback is intentional:
+    #   * `ai_changelog: 'false'` (default)  → bash conventional-commits
+    #     grouping only.
+    #   * `ai_changelog: 'true'` + AI succeeds → AI-grouped output, with
+    #     `<!-- ai-summary model=... -->` marker.
+    #   * `ai_changelog: 'true'` + AI fails  → falls back to bash
+    #     grouping with a warning annotation. Releases NEVER block on
+    #     AI availability.
+    # -------------------------------------------------------------------------
+    - id: changelog
+      shell: bash
+      env:
+        PREVIOUS_TAG:  ${{ inputs.previous_tag }}
+        SOURCE_BRANCH: ${{ inputs.source_branch }}
+        AI_CHANGELOG:  ${{ inputs.ai_changelog }}
+        AI_MODEL:      ${{ inputs.ai_model }}
+        REPOSITORY:    ${{ github.repository }}
+        GH_TOKEN:      ${{ github.token }}
+      run: |
+        set -euo pipefail
+
+        CHANGELOG_FILE="${RUNNER_TEMP}/release-changelog.md"
+        : > "${CHANGELOG_FILE}"
+        echo "path=${CHANGELOG_FILE}" >> "${GITHUB_OUTPUT}"
+
+        # Short-circuit: missing inputs ⇒ no changelog section.
+        # `version-only` use cases (no source branch, first release, etc.)
+        # render exactly like before this feature shipped.
+        if [ -z "${PREVIOUS_TAG}" ] || [ -z "${SOURCE_BRANCH}" ]; then
+          echo "::notice::changelog: skipped (previous_tag='${PREVIOUS_TAG}', source_branch='${SOURCE_BRANCH}')"
+          exit 0
+        fi
+
+        case "${AI_CHANGELOG}" in
+          true|false) ;;
+          *) echo "::error::ai_changelog must be 'true' or 'false', got '${AI_CHANGELOG}'"; exit 1 ;;
+        esac
+
+        # GH Compare API: returns commits reachable from source_branch but
+        # not from previous_tag. `per_page=250` is the API max; we cap our
+        # bash grouper at the same number so a runaway release doesn't
+        # produce a wall of noise. (For releases with >250 commits a
+        # human should be writing the notes anyway.)
+        COMPARE_JSON="${RUNNER_TEMP}/release-compare.json"
+        if ! gh api \
+              "repos/${REPOSITORY}/compare/${PREVIOUS_TAG}...${SOURCE_BRANCH}?per_page=250" \
+              > "${COMPARE_JSON}" 2>"${RUNNER_TEMP}/release-compare.err"; then
+          echo "::warning::changelog: GitHub Compare API failed; skipping changelog section. See log for details."
+          cat "${RUNNER_TEMP}/release-compare.err" >&2 || true
+          exit 0
+        fi
+
+        # Extract { sha, subject } per commit. `.commits[]` is in
+        # chronological order (oldest → newest); we reverse so the
+        # newest changes appear first in the changelog.
+        # Also strip the dependabot + meta-commit noise here so the AI
+        # prompt and the bash grouper see the same filtered list.
+        RAW_COMMITS="${RUNNER_TEMP}/release-commits.tsv"
+        jq -r '
+          .commits | reverse | .[]
+          | [ .sha[0:7], (.commit.message | split("\n")[0]) ]
+          | select(
+              (.[1] | test("^release: v[0-9]") | not)
+              and (.[1] | test("^Bump .+ from .+ to .+$") | not)
+              and (.[1] | test("^chore\\(deps\\): bump ") | not)
+            )
+          | @tsv
+        ' "${COMPARE_JSON}" > "${RAW_COMMITS}"
+
+        COMMIT_COUNT=$(wc -l < "${RAW_COMMITS}" | tr -d ' ')
+        if [ "${COMMIT_COUNT}" -eq 0 ]; then
+          echo "::notice::changelog: no qualifying commits between ${PREVIOUS_TAG} and ${SOURCE_BRANCH}"
+          exit 0
+        fi
+        echo "::notice::changelog: ${COMMIT_COUNT} commit(s) between ${PREVIOUS_TAG} and ${SOURCE_BRANCH}"
+
+        # ---------------------------------------------------------------------
+        # Bash conventional-commits grouper (always runs; the AI step
+        # OVERWRITES this output on success). Buckets by prefix; anything
+        # unrecognized lands in "Other".
+        # ---------------------------------------------------------------------
+        BASH_OUT="${RUNNER_TEMP}/release-changelog.bash.md"
+        {
+          declare -A SECTIONS=(
+            [feat]='### Features'
+            [fix]='### Fixes'
+            [security]='### Security'
+            [perf]='### Performance'
+            [refactor]='### Refactoring'
+            [docs]='### Documentation'
+            [test]='### Tests'
+            [ci]='### CI / Build'
+            [build]='### CI / Build'
+            [chore]='### Internal'
+            [style]='### Internal'
+            [other]='### Other'
+          )
+          # Preserve display order (don't iterate associative array).
+          ORDER=(feat fix security perf refactor docs test ci chore other)
+
+          declare -A BUCKETS
+          for k in "${ORDER[@]}"; do BUCKETS[$k]=""; done
+
+          while IFS=$'\t' read -r sha subject; do
+            [ -z "${sha}" ] && continue
+            # Extract the conventional-commit type prefix (before `:` or
+            # `(scope):`). Lower-cased for matching.
+            prefix=$(printf '%s' "${subject}" \
+              | sed -E 's/^([a-zA-Z]+)(\([^)]*\))?!?:.*$/\1/' \
+              | tr '[:upper:]' '[:lower:]')
+            case "${prefix}" in
+              feat|fix|security|perf|refactor|docs|test|ci|build|chore|style)
+                bucket="${prefix}"
+                # Collapse build → ci (one section).
+                [ "${bucket}" = "build" ] && bucket="ci"
+                # Collapse style → chore (one section).
+                [ "${bucket}" = "style" ] && bucket="chore"
+                ;;
+              *) bucket="other" ;;
+            esac
+            BUCKETS[$bucket]+="- ${subject} (\`${sha}\`)"$'\n'
+          done < "${RAW_COMMITS}"
+
+          printed_any=0
+          # `ci` is shown once even though both `ci` and `build`
+          # map to it. Same for `chore` (absorbs `style`).
+          declare -A SEEN
+          for k in "${ORDER[@]}"; do
+            target="${k}"
+            [ "${k}" = "build" ] && target="ci"
+            [ "${k}" = "style" ] && target="chore"
+            [ -n "${SEEN[$target]:-}" ] && continue
+            SEEN[$target]=1
+            content="${BUCKETS[$target]:-}"
+            [ -z "${content}" ] && continue
+            printf '%s\n\n%s\n' "${SECTIONS[$target]}" "${content}"
+            printed_any=1
+          done
+
+          if [ "${printed_any}" -eq 0 ]; then
+            printf '_No notable changes._\n\n'
+          fi
+        } > "${BASH_OUT}"
+
+        # ---------------------------------------------------------------------
+        # Optional AI rewrite. The bash output is the floor: AI output
+        # only replaces it on a clean 200 + non-empty body. Every failure
+        # path warns and keeps the bash output.
+        # ---------------------------------------------------------------------
+        FINAL_BODY="${BASH_OUT}"
+
+        if [ "${AI_CHANGELOG}" = "true" ]; then
+          AI_OUT="${RUNNER_TEMP}/release-changelog.ai.md"
+          AI_ERR="${RUNNER_TEMP}/release-changelog.ai.err"
+          PROMPT_FILE="${RUNNER_TEMP}/release-changelog.prompt.txt"
+
+          {
+            printf 'You are a release-notes editor. Group the following git commits into these sections by inferring intent from each subject line:\n\n'
+            printf '### Features\n### Fixes\n### Security\n### Performance\n### Refactoring\n### Documentation\n### Tests\n### CI / Build\n### Internal\n### Other\n\n'
+            printf 'Rules:\n'
+            printf -- '- Output ONLY a Markdown fragment, no preamble, no closing remarks.\n'
+            printf -- '- Each bullet must end with the commit SHA in inline code: `(`abc1234`)`.\n'
+            printf -- '- Skip sections that have zero commits — do not render empty headings.\n'
+            printf -- '- Do NOT editorialize. Do not invent details not present in the subject.\n'
+            printf -- '- Preserve subject phrasing; clean up only obvious typos / trailing punctuation.\n'
+            printf -- '- Skip release / version-bump / dependabot commits entirely.\n\n'
+            printf 'Commits (one per line, tab-separated `sha\\tsubject`):\n\n'
+            cat "${RAW_COMMITS}"
+          } > "${PROMPT_FILE}"
+
+          # Build JSON payload via jq -Rs so the prompt body is properly
+          # escaped even if commit subjects contain quotes / backslashes /
+          # control chars.
+          PAYLOAD=$(jq -Rs --arg model "${AI_MODEL}" '{
+            model: $model,
+            temperature: 0.1,
+            messages: [
+              {"role": "system", "content": "You are a precise, factual release-notes editor. Output Markdown only."},
+              {"role": "user",   "content": . }
+            ]
+          }' < "${PROMPT_FILE}")
+
+          HTTP_CODE=$(curl -sS \
+            -o "${AI_OUT}" -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "${PAYLOAD}" \
+            'https://models.github.ai/inference/chat/completions' \
+            2>"${AI_ERR}" || true)
+
+          if [ "${HTTP_CODE}" = "200" ]; then
+            AI_CONTENT=$(jq -r '.choices[0].message.content // empty' "${AI_OUT}" 2>/dev/null || true)
+            if [ -n "${AI_CONTENT}" ]; then
+              {
+                printf '<!-- ai-summary model=%s -->\n\n' "${AI_MODEL}"
+                printf '%s\n' "${AI_CONTENT}"
+              } > "${AI_OUT}.final"
+              FINAL_BODY="${AI_OUT}.final"
+              echo "::notice::changelog: AI summary OK (${AI_MODEL})"
+            else
+              echo "::warning::changelog: AI returned 200 but empty content; falling back to bash grouping."
+            fi
+          else
+            echo "::warning::changelog: AI request failed (HTTP ${HTTP_CODE}); falling back to bash grouping. Most likely missing 'models: read' permission on the calling job."
+            head -c 2000 "${AI_OUT}" >&2 || true
+            cat "${AI_ERR}" >&2 || true
+            echo "" >&2
+          fi
+        fi
+
+        # ---------------------------------------------------------------------
+        # Compose the final changelog section: chosen body + collapsed
+        # raw-commit log (always present so reviewers can verify the
+        # grouping didn't drop anything).
+        # ---------------------------------------------------------------------
+        {
+          printf '### Changes since `%s`\n\n' "${PREVIOUS_TAG}"
+          cat "${FINAL_BODY}"
+          printf '\n<details><summary>Raw commits (%d)</summary>\n\n' "${COMMIT_COUNT}"
+          printf '```\n'
+          awk -F'\t' '{ printf "%s  %s\n", $1, $2 }' "${RAW_COMMITS}"
+          printf '```\n</details>\n'
+        } > "${CHANGELOG_FILE}"
+
+        echo "::notice::changelog: wrote $(wc -c < "${CHANGELOG_FILE}" | tr -d ' ') bytes to ${CHANGELOG_FILE}"
+
     - id: render
       shell: bash
       env:
@@ -76,6 +356,7 @@ runs:
         COMMIT_SHA: ${{ github.sha }}
         SERVER_URL: ${{ github.server_url }}
         REPOSITORY: ${{ github.repository }}
+        CHANGELOG_PATH: ${{ steps.changelog.outputs.path }}
       run: |
         set -euo pipefail
         ERR=0
@@ -152,6 +433,17 @@ runs:
         export TAG_NAME VERSION RELEASE_NAME SHORT_SHA COMMIT_URL BUILD_DATE
         export IMAGE_SECTION PLATFORMS_SECTION EXTRA_CONTEXT
         export TEMPLATE_PATH OUTPUT_PATH
+
+        # Slurp the changelog file produced by the previous step. Missing
+        # file ⇒ empty section (e.g. callers that don't pass previous_tag
+        # / source_branch, or first release of a kit). The template's
+        # `{{ changelog_section }}` placeholder will render as empty,
+        # which Markdown collapses cleanly.
+        CHANGELOG_SECTION=""
+        if [ -n "${CHANGELOG_PATH:-}" ] && [ -s "${CHANGELOG_PATH}" ]; then
+          CHANGELOG_SECTION="$(cat "${CHANGELOG_PATH}")"
+        fi
+        export CHANGELOG_SECTION
 
         python3 "${GITHUB_ACTION_PATH}/render.py"
 

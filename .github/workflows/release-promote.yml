@@ -190,6 +190,24 @@ name: Release promote (reusable)
         required: false
         type: string
         default: ''
+      release_ai_changelog:
+        description: >-
+          `'true'` to summarize the commit log (between `previous_tag`
+          and `source_branch` HEAD) via GitHub Models inference in the
+          rendered release body. Falls back to a deterministic bash
+          grouping by conventional-commit prefix on any AI failure —
+          releases never block on AI availability. `previous_tag` is
+          auto-resolved by the `Resolve tag` step.
+        required: false
+        type: string
+        default: 'false'
+      release_ai_model:
+        description: >-
+          GitHub Models model identifier (e.g. `openai/gpt-4o-mini`).
+          Only consulted when `release_ai_changelog == 'true'`.
+        required: false
+        type: string
+        default: 'openai/gpt-4o-mini'
 
     outputs:
       target_sha:
@@ -218,6 +236,13 @@ name: Release promote (reusable)
           `.github/workflows/**`). Empty when target_branch was
           already compliant.
         value: ${{ jobs.promote.outputs.removed_violations }}
+      previous_tag:
+        description: >-
+          Tag that immediately preceded the newly-resolved `tag_name`
+          (e.g. `v1.0.0` when this release is `v1.0.1`). Empty on the
+          first release of a kit. Used downstream as the lower bound
+          for changelog generation.
+        value: ${{ jobs.promote.outputs.previous_tag }}
       release_url:
         description: 'GitHub Release HTML URL (when the release stage ran).'
         value: ${{ jobs.release.outputs.release_url }}
@@ -276,6 +301,7 @@ jobs:
       promoted:           ${{ steps.promote.outputs.promoted }}
       removed_paths:      ${{ steps.promote.outputs.removed_paths }}
       removed_violations: ${{ steps.promote.outputs.removed_violations }}
+      previous_tag:       ${{ steps.resolve_tag.outputs.previous_tag }}
     steps:
       - name: Checkout source_branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -556,3 +582,13 @@ jobs:
       generate_release_notes: ${{ inputs.release_generate_notes }}
       target_commitish:       ${{ needs.promote.outputs.target_sha }}
       files:                  ${{ inputs.release_files }}
+      # AI changelog wiring. `previous_tag` is the auto-resolved value
+      # from the promote job's `Resolve tag` step — empty on the first
+      # release of a kit (renderer treats that as "skip changelog
+      # section"). `source_branch` is the workflow input (typically
+      # `dev`); the renderer summarizes commits between previous_tag
+      # and the HEAD of this branch via the GitHub Compare API.
+      previous_tag:           ${{ needs.promote.outputs.previous_tag }}
+      source_branch:          ${{ inputs.source_branch }}
+      ai_changelog:           ${{ inputs.release_ai_changelog }}
+      ai_model:               ${{ inputs.release_ai_model }}
