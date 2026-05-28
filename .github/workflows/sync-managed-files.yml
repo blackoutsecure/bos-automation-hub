@@ -89,15 +89,20 @@ on:
         default: 3
       runs_on:
         description: >-
-          Runner label for the job. Accepts a bare label (e.g. `ubuntu-latest`)
-          or a JSON-array string of labels (e.g. `["self-hosted","Linux","ARM64"]`).
-          Both shapes are parsed at runtime via `fromJSON` — a bare JSON-array
-          string substituted directly into `runs-on:` would otherwise be treated
-          by GHA's scheduler as a single literal label and the job would never
-          be picked up.
+          Optional runner override for the sync job. When empty
+          (the default), resolves from the org-shared
+          `vars.DEFAULT_RUNNER`. Accepts either a bare label
+          (e.g. `ubuntu-latest`) or a JSON-array string of labels
+          (e.g. `["self-hosted","Linux","ARM64"]`); both shapes are
+          parsed at runtime via `fromJSON` so GHA sees a real label
+          list rather than a single literal string. No silent
+          fallback: `vars.DEFAULT_RUNNER` is validated by the
+          `preflight-runner-config` job (see README.md "Runner
+          configuration") so a job that reaches this stage is
+          guaranteed to evaluate against a valid label set.
         required: false
         type: string
-        default: 'ubuntu-latest'
+        default: ''
       timeout_minutes:
         description: 'Per-job timeout.'
         required: false
@@ -118,13 +123,28 @@ permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate `vars.DEFAULT_RUNNER` once before the sync job
+  # evaluates its `runs-on:` expression. See release.yml for full rationale.
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+        with:
+          default_runner: ${{ vars.DEFAULT_RUNNER }}
+
   sync:
     name: Sync managed dotfiles (${{ inputs.mode }})
-    # See monitor-upstream-release.yml for the `fromJSON` + `startsWith`
-    # rationale (JSON-array-shaped inputs in `runs-on:`). The
-    # `inputs.runs_on` input accepts both bare labels and JSON-array
-    # strings; this expression parses whichever shape was passed.
-    runs-on: ${{ fromJSON(startsWith(inputs.runs_on, '[') && inputs.runs_on || format('"{0}"', inputs.runs_on)) }}
+    needs: preflight-runner-config
+    # Resolve runner: explicit `inputs.runs_on` override beats org-shared
+    # `vars.DEFAULT_RUNNER`. Presence and shape of `vars.DEFAULT_RUNNER`
+    # are enforced by `preflight-runner-config`. The `fromJSON` +
+    # `startsWith` dance supports both bare-label and JSON-array shapes.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER)) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     permissions:
       contents: write   # required for `mode: commit`; harmless for `mode: check`

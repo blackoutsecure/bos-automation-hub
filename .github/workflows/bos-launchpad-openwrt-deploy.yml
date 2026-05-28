@@ -242,12 +242,24 @@ name: Blackout Secure Launchpad — OpenWrt (reusable)
         default: 'site-src'
       runs_on:
         description: >-
-          Runner label. Defaults to `ubuntu-22.04` — the SDK build
-          needs the host toolchain pinned. Override only when you've
-          validated SDK compatibility with a different image.
+          Optional runner override for the build job. When empty
+          (the default), resolves from the org-shared `vars.RUNNER_X64`.
+          The OpenWrt SDK ships binaries built for `Linux-x86_64`
+          hosts (the toolchain `gcc`/`ld`/`make` cross-binaries are
+          ELF x86_64), so this workflow is pinned to x64 the same
+          way the balena workflows are. Accepts either a bare label
+          (e.g. `ubuntu-22.04`) or a JSON-array string of labels
+          (e.g. `["self-hosted","Linux","X64","openwrt-builder"]`);
+          both shapes are parsed at runtime via `fromJSON` so GHA
+          sees a real label list rather than a single literal
+          string. No silent fallback: `vars.RUNNER_X64` is
+          validated by the `preflight-runner-config` job (see
+          README.md "Runner configuration") so a job that reaches
+          this stage is guaranteed to evaluate against a valid
+          x64-capable label set.
         required: false
         type: string
-        default: 'ubuntu-22.04'
+        default: ''
       timeout_minutes:
         description: >-
           Job timeout in minutes. Cold SDK builds with ~3 packages
@@ -293,9 +305,36 @@ permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate `vars.RUNNER_X64` once before the build job
+  # evaluates its `runs-on:` expression. The OpenWrt SDK ships
+  # `Linux-x86_64` host binaries, so this workflow is x64-pinned the
+  # same way the balena workflows are. See release.yml for full
+  # rationale on the preflight pattern.
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+        with:
+          runner_x64: ${{ vars.RUNNER_X64 }}
+          require_default_runner: 'false'
+          require_runner_x64: 'true'
+
   build-and-publish:
     name: Build once, publish to Cloudflare Pages
-    runs-on: ${{ inputs.runs_on }}
+    needs: preflight-runner-config
+    # OpenWrt SDK requires a Linux-x86_64 host (its cross-toolchain
+    # binaries are ELF x86_64), so this job is pinned to
+    # `vars.RUNNER_X64` (validated by `preflight-runner-config`)
+    # rather than `vars.DEFAULT_RUNNER`. Callers can still pass
+    # `inputs.runs_on` for a per-call override (e.g. a different
+    # jammy-compatible self-hosted x64 label). The `fromJSON` +
+    # `startsWith` dance supports both bare-label and JSON-array
+    # shapes.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.RUNNER_X64, '[') && (inputs.runs_on || vars.RUNNER_X64) || format('"{0}"', inputs.runs_on || vars.RUNNER_X64)) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     env:
       # Forwarded verbatim to every script under .bos-hub/.github/scripts/openwrt/.

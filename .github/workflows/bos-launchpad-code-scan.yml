@@ -114,10 +114,21 @@ name: Repo Security Scan (reusable)
         type: number
         default: 30
       runs_on:
-        description: 'Runner label. Default `ubuntu-latest`.'
+        description: >-
+          Optional runner override for the scan/codeql jobs. When empty
+          (the default), resolves from the org-shared
+          `vars.DEFAULT_RUNNER`. Accepts either a bare label
+          (e.g. `ubuntu-latest`) or a JSON-array string of labels
+          (e.g. `["self-hosted","Linux","X64"]`); both shapes are
+          parsed at runtime via `fromJSON` so GHA sees a real label
+          list rather than a single literal string. No silent
+          fallback: `vars.DEFAULT_RUNNER` is validated by the
+          `preflight-runner-config` job (see README.md "Runner
+          configuration") so a job that reaches this stage is
+          guaranteed to evaluate against a valid label set.
         required: false
         type: string
-        default: ubuntu-latest
+        default: ''
       use_advanced_pat:
         description: >-
           When `true` AND the caller forwards a non-empty `scanning_pat`
@@ -145,10 +156,29 @@ name: Repo Security Scan (reusable)
 permissions: {}
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate `vars.DEFAULT_RUNNER` once before any downstream job
+  # evaluates its `runs-on:` expression. See release.yml for full rationale.
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+        with:
+          default_runner: ${{ vars.DEFAULT_RUNNER }}
+
   scan:
     name: bos-code-scanning-kit
+    needs: preflight-runner-config
     if: inputs.enable_kit_composite
-    runs-on: ${{ inputs.runs_on }}
+    # Resolve runner: explicit `inputs.runs_on` override beats org-shared
+    # `vars.DEFAULT_RUNNER`. Presence and shape of `vars.DEFAULT_RUNNER`
+    # are enforced by `preflight-runner-config`. The `fromJSON` +
+    # `startsWith` dance supports both bare-label and JSON-array shapes.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER)) }}
     # Permissions are scoped at the job level rather than the workflow level
     # so the calling workflow's effective-permissions cascade is explicit.
     # `security-events: write` is required for the kit's SARIF upload;
@@ -195,8 +225,10 @@ jobs:
   # ---------------------------------------------------------------------------
   codeql:
     name: Analyze (${{ matrix.language }})
+    needs: preflight-runner-config
     if: inputs.codeql_languages != ''
-    runs-on: ${{ inputs.runs_on }}
+    # Same runner-resolution shape as the `scan` job above.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER)) }}
     timeout-minutes: ${{ inputs.codeql_timeout_minutes }}
     permissions:
       # Required by github/codeql-action to upload SARIF to the
