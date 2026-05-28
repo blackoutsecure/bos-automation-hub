@@ -281,11 +281,53 @@ jobs:
         name: Resolve language matrix
         env:
           INPUT_LANGUAGES: ${{ inputs.codeql_languages }}
-          GH_TOKEN: ${{ github.token }}
+          # Prefer the org-level SCANNING_PAT (when the caller opts
+          # into `use_advanced_pat` AND forwards a non-empty secret)
+          # for the default-setup probe. That endpoint requires
+          # `Administration: read`, a scope the workflow's default
+          # `GITHUB_TOKEN` cannot grant. With only `github.token` the
+          # probe falls back gracefully (403 → "could not determine")
+          # and we proceed with normal resolution.
+          GH_TOKEN: ${{ (inputs.use_advanced_pat && secrets.scanning_pat != '') && secrets.scanning_pat || github.token }}
           REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
+
+          # ---- Preflight: default-setup conflict detection ---------
+          # GitHub disallows running an advanced CodeQL workflow
+          # against a repo that has CodeQL default setup enabled —
+          # the SARIF upload is rejected with "CodeQL analyses from
+          # advanced configurations cannot be processed when the
+          # default setup is enabled". Detect the conflict ourselves
+          # and skip the codeql job entirely instead of burning CPU
+          # on an analyze that we know will fail to upload.
+          #
+          # The endpoint needs `Administration: read` which the
+          # default `GITHUB_TOKEN` cannot grant. The probe uses
+          # SCANNING_PAT when available, falls back to `github.token`
+          # otherwise. Any failure (403, 404, network) is treated as
+          # "could not determine" — we proceed with normal resolution
+          # and let the codeql job's upload surface the conflict if
+          # there is one.
+          #
+          # The probe runs unconditionally (before input-mode
+          # dispatch) because the conflict applies regardless of how
+          # the caller specified `codeql_languages` — an explicit
+          # `'["actions"]'` collides with default setup just as much
+          # as an `'auto'`-resolved one.
+          ds_state="$(gh api "repos/${REPO}/code-scanning/default-setup" --jq '.state' 2>/dev/null || true)"
+          if [ "${ds_state}" = 'configured' ]; then
+            ds_langs="$(gh api "repos/${REPO}/code-scanning/default-setup" --jq '.languages | join(",")' 2>/dev/null || echo '?')"
+            echo "::warning::CodeQL default setup is enabled on ${REPO} (languages: ${ds_langs}). Skipping advanced CodeQL to avoid the mutually-exclusive 'advanced configurations cannot be processed when default setup is enabled' upload error. To use the advanced workflow instead, disable default setup at Settings → Code security → Code scanning → CodeQL → Disable."
+            echo 'languages=[]' >> "${GITHUB_OUTPUT}"
+            echo "Mode: default-setup-skip. Default setup owns CodeQL on this repo."
+            exit 0
+          elif [ -z "${ds_state}" ]; then
+            echo "Default-setup state could not be determined (probe call failed or insufficient permissions). Proceeding with normal language resolution; the codeql job will surface a clear error if there is a conflict."
+          else
+            echo "Default-setup state: ${ds_state} (no conflict)."
+          fi
 
           if [ "${INPUT_LANGUAGES}" != 'auto' ]; then
             # Mode 3: deterministic JSON array — echo back verbatim.

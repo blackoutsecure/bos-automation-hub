@@ -655,6 +655,26 @@ output that the `codeql` job's `matrix.language` consumes via
   explicitly do NOT want Python source scanned. Pin
   `'["actions"]'`.
 
+**Default-setup conflict auto-skip.** GitHub disallows running an
+advanced CodeQL workflow against a repo that has [CodeQL default
+setup](https://docs.github.com/en/code-security/code-scanning/enabling-code-scanning/configuring-default-setup-for-code-scanning)
+enabled — the SARIF upload from the advanced path is rejected with
+"CodeQL analyses from advanced configurations cannot be processed
+when the default setup is enabled". To avoid burning compute on
+analyses that will fail to upload, `resolve-codeql-languages` probes
+`/repos/{owner}/{repo}/code-scanning/default-setup` unconditionally
+and emits `[]` (skip) when `state == 'configured'`, regardless of
+input mode, with a `::warning::` pointing at the disable path. The
+endpoint requires `Administration: read` (not grantable to the
+default `GITHUB_TOKEN`), so the probe uses the org-level
+`SCANNING_PAT` when available (`use_advanced_pat: true` + secret
+forwarded) and falls back to `github.token` otherwise — in the
+fallback case the call typically 403s, the probe logs "could not
+determine", and the codeql job runs and surfaces the same conflict
+error directly. Callers that know they have default setup should
+also set `codeql_languages: ''` explicitly to skip the wasted API
+call per run.
+
 **Cost.** The resolver job is one API call + one sparse-checkout
 + one shell script; typically completes in ≈10 s. It's gated on
 `codeql_languages != ''` so callers with CodeQL disabled pay zero.
