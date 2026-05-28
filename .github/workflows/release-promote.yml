@@ -561,8 +561,15 @@ jobs:
   # ---------------------------------------------------------------------------
   # Stage 2 — publish the GitHub Release on the new tag.
   #
-  # Skipped when the promote stage was a no-op (no commit created),
-  # when `dry_run: true`, or when the promote stage failed.
+  # Skipped only when `dry_run: true` or when the promote stage failed.
+  # The promote action always publishes the requested tag on success:
+  #   * a new promotion commit on `main` when the allowlisted source
+  #     tree diverged, OR
+  #   * a tag on the existing `main` HEAD when the allowlisted tree was
+  #     already in sync (e.g. a release dispatched after CI-only or
+  #     test-only changes on `dev`, neither of which are allowlisted).
+  # `promoted == 'true'` therefore reads as "tag exists on origin;
+  # publish the GitHub Release".
   # ---------------------------------------------------------------------------
   release:
     name: GitHub Release

@@ -700,6 +700,80 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      # ----- Per-arch image summary -------------------------------------
+      # Surfaces arch, platform, digest, and the compressed image size
+      # (sum of config + layer descriptor sizes from the registry) into
+      # the workflow run summary. Runs on every attempt — push or
+      # validation — so even cache-only builds get a row. Size probe is
+      # skipped on validation-only builds (no registry image to inspect
+      # yet) and falls back gracefully when the registry inspect or
+      # `jq` is unavailable.
+      - name: Job summary
+        if: always()
+        env:
+          ARCH: ${{ matrix.arch }}
+          PLATFORM: ${{ steps.platform.outputs.value }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          BUILD_STATUS: ${{ steps.build.outcome }}
+          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+        run: |
+          set -euo pipefail
+
+          human_bytes() {
+            # `numfmt` ships in coreutils on every runner image we use
+            # (ubuntu-latest + the org's self-hosted images). Fall back
+            # to a bare byte count if it's somehow missing.
+            local n="${1:-0}"
+            if command -v numfmt >/dev/null 2>&1; then
+              numfmt --to=iec-i --suffix=B --format='%.2f' "${n}"
+            else
+              printf '%s B' "${n}"
+            fi
+          }
+
+          IMAGE_SIZE_BYTES=''
+          IMAGE_SIZE_HUMAN='n/a'
+          if [ "${PUSH}" = "true" ] && [ -n "${DIGEST:-}" ] && command -v jq >/dev/null 2>&1; then
+            if MANIFEST_RAW="$(docker buildx imagetools inspect --raw "${IMAGE_REF}@${DIGEST}" 2>/dev/null)"; then
+              IMAGE_SIZE_BYTES="$(
+                printf '%s' "${MANIFEST_RAW}" \
+                  | jq '[(.config.size // 0)] + [(.layers // [])[].size // 0] | add // 0'
+              )"
+              IMAGE_SIZE_HUMAN="$(human_bytes "${IMAGE_SIZE_BYTES}")"
+            fi
+          fi
+
+          CONFIG_DIGEST=''
+          if [ -n "${BUILD_METADATA:-}" ] && command -v jq >/dev/null 2>&1; then
+            CONFIG_DIGEST="$(
+              printf '%s' "${BUILD_METADATA}" \
+                | jq -r '."containerimage.config.digest" // empty' 2>/dev/null || true
+            )"
+          fi
+
+          MODE="$([ "${PUSH}" = "true" ] && echo 'push-by-digest' || echo 'validation-only')"
+
+          {
+            echo "## Docker build — ${ARCH}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| Architecture     | \`${ARCH}\` |"
+            echo "| Platform         | \`${PLATFORM}\` |"
+            echo "| Image            | \`${IMAGE_REF}\` |"
+            echo "| Version          | \`${IMAGE_VERSION}\` |"
+            echo "| Mode             | \`${MODE}\` |"
+            echo "| Build status     | \`${BUILD_STATUS}\` |"
+            if [ -n "${DIGEST:-}" ]; then
+              echo "| Manifest digest  | \`${DIGEST}\` |"
+            fi
+            if [ -n "${CONFIG_DIGEST:-}" ]; then
+              echo "| Config digest    | \`${CONFIG_DIGEST}\` |"
+            fi
+            echo "| Compressed size  | \`${IMAGE_SIZE_HUMAN}\`${IMAGE_SIZE_BYTES:+ (${IMAGE_SIZE_BYTES} bytes)} |"
+            echo "| Build date       | \`${BUILD_DATE}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   manifest:
     name: Publish manifest
     needs: [preflight-runner-config, setup, build]
@@ -763,17 +837,74 @@ jobs:
         env:
           APPLIED_TAGS: ${{ steps.manifest.outputs.applied_tags }}
           DIGEST_COUNT: ${{ steps.manifest.outputs.digest_count }}
+          INDEX_DIGEST: ${{ steps.manifest.outputs.index_digest }}
+          PER_ARCH_SIZES: ${{ steps.manifest.outputs.per_arch_sizes }}
+          TOTAL_SIZE_BYTES: ${{ steps.manifest.outputs.total_compressed_size_bytes }}
+          SOURCE_REPO: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_REF: ${{ github.ref }}
+          SERVER_URL: ${{ github.server_url }}
+          NAMESPACE: ${{ needs.setup.outputs.namespace }}
+          IMAGE_NAME: ${{ inputs.image_name }}
         run: |
+          set -euo pipefail
+
+          human_bytes() {
+            # `numfmt` ships in coreutils on the org's runner images.
+            # Fall back to a bare byte count if it's somehow missing.
+            local n="${1:-0}"
+            if [ -z "${n}" ] || [ "${n}" = "0" ]; then
+              echo '0 B'
+              return
+            fi
+            if command -v numfmt >/dev/null 2>&1; then
+              numfmt --to=iec-i --suffix=B --format='%.2f' "${n}"
+            else
+              printf '%s B' "${n}"
+            fi
+          }
+
+          TOTAL_HUMAN="$(human_bytes "${TOTAL_SIZE_BYTES:-0}")"
+
+          # Docker Hub registry page (only public registry we publish to today).
+          REGISTRY_URL="https://hub.docker.com/r/${NAMESPACE}/${IMAGE_NAME}"
+          TAGS_URL="${REGISTRY_URL}/tags"
+
           {
             echo "## Docker Build Summary"
             echo ""
             echo "| Field | Value |"
             echo "|-------|-------|"
-            echo "| Image       | \`${IMAGE_REF}\` |"
-            echo "| Version     | \`${IMAGE_VERSION}\` |"
-            echo "| Latest tag  | \`${TAG_LATEST}\` |"
-            echo "| Build date  | \`${BUILD_DATE}\` |"
-            echo "| Digests     | \`${DIGEST_COUNT:-?}\` |"
+            echo "| Image            | \`${IMAGE_REF}\` |"
+            echo "| Version          | \`${IMAGE_VERSION}\` |"
+            echo "| Latest tag       | \`${TAG_LATEST}\` |"
+            echo "| Build date       | \`${BUILD_DATE}\` |"
+            echo "| Architectures    | \`${DIGEST_COUNT:-?}\` |"
+            if [ -n "${INDEX_DIGEST:-}" ]; then
+              echo "| Index digest     | \`${INDEX_DIGEST}\` |"
+            fi
+            if [ -n "${TOTAL_SIZE_BYTES:-}" ] && [ "${TOTAL_SIZE_BYTES}" != "0" ]; then
+              echo "| Total compressed | \`${TOTAL_HUMAN}\` (${TOTAL_SIZE_BYTES} bytes, sum across architectures) |"
+            fi
+            echo "| Registry         | [Docker Hub](${REGISTRY_URL}) · [tags](${TAGS_URL}) |"
+            echo "| Source           | [\`${SOURCE_REPO}@${SOURCE_SHA}\`](${SERVER_URL}/${SOURCE_REPO}/commit/${SOURCE_SHA}) (\`${SOURCE_REF}\`) |"
+
+            # Per-arch breakdown — only render when we actually got sizes
+            # from the registry probe (composite emits empty on failure).
+            if [ -n "${PER_ARCH_SIZES:-}" ]; then
+              echo ""
+              echo "### Per-architecture images"
+              echo ""
+              echo "| Architecture | Compressed size | Digest |"
+              echo "|--------------|-----------------|--------|"
+              # PER_ARCH_SIZES format: `<arch>\t<bytes>\t<digest>` per line.
+              while IFS=$'\t' read -r arch bytes digest; do
+                [ -n "${arch:-}" ] && [ -n "${digest:-}" ] || continue
+                size_human="$(human_bytes "${bytes:-0}")"
+                echo "| \`${arch}\` | ${size_human} (${bytes:-0} bytes) | \`${digest}\` |"
+              done <<< "${PER_ARCH_SIZES}"
+            fi
+
             if [ -n "${APPLIED_TAGS:-}" ]; then
               echo ""
               echo "### Applied tags"
@@ -781,6 +912,19 @@ jobs:
               while IFS= read -r t; do
                 [ -n "${t}" ] && echo "- \`${IMAGE_REF}:${t}\`"
               done <<< "${APPLIED_TAGS}"
+
+              echo ""
+              echo "### Pull commands"
+              echo ""
+              echo '```bash'
+              while IFS= read -r t; do
+                [ -n "${t}" ] && echo "docker pull ${IMAGE_REF}:${t}"
+              done <<< "${APPLIED_TAGS}"
+              if [ -n "${INDEX_DIGEST:-}" ]; then
+                echo "# Pin to the exact published index digest:"
+                echo "docker pull ${IMAGE_REF}@${INDEX_DIGEST}"
+              fi
+              echo '```'
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 

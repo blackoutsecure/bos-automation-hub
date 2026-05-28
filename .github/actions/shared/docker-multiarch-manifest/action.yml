@@ -49,6 +49,28 @@ outputs:
   digest_count:
     description: 'Number of per-arch digests merged into the manifest.'
     value: ${{ steps.publish.outputs.digest_count }}
+  index_digest:
+    description: >-
+      sha256 digest of the published OCI image index (manifest list)
+      under `version_tag`. Empty when the registry inspect after push
+      failed or was skipped.
+    value: ${{ steps.publish.outputs.index_digest }}
+  per_arch_sizes:
+    description: >-
+      Newline-separated per-arch breakdown of the published image, one
+      entry per arch in the format
+      `<arch>\t<bytes>\t<sha256-digest>`. `<arch>` is lowercase
+      OCI arch with optional `/variant` suffix (e.g. `amd64`,
+      `arm64`, `arm/v7`). `<bytes>` is the sum of the per-arch
+      config descriptor size plus all layer descriptor sizes (i.e.
+      the compressed download size of that arch). Empty when the
+      registry inspect after push failed or was skipped.
+    value: ${{ steps.publish.outputs.per_arch_sizes }}
+  total_compressed_size_bytes:
+    description: >-
+      Sum of `per_arch_sizes` across every architecture. Empty when
+      the registry inspect after push failed or was skipped.
+    value: ${{ steps.publish.outputs.total_compressed_size_bytes }}
 
 runs:
   using: composite
@@ -173,9 +195,84 @@ runs:
           docker buildx imagetools inspect "${IMAGE_REF}:${VERSION_TAG}"
         fi
 
+        # ----- Post-push size/digest probe ----------------------------------
+        # Re-inspects the just-pushed tag to capture the OCI index
+        # digest plus per-arch compressed sizes (sum of each arch's
+        # config descriptor + layer descriptors). Used by callers to
+        # render image-size info in the workflow summary. Failures
+        # here are non-fatal — the manifest is already published; we
+        # just leave the outputs empty and emit a warning.
+        INDEX_DIGEST=''
+        TOTAL_BYTES=''
+        PER_ARCH_BUFFER=''
+        if command -v jq >/dev/null 2>&1; then
+          if INDEX_RAW="$(docker buildx imagetools inspect --raw "${IMAGE_REF}:${VERSION_TAG}" 2>/dev/null)"; then
+            # `--format '{{.Manifest.Digest}}'` returns the registry-canonical
+            # index digest. Fall back to local sha256 of the raw bytes only
+            # if the format probe fails (unlikely; older buildx).
+            if ! INDEX_DIGEST="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "${IMAGE_REF}:${VERSION_TAG}" 2>/dev/null)"; then
+              INDEX_DIGEST="sha256:$(printf '%s' "${INDEX_RAW}" | sha256sum | awk '{print $1}')"
+            fi
+            INDEX_DIGEST="$(printf '%s' "${INDEX_DIGEST}" | tr -d '[:space:]')"
+
+            # Per-arch: walk the index, fetch each child manifest, sum
+            # config + layer sizes. Single-arch images (no `.manifests`)
+            # are handled by the second jq branch below.
+            ENTRIES="$(
+              printf '%s' "${INDEX_RAW}" | jq -r '
+                if (.manifests // empty) then
+                  .manifests[]
+                    | select(.platform.os != "unknown")
+                    | [
+                        (.platform.architecture // "unknown")
+                          + ( if (.platform.variant // "") == "" then "" else "/" + .platform.variant end ),
+                        .digest
+                      ]
+                    | @tsv
+                else empty end
+              '
+            )"
+
+            TOTAL_BYTES=0
+            if [ -n "${ENTRIES}" ]; then
+              while IFS=$'\t' read -r arch digest; do
+                [ -n "${arch}" ] && [ -n "${digest}" ] || continue
+                if MANIFEST_RAW="$(docker buildx imagetools inspect --raw "${IMAGE_REF}@${digest}" 2>/dev/null)"; then
+                  arch_bytes="$(
+                    printf '%s' "${MANIFEST_RAW}" \
+                      | jq '[(.config.size // 0)] + [(.layers // [])[].size // 0] | add // 0'
+                  )"
+                else
+                  arch_bytes=0
+                fi
+                TOTAL_BYTES=$((TOTAL_BYTES + arch_bytes))
+                PER_ARCH_BUFFER="${PER_ARCH_BUFFER}${arch}	${arch_bytes}	${digest}"$'\n'
+              done <<< "${ENTRIES}"
+            else
+              # Single-arch image: the inspected tag is itself a manifest.
+              arch="$(printf '%s' "${INDEX_RAW}" | jq -r '.config.architecture // "unknown"' 2>/dev/null || echo unknown)"
+              arch_bytes="$(
+                printf '%s' "${INDEX_RAW}" \
+                  | jq '[(.config.size // 0)] + [(.layers // [])[].size // 0] | add // 0'
+              )"
+              TOTAL_BYTES=$((TOTAL_BYTES + arch_bytes))
+              PER_ARCH_BUFFER="${arch}	${arch_bytes}	${INDEX_DIGEST}"$'\n'
+            fi
+          else
+            echo "::warning title=docker-multiarch-manifest::post-push inspect of '${IMAGE_REF}:${VERSION_TAG}' failed; size/digest outputs will be empty"
+          fi
+        else
+          echo "::warning title=docker-multiarch-manifest::jq not found on runner; skipping size/digest probe (outputs will be empty)"
+        fi
+
         {
           echo "applied_tags<<__EOF__"
           printf '%s\n' "${APPLIED[@]}"
           echo "__EOF__"
           echo "digest_count=${#DIGESTS[@]}"
+          echo "index_digest=${INDEX_DIGEST}"
+          echo "total_compressed_size_bytes=${TOTAL_BYTES}"
+          echo "per_arch_sizes<<__EOF_PAS__"
+          [ -n "${PER_ARCH_BUFFER}" ] && printf '%s' "${PER_ARCH_BUFFER}"
+          echo "__EOF_PAS__"
         } >> "${GITHUB_OUTPUT}"

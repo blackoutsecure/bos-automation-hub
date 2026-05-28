@@ -1142,6 +1142,16 @@ amd64 and arm64 in different jobs/runners and merging at the end).
 
 - `applied_tags` — newline-separated list of tags actually applied.
 - `digest_count` — number of per-arch digests merged.
+- `index_digest` — sha256 digest of the published OCI image index
+  (manifest list) under `version_tag`. Empty if the post-push registry
+  inspect failed.
+- `per_arch_sizes` — newline-separated per-arch breakdown of the
+  published image, one entry per arch in the form
+  `<arch>\t<bytes>\t<sha256-digest>`. `<bytes>` is the compressed
+  download size for that arch (config descriptor + sum of layer
+  descriptor sizes). Empty if the post-push registry inspect failed.
+- `total_compressed_size_bytes` — sum of `per_arch_sizes` bytes across
+  every architecture. Empty if the post-push registry inspect failed.
 
 See [action.yml](.github/actions/shared/docker-multiarch-manifest/action.yml)
 for full details.
