@@ -32,10 +32,12 @@
 #       `cloudflare/wrangler-action@v4`.
 #
 # Scripts live under `.github/scripts/openwrt/` in this hub and are
-# pulled in by checking out this repo at the SHA of THIS workflow file
-# (`github.workflow_sha`) into `.bos-hub/`. That guarantees the script
-# revision always matches the workflow YAML the caller is invoking,
-# even when consumers pin `@<sha>` instead of `@main`.
+# pulled in via a sparse checkout into `.bos-hub/`. The checkout ref
+# is the `hub_ref` input (defaults to `main`). Reusable workflows
+# cannot introspect the ref they themselves were loaded from
+# (`github.workflow_sha` returns the CALLER's workflow SHA in this
+# context), so SHA-pinning consumers must pass `hub_ref: <sha>` to
+# keep the workflow YAML and the scripts in lockstep.
 #
 # Caller contract:
 #   * Must provide `site-src/` (or override path via `site_src_dir`) in
@@ -254,6 +256,18 @@ name: Blackout Secure Launchpad — OpenWrt (reusable)
         required: false
         type: number
         default: 60
+      hub_ref:
+        description: >-
+          Git ref (branch / tag / SHA) in `blackoutsecure/bos-automation-hub`
+          to check out the SDK build scripts from. Defaults to `main`.
+          Reusable workflows have no built-in way to introspect the ref
+          they themselves were loaded from (`github.workflow_sha`
+          surfaces the CALLER's SHA, not the hub's), so consumers that
+          pin `uses: …@<sha>` should pass the same `<sha>` here to
+          keep the workflow YAML and scripts in lockstep.
+        required: false
+        type: string
+        default: 'main'
 
     secrets:
       OPENWRT_USIGN_SECRET_KEY:
@@ -320,21 +334,24 @@ jobs:
         with:
           persist-credentials: false
 
-      # Pull in the hub-managed scripts at the SAME ref as this
-      # workflow file. `github.workflow_sha` is the commit SHA of the
-      # reusable workflow itself (NOT the caller), so consumers that
-      # pin `@<sha>` get a script set that matches the workflow YAML
-      # byte-for-byte. Falls back implicitly to the resolved SHA when
-      # consumers reference `@main`.
+      # Pull in the hub-managed scripts. By default we track `main`,
+      # which keeps any consumer using `uses: …@main` byte-for-byte
+      # consistent with the latest hub HEAD. Reusable workflows can
+      # NOT introspect the ref they were loaded from —
+      # `github.workflow_sha` returns the CALLER's workflow SHA, not
+      # this file's SHA — so SHA-pinning consumers must pass
+      # `hub_ref: <same-sha>` to keep the script set in lockstep with
+      # the workflow YAML.
       - name: Checkout bos-automation-hub (SDK build scripts)
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: blackoutsecure/bos-automation-hub
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ inputs.hub_ref }}
           path: .bos-hub
           persist-credentials: false
           sparse-checkout: |
             .github/scripts/openwrt
+            .github/actions/cf-pages-headers-generate
           sparse-checkout-cone-mode: false
 
       - name: Resolve PACKAGES_SPEC
