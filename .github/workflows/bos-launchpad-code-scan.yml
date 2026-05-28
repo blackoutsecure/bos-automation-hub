@@ -538,3 +538,53 @@ jobs:
         uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           category: "/language:${{ matrix.language }}"
+
+      # CodeQL itself writes nothing to $GITHUB_STEP_SUMMARY — alerts land
+      # silently in the Security tab. The kit's posture audit writes a
+      # visible per-run summary; this step gives CodeQL feedback parity so
+      # operators don't have to context-switch to the Security tab just to
+      # confirm a run produced zero alerts (the most common case).
+      #
+      # The count is repo-wide for the ref (not per-language) because the
+      # `code-scanning/alerts` API has no language filter — every matrix
+      # leg shows the same total, clearly labelled. Each leg still gets
+      # its own header so the operator can confirm both arches uploaded.
+      #
+      # The 5-second sleep closes the race between the analyze step's
+      # SARIF upload completing and GHAS indexing the alerts. On query
+      # failure (slow indexing, missing permission, API hiccup) the step
+      # degrades to a "could not query" line and never fails the matrix
+      # leg — `if: always()` ensures it also runs on analyze failure so
+      # the operator sees a row in the summary even when the run errored.
+      - name: CodeQL summary
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO:     ${{ github.repository }}
+          REF:      ${{ github.ref }}
+          LANG:     ${{ matrix.language }}
+        shell: bash
+        run: |
+          # `set -u` only — never let a query failure mark the job red.
+          set -u
+          sleep 5
+          count="$(gh api \
+            "repos/${REPO}/code-scanning/alerts?tool_name=CodeQL&ref=${REF}&state=open&per_page=100" \
+            --jq 'length' 2>/dev/null || echo '?')"
+          ref_enc="$(printf '%s' "${REF}" | sed 's|/|%2F|g')"
+          security_url="https://github.com/${REPO}/security/code-scanning?query=tool%3ACodeQL+ref%3A${ref_enc}"
+          {
+            echo "## CodeQL · \`${LANG}\` · ref \`${REF}\`"
+            echo ""
+            case "${count}" in
+              0)
+                echo "**0 open CodeQL alerts** on \`${REF}\`. Scan completed, nothing to fix."
+                ;;
+              '?')
+                echo "Could not query the code-scanning alerts API — the SARIF upload may still be indexing, or this token lacks \`security_events: read\`. Check the [Security tab](${security_url}) directly."
+                ;;
+              *)
+                echo "**${count} open CodeQL alert(s)** on \`${REF}\`. [View in Security tab](${security_url})."
+                ;;
+            esac
+          } >> "${GITHUB_STEP_SUMMARY}"

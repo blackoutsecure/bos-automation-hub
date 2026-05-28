@@ -138,6 +138,38 @@
 #                                  kiosk, demo, service users, ...) for
 #                                  which VMs should NOT auto-start.
 #                                  Default: (empty -- no users excluded)
+#   UTM_AUTOSTART_OPEN_APP         Install-time only (not baked into the
+#                                  helper). Controls whether an apply
+#                                  run activates the autostart
+#                                  pipeline IMMEDIATELY for the active
+#                                  console user, or just stages the
+#                                  files and waits for the next login.
+#                                  Default: false.
+#
+#                                    false (default) -- files-only
+#                                      install. Any stale running
+#                                      LaunchAgent is booted out so
+#                                      the new helper code takes over
+#                                      cleanly, but the new
+#                                      LaunchAgent is NOT bootstrapped
+#                                      and UTM.app is NOT launched.
+#                                      LaunchAgent loads naturally at
+#                                      the next user login (when
+#                                      UTM.app is launched as a Login
+#                                      Item). No GUI side effects.
+#                                    true -- bootstrap the LaunchAgent
+#                                      into the console user's GUI
+#                                      domain now, AND 'open -a
+#                                      UTM.app' so the autostart chain
+#                                      runs end-to-end without a
+#                                      logout. UTM.app's GUI may
+#                                      appear on the console user's
+#                                      screen as a result; this can
+#                                      also surface first-run
+#                                      Gatekeeper / permission
+#                                      popups. Opt in when you want
+#                                      the install run to take effect
+#                                      immediately.
 #
 # Deployment:
 #   MDM (Intune, Jamf, Kandji, Mosyle, Workspace ONE):
@@ -217,6 +249,16 @@ defaultdelay=5                 # seconds between successive VM starts
 defaultboottimeout=60          # max seconds to wait for UTM.app
 defaultwaitpollinterval=1      # seconds between pgrep polls in wait loop
 defaultskiprunning="true"      # skip VMs not in 'stopped' state
+# defaultopenapp: install-time only -- when 'true', the installer
+# bootstraps the LaunchAgent into the console user's GUI domain AND
+# launches UTM.app so the autostart pipeline runs immediately. When
+# 'false' (the default), the install is files-only: stale running
+# LaunchAgent instances are still booted out so new helper code
+# takes effect cleanly, but the new LaunchAgent is NOT bootstrapped
+# and UTM.app is NOT launched -- both happen naturally at the next
+# user login. OFF by default so the install has no GUI side effects
+# (no UTM.app pop-up, no first-run Gatekeeper prompts).
+defaultopenapp="false"
 defaultloglevel="info"         # trace|debug|info|warn|error
 
 # ----- Resolved user tunables (env vars consumed at install time) -----
@@ -225,12 +267,22 @@ boottimeout="${UTM_AUTOSTART_BOOT_TIMEOUT:-${defaultboottimeout}}"
 waitpollinterval="${UTM_AUTOSTART_WAIT_POLL_INTERVAL:-${defaultwaitpollinterval}}"
 skiprunning_raw="${UTM_AUTOSTART_SKIP_RUNNING:-${defaultskiprunning}}"
 userexcluderaw="${UTM_AUTOSTART_USER_EXCLUDE:-${defaultuserexclude}}"
+openapp_raw="${UTM_AUTOSTART_OPEN_APP:-${defaultopenapp}}"
 
 # Normalise UTM_AUTOSTART_SKIP_RUNNING to 'true' / 'false'.
 case "$(printf '%s' "$skiprunning_raw" | tr '[:upper:]' '[:lower:]')" in
     true|1|yes|y|on)   skiprunning="true" ;;
     false|0|no|n|off)  skiprunning="false" ;;
     *) echo "ERROR: UTM_AUTOSTART_SKIP_RUNNING must be true/false (got '$skiprunning_raw')"; exit 1 ;;
+esac
+
+# Normalise UTM_AUTOSTART_OPEN_APP to 'true' / 'false'. This is an
+# install-time-only knob (not baked into the helper), so we validate
+# it here and act on it later in the apply-mode tail.
+case "$(printf '%s' "$openapp_raw" | tr '[:upper:]' '[:lower:]')" in
+    true|1|yes|y|on)   openapp="true" ;;
+    false|0|no|n|off)  openapp="false" ;;
+    *) echo "ERROR: UTM_AUTOSTART_OPEN_APP must be true/false (got '$openapp_raw')"; exit 1 ;;
 esac
 
 # Normalise UTM_AUTOSTART_USER_EXCLUDE: accept comma- or newline-separated,
@@ -294,7 +346,18 @@ Common:
                                 that should NOT trigger autostart at
                                 login. Helper exits 0 immediately for
                                 excluded users without waiting for
-                                UTM.app. Default: (empty -- all users)"
+                                UTM.app. Default: (empty -- all users)
+  UTM_AUTOSTART_OPEN_APP        install-time only: when 'true', the
+                                installer bootstraps the LaunchAgent
+                                into the console user's GUI domain AND
+                                launches UTM.app so the autostart
+                                pipeline runs immediately. When 'false'
+                                (default: ${defaultopenapp}), the
+                                install is files-only and the
+                                LaunchAgent loads at next login.
+                                Off by default so the install has no
+                                GUI side effects (no UTM.app pop-up,
+                                no first-run Gatekeeper prompts)."
             exit 0
             ;;
         *) echo "ERROR: unknown argument '$arg' (try --help)"; exit 1 ;;
@@ -822,6 +885,9 @@ run_preflight_audit() {
         pre-flight)
             echo "=== Pre-flight: inspecting install locations ==="
             ;;
+        post-flight)
+            echo "=== Post-install verification: re-inspecting install locations ==="
+            ;;
         *)
             echo "=== Audit ==="
             ;;
@@ -1095,34 +1161,105 @@ if command -v plutil >/dev/null 2>&1; then
 fi
 
 # ----- (re)load the LaunchAgent for the active console user, if any -----
-# A system LaunchAgent under /Library/LaunchAgents/ is loaded
-# automatically at the next login. If a user is already logged in at
-# the console, try a best-effort bootstrap so changes take effect
-# without forcing a logout.
 #
-# Reminder: this loads the LaunchAgent for the active console user,
-# but it does NOT add UTM.app to that user's "Open at Login" list.
-# That is a per-user prerequisite that must be done once for each
-# account whose VMs should auto-start -- see the "per-user 'Open at
-# Login' walkthrough" in the header of this script.
+# A system LaunchAgent under /Library/LaunchAgents/ is loaded
+# automatically at the next login. Whether we *also* bootstrap it
+# immediately for the active console user is gated by
+# UTM_AUTOSTART_OPEN_APP -- because bootstrap will RunAtLoad the
+# helper, which (transitively, via 'utmctl' inside UTM.app's bundle
+# or via XPC to the UTM agent) can cause UTM.app's GUI to appear on
+# the console user's screen *during the install*. That's surprising
+# for an unattended install flow, so by default we just stage the
+# files and let the LaunchAgent load naturally at the next user
+# login (when UTM.app is launched as a Login Item).
+#
+# When UTM_AUTOSTART_OPEN_APP=true, we do bootout/bootstrap *and*
+# explicitly 'open -a UTM.app' so the autostart pipeline runs
+# end-to-end without requiring a logout.
+#
+# Reminder: bootstrap does NOT add UTM.app to the user's "Open at
+# Login" list. That is a per-user prerequisite that must be done
+# once for each account whose VMs should auto-start -- see the
+# "per-user 'Open at Login' walkthrough" in the header of this
+# script.
 consoleuser="$(stat -f%Su /dev/console 2>/dev/null || true)"
+uid=""
 if [[ -n "$consoleuser" && "$consoleuser" != "root" && "$consoleuser" != "loginwindow" ]]; then
     uid="$(id -u "$consoleuser" 2>/dev/null || true)"
-    if [[ -n "$uid" ]]; then
-        if (( helper_changed || plist_changed )); then
-            echo "$(date) | Reloading LaunchAgent for console user '$consoleuser' (uid $uid)"
-            # Best-effort bootout; ignore "not loaded" errors.
-            launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
-            if ! launchctl bootstrap "gui/${uid}" "$plistpath"; then
-                log_warn "launchctl bootstrap failed; LaunchAgent will load at next login."
-            fi
+fi
+
+# Bootout any stale running instance of the LaunchAgent whenever the
+# helper or plist content actually changed. Without this, the OLD
+# helper code stays resident in the user's GUI domain until next
+# logout. Bootout itself is silent (no UTM activation) -- we just
+# unload; we only re-bootstrap when openapp=true.
+if [[ -n "$uid" ]] && (( helper_changed || plist_changed )); then
+    echo "$(date) | Unloading any stale LaunchAgent instance for console user '$consoleuser' (uid $uid)"
+    # Best-effort bootout; ignore "not loaded" errors.
+    launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
+fi
+
+if [[ "$openapp" == "true" ]]; then
+    # Opt-in: activate the autostart pipeline NOW for the console user
+    # (bootstrap LaunchAgent + ensure UTM.app is running). May cause
+    # UTM.app's GUI to appear on the console user's screen.
+    if [[ -z "$uid" ]]; then
+        log_warn "UTM_AUTOSTART_OPEN_APP=true but no console user session detected; LaunchAgent will load at next login."
+    else
+        echo "$(date) | Bootstrapping LaunchAgent into console user '$consoleuser' (uid $uid) -- UTM_AUTOSTART_OPEN_APP=true"
+        if ! launchctl bootstrap "gui/${uid}" "$plistpath"; then
+            log_warn "launchctl bootstrap failed; LaunchAgent will load at next login."
+        fi
+
+        # Also launch UTM.app itself if it's not already running, so
+        # the just-bootstrapped helper has something to talk to and
+        # the autostart chain runs end-to-end. 'launchctl asuser
+        # <uid> sudo -u <user> open -a <path>' is the canonical
+        # pattern: launchctl enters the target uid's GUI domain so
+        # 'open' can reach the Aqua session; sudo drops root
+        # privileges so UTM.app inherits the correct user identity.
+        if [[ ! -d "$utmappdir" ]]; then
+            log_warn "UTM_AUTOSTART_OPEN_APP=true but $utmappdir is not installed; cannot launch UTM.app."
+        elif pgrep -x "$utmprocess" >/dev/null 2>&1; then
+            echo "$(date) | UTM.app already running; not launching again (UTM_AUTOSTART_OPEN_APP=true)."
         else
-            echo "$(date) | No content changes; leaving existing LaunchAgent state alone."
+            echo "$(date) | Launching UTM.app for console user '$consoleuser' (uid $uid) -- UTM_AUTOSTART_OPEN_APP=true"
+            if ! launchctl asuser "$uid" sudo -u "$consoleuser" /usr/bin/open -a "$utmappdir" 2>/dev/null; then
+                log_warn "Failed to launch UTM.app for '$consoleuser'; user will need to open it manually."
+            fi
         fi
     fi
 else
-    echo "$(date) | No console user session detected; LaunchAgent will load at next login."
+    # Default: files-only install. The LaunchAgent will load naturally
+    # at the next user login (when UTM.app is launched as a Login
+    # Item). Make this explicit in the log so the operator knows why
+    # the install is "quiet".
+    if [[ -z "$uid" ]]; then
+        echo "$(date) | No console user session detected; LaunchAgent will load at next login."
+    elif (( helper_changed || plist_changed )); then
+        echo "$(date) | Files staged for console user '$consoleuser'; LaunchAgent will load at next login."
+        echo "$(date) |   To activate now without logging out, re-run with: UTM_AUTOSTART_OPEN_APP=true"
+        echo "$(date) |   (this will also launch UTM.app -- UTM.app's GUI may appear on the user's screen)"
+    else
+        echo "$(date) | No content changes; leaving existing LaunchAgent state alone."
+    fi
 fi
+
+# ----- post-install verification -----
+# Re-run the same audit pre-flight ran, this time to confirm every
+# install location now reports PASS. Apply has already finished
+# writing files and (re)loading the LaunchAgent, so a FAIL here
+# would indicate an external permissions race or an installer bug.
+# Log loudly but don't error the install -- the files ARE in place.
+echo ""
+run_preflight_audit post-flight
+if [[ "$audit_fail" -gt 0 ]]; then
+    log_warn "Post-install verification found $audit_fail issue(s); review the audit above."
+else
+    echo ""
+    echo "$(date) | Post-install verification: all checks PASS."
+fi
+echo ""
 
 echo "$(date) | $appname installed"
 echo "$(date) | Helper script: $helperpath"

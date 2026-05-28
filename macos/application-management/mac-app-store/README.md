@@ -23,7 +23,7 @@ refuses to apply updates.
 3. Removes per-user Darwin caches under `$TMPDIR/../C/com.apple.appstore{,agent}`.
 4. Deletes per-user defaults for `com.apple.appstore`, `com.apple.appstoreagent`, and `com.apple.storeagent`.
 5. Removes the App Store sandbox containers and caches under `~/Library/Containers/` and `~/Library/Caches/`.
-6. Runs `sudo softwareupdate --clear-catalog` and `sudo softwareupdate --list` to discard and refresh the system update catalog.
+6. On macOS 10.x, runs `sudo softwareupdate --clear-catalog` to discard the cached update catalog. On macOS 11+ this flag is deprecated (`Catalog management is no longer supported.`) and is skipped; `sudo softwareupdate --list` is run regardless to refresh metadata.
 7. Prompts the operator to restart the Mac so macOS can recreate the App Store containers cleanly.
 
 ## Modes
@@ -31,7 +31,7 @@ refuses to apply updates.
 | Mode | Flag | Behaviour |
 |---|---|---|
 | Apply (default) | _(no flag)_ | Performs the reset. Requires non-root user; prompts for `sudo` once. |
-| Check | `--check` (`--status`) | Read-only audit. Reports whether the environment is ready to run the reset, plus an informational snapshot of currently running App Store processes and existing cache/container paths. Never invokes `sudo`. |
+| Check | `--check` (`--status`) | Read-only audit. Reports whether the environment is ready to run the reset (OS, user, `$HOME`, `$TMPDIR`, required tools, **Full Disk Access**, **macOS major version**), plus an informational snapshot of currently running App Store processes and existing cache/container paths. Never invokes `sudo`. |
 | Dry-run | `--dry-run` (`-n`) | Prints every destructive command with `printf %q` quoting without executing it. Never invokes `sudo`. |
 
 ## Side Effects
@@ -52,6 +52,17 @@ This script must run as the **logged-in console user**, not via `sudo bash …`:
 - `~/Library/...`, `$TMPDIR`, and `defaults` operations are per-user; if launched as root they would resolve to `/var/root` and silently miss the real target.
 - In apply mode, `sudo` is primed once up front and reused by the `/var/log` write and the two `softwareupdate` calls, so the operator is prompted at most once.
 - `--check` and `--dry-run` are pure read-only and never invoke `sudo`.
+
+## macOS Permissions (Full Disk Access)
+
+Removing `~/Library/Containers/com.apple.appstore` and `~/Library/Containers/com.apple.appstoreagent` is protected by macOS TCC (App Sandbox container privacy). The terminal app that invokes this script needs **Full Disk Access**:
+
+1. Open **System Settings → Privacy & Security → Full Disk Access**.
+2. Add (or toggle on) the terminal you are using — Terminal.app, iTerm2, Ghostty, Warp, the MDM script runner, etc.
+3. **Quit and reopen** the terminal so the new permission takes effect.
+4. Re-run the script.
+
+Without Full Disk Access the script reports a clear `WARN: cannot remove ... -- macOS denied access (TCC).` for each blocked container and **continues**. Caches, preferences, and processes are still reset, but the user may remain signed in to the App Store because the sandbox container survives.
 
 ## Deployment
 

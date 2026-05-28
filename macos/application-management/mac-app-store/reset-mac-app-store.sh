@@ -36,7 +36,12 @@
 #   * `defaults delete com.apple.appstore{,agent}` and
 #     `com.apple.storeagent` wipe per-user App Store prefs.
 #   * `softwareupdate --clear-catalog` (root) discards the
-#     cached software-update catalog for the whole machine.
+#     cached software-update catalog. NOTE: Apple deprecated
+#     catalog management in macOS Big Sur (11.0); on 11+ the
+#     tool prints "Catalog management is no longer supported."
+#     and is a no-op, so this script only invokes the legacy
+#     flag on macOS 10.x and relies on `--list` to refresh
+#     metadata on newer releases.
 #
 # Privilege model:
 #   This script MUST be run as the logged-in console user
@@ -45,6 +50,18 @@
 #   once up-front (apply mode only) so the `softwareupdate`
 #   step and the /var/log write do not re-prompt. `--check`
 #   and `--dry-run` are pure read-only and never invoke sudo.
+#
+# macOS permissions:
+#   Removing `~/Library/Containers/com.apple.appstore{,agent}`
+#   is protected by macOS TCC (App Sandbox container privacy).
+#   The terminal app invoking this script (Terminal.app,
+#   iTerm2, Ghostty, Warp, the MDM script runner, ...) needs
+#   Full Disk Access:
+#     System Settings > Privacy & Security > Full Disk Access
+#   Toggle the terminal on, then QUIT AND REOPEN it before
+#   re-running. Without FDA the script reports a clear WARN
+#   and continues -- the App Store still resets but signed-in
+#   state may persist.
 #
 # Deployment:
 #   MDM (Intune, Jamf, Kandji, Mosyle, Workspace ONE):
@@ -191,13 +208,48 @@ if [[ "$mode" == "check" ]]; then
     fi
 
     # Required tools for the reset
-    for cmd in osascript killall defaults softwareupdate sudo; do
+    for cmd in osascript killall defaults softwareupdate sudo sw_vers; do
         if command -v "$cmd" >/dev/null 2>&1; then
             report PASS "tool $cmd" "$(command -v "$cmd")"
         else
             report FAIL "tool $cmd" "missing"
         fi
     done
+
+    # macOS major version: informational. `softwareupdate --clear-catalog`
+    # was deprecated in macOS Big Sur (11.0); apply mode will skip it
+    # on 11+ and run it on 10.x. Not drift either way -- just surface
+    # which code path apply will take.
+    macos_major_check="$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)"
+    if [[ -n "$macos_major_check" && "$macos_major_check" =~ ^[0-9]+$ ]]; then
+        if (( macos_major_check < 11 )); then
+            report PASS "macOS major" "$macos_major_check (apply will run --clear-catalog)"
+        else
+            report PASS "macOS major" "$macos_major_check (apply will skip --clear-catalog; deprecated)"
+        fi
+    else
+        report PASS "macOS major" "unknown (sw_vers returned no value)"
+    fi
+
+    # Full Disk Access preflight. ~/Library/Containers/com.apple.appstore
+    # is protected by macOS TCC (App Sandbox container privacy). Without
+    # Full Disk Access the rm -rf in apply mode fails with "Operation
+    # not permitted", the container survives, and the reset is incomplete
+    # (the user remains signed in). Probe by attempting to list the
+    # container -- if it exists and we cannot read it, FDA is missing.
+    # If the container is absent we cannot preflight from this path,
+    # but apply has nothing to remove there anyway.
+    #
+    # Counted as FAIL (drift, exit 2) when FDA is required but absent,
+    # because the reset will not be complete without it.
+    fda_target="$HOME/Library/Containers/com.apple.appstore"
+    if [[ ! -e "$fda_target" ]]; then
+        report PASS "full disk access" "cannot preflight (container absent; nothing to remove)"
+    elif ls "$fda_target" >/dev/null 2>&1; then
+        report PASS "full disk access" "granted (can read $fda_target)"
+    else
+        report FAIL "full disk access" "DENIED for $fda_target -- grant terminal Full Disk Access (System Settings > Privacy & Security > Full Disk Access), then QUIT AND REOPEN the terminal"
+    fi
 
     # Informational snapshot: what would apply mode actually touch?
     # These never count as drift -- App Store leaving caches behind
@@ -254,34 +306,123 @@ run() {
     fi
 }
 
+# killall_quiet: `killall -9 <proc>` exits non-zero and prints
+# "No matching processes belonging to you were found" when the
+# target agent is not running. That is the expected state most
+# of the time, so suppress the noise and treat absence as success.
+killall_quiet() {
+    local proc="$1"
+    if [[ "$mode" == "dry-run" ]]; then
+        printf 'DRY-RUN: killall -9 %q\n' "$proc"
+        return 0
+    fi
+    killall -9 "$proc" 2>/dev/null || true
+    log_debug "killall -9 $proc (best-effort)"
+}
+
+# defaults_delete: `defaults delete <domain>` prints a noisy
+# multi-line error when the per-user defaults domain is absent
+# ("Domain (com.apple.foo) not found. Defaults have not been
+# changed."). Treat absence as success and only surface real
+# failures. Never fatal -- the reset continues.
+defaults_delete() {
+    local domain="$1"
+    if [[ "$mode" == "dry-run" ]]; then
+        printf 'DRY-RUN: defaults delete %q\n' "$domain"
+        return 0
+    fi
+    local out rc
+    out="$(defaults delete "$domain" 2>&1)"
+    rc=$?
+    if (( rc == 0 )); then
+        log_debug "defaults delete $domain ok"
+        return 0
+    fi
+    if grep -qiE 'domain .* not found|does not exist' <<<"$out"; then
+        log_debug "defaults: $domain absent (nothing to delete)"
+        return 0
+    fi
+    log_warn "defaults delete $domain failed: $out"
+    return 0
+}
+
+# rm_protected: rm -rf a path that may be protected by macOS
+# TCC (App Sandbox container privacy on ~/Library/Containers/*).
+# Distinguishes three cases:
+#   * target already absent -> silent success
+#   * "Operation not permitted" -> clear Full Disk Access guidance
+#   * any other failure       -> WARN and continue
+# Never fatal -- the reset proceeds even if a container survives,
+# because the rest of the steps still meaningfully reset state.
+rm_protected() {
+    local target="$1"
+    if [[ "$mode" == "dry-run" ]]; then
+        printf 'DRY-RUN: rm -rf %q\n' "$target"
+        return 0
+    fi
+    if [[ ! -e "$target" ]]; then
+        log_debug "rm: $target absent"
+        return 0
+    fi
+    local err rc
+    err="$(rm -rf "$target" 2>&1)"
+    rc=$?
+    if (( rc == 0 )) && [[ ! -e "$target" ]]; then
+        return 0
+    fi
+    if grep -q 'Operation not permitted' <<<"$err"; then
+        cat >&2 <<EOF
+WARN: cannot remove $target -- macOS denied access (TCC).
+      Grant your terminal app Full Disk Access and re-run:
+        System Settings > Privacy & Security > Full Disk Access
+      Add your terminal (Terminal, iTerm, Ghostty, Warp, ...) to
+      the list, toggle it ON, then QUIT AND REOPEN the terminal
+      before re-running this script.
+EOF
+        return 0
+    fi
+    log_warn "rm -rf $target failed: $err"
+    return 0
+}
+
 echo "=== Resetting $appname (mode=$mode) ==="
 
 echo "$(date) | Closing App Store"
 run osascript -e 'tell application "App Store" to quit'
 
 echo "$(date) | Killing App Store background agents"
-run killall -9 appstoreagent
-run killall -9 storeaccountd
-run killall -9 storedownloadd
-run killall -9 storeinstalld
+killall_quiet appstoreagent
+killall_quiet storeaccountd
+killall_quiet storedownloadd
+killall_quiet storeinstalld
 
 echo "$(date) | Clearing App Store caches"
-run rm -rf "$darwin_cache_root/com.apple.appstore"
-run rm -rf "$darwin_cache_root/com.apple.appstoreagent"
+rm_protected "$darwin_cache_root/com.apple.appstore"
+rm_protected "$darwin_cache_root/com.apple.appstoreagent"
 
 echo "$(date) | Clearing App Store preferences"
-run defaults delete com.apple.appstore
-run defaults delete com.apple.appstoreagent
-run defaults delete com.apple.storeagent
+defaults_delete com.apple.appstore
+defaults_delete com.apple.appstoreagent
+defaults_delete com.apple.storeagent
 
 echo "$(date) | Clearing MAS receipts cache"
-run rm -rf "$HOME/Library/Containers/com.apple.appstore"
-run rm -rf "$HOME/Library/Containers/com.apple.appstoreagent"
-run rm -rf "$HOME/Library/Caches/com.apple.appstore"
-run rm -rf "$HOME/Library/Caches/com.apple.appstoreagent"
+rm_protected "$HOME/Library/Containers/com.apple.appstore"
+rm_protected "$HOME/Library/Containers/com.apple.appstoreagent"
+rm_protected "$HOME/Library/Caches/com.apple.appstore"
+rm_protected "$HOME/Library/Caches/com.apple.appstoreagent"
 
 echo "$(date) | Resetting softwareupdate catalog"
-run sudo softwareupdate --clear-catalog
+# `softwareupdate --clear-catalog` was deprecated in macOS Big Sur
+# (11.0). On 11+ it prints "Catalog management is no longer
+# supported." and is a no-op, so skip the call and rely on the
+# `--list` refresh below to re-pull metadata. Only invoke the
+# legacy flag on macOS 10.x.
+macos_major="$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)"
+if [[ -n "$macos_major" && "$macos_major" =~ ^[0-9]+$ && "$macos_major" -lt 11 ]]; then
+    run sudo softwareupdate --clear-catalog
+else
+    echo "$(date) | Skipping --clear-catalog (deprecated on macOS ${macos_major:-?}; not supported)"
+fi
 
 echo "$(date) | Refreshing update metadata"
 run sudo softwareupdate --list
