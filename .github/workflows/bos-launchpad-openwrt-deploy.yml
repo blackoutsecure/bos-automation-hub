@@ -262,12 +262,17 @@ name: Blackout Secure Launchpad — OpenWrt (reusable)
         default: ''
       timeout_minutes:
         description: >-
-          Job timeout in minutes. Cold SDK builds with ~3 packages
-          run ~45 min; warm SDK cache + no package changes ~10 min.
-          Default 60 leaves headroom for either.
+          Job timeout in minutes. Cold runs (no `sdk/staging_dir`
+          cache hit) take ~60 min when the spec packages pull in deep
+          dep chains (gmp -> nettle -> gnutls, nghttp2 -> libcurl,
+          etc.) that the upstream SDK tarball does NOT pre-build.
+          Warm runs (staging_dir cache hit + no spec changes) finish
+          in ~10-15 min. Default 90 leaves headroom for the cold
+          case; the workflow-level `concurrency:` group prevents
+          overlapping runs so a long single run won't pile up.
         required: false
         type: number
-        default: 60
+        default: 90
       hub_ref:
         description: >-
           Git ref (branch / tag / SHA) in `blackoutsecure/bos-automation-hub`
@@ -443,6 +448,45 @@ jobs:
 
       - name: Extract SDK
         run: .bos-hub/.github/scripts/openwrt/extract-sdk.sh
+
+      # Persist the OpenWrt build state across runs. The SDK tarball
+      # cache (above) only saves the raw upstream tarball — every
+      # cross-compiled dep (gmp / nettle / libcurl / nghttp2 / ...)
+      # that the spec packages link against would otherwise be
+      # rebuilt from scratch on every run, easily blowing the job
+      # timeout on "rebuild=2"-style incremental runs. Caching
+      # `staging_dir` (installed deps), `build_dir` (intermediate
+      # object files + extracted sources) and `dl` (downloaded
+      # source tarballs) reduces a cold-deps run from ~60 min down
+      # to ~10-15 min.
+      #
+      # Key strategy: per-run unique primary key (never hits) +
+      # restore-keys fallback pinned to (SDK file, BUILT_ARCH). This
+      # is the recommended pattern for evolving build caches:
+      # restore the most recent compatible state, then always save a
+      # fresh post-build snapshot so subsequent runs pick up any new
+      # deps. SDK file name embeds the OpenWrt release + compiler
+      # version, so toolchain ABI changes invalidate the cache
+      # automatically. BUILT_ARCH guards against accidental reuse
+      # across different target arches.
+      #
+      # Save semantics: actions/cache only saves on JOB SUCCESS, so a
+      # timeout-killed run mid-`make` won't persist a corrupt
+      # staging_dir. This preserves the safety property the
+      # workflow's `concurrency: cancel-in-progress: false` was
+      # added to enforce.
+      - name: Cache SDK build state (staging_dir / build_dir / dl / ccache)
+        id: sdk-state-cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            sdk/staging_dir
+            sdk/build_dir
+            sdk/dl
+            ~/.ccache
+          key: openwrt-sdkstate-${{ steps.sdk-url.outputs.file }}-${{ inputs.built_arch }}-${{ github.run_id }}
+          restore-keys: |
+            openwrt-sdkstate-${{ steps.sdk-url.outputs.file }}-${{ inputs.built_arch }}-
 
       - name: Stage package sources & detect metadata
         working-directory: sdk

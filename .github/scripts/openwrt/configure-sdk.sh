@@ -18,6 +18,14 @@ CONFIG_ALL_KMODS=n
 CONFIG_ALL_NONSHARED=n
 CONFIG_AUTOREMOVE=n
 CONFIG_SIGNED_PACKAGES=y
+# Route every host + cross compile invocation through ccache. The
+# CI host installs ccache via apt (see the launchpad workflow's
+# "Install host build dependencies" step) and persists ~/.ccache +
+# sdk/staging_dir across runs, so the cost of enabling this is
+# zero on the first run and a large speedup on every subsequent
+# run that recompiles unchanged toolchain deps (gmp, nettle,
+# libcurl, nghttp2, ...) the SDK tarball does NOT pre-build.
+CONFIG_CCACHE=y
 EOF
   for n in "${names[@]}"; do echo "CONFIG_PACKAGE_${n}=m"; done
 } >> .config
