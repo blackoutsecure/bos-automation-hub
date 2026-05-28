@@ -17,6 +17,7 @@ macos/
 | Category | Folder |
 |---|---|
 | Application management | [`application-management/`](application-management/) |
+| Operator helpers | [`sudo-cache/`](sudo-cache/) — extend the `sudo` credential cache so multi-step automation runs don't re-prompt for a password. |
 
 ## Deployment
 

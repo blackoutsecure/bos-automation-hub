@@ -10,22 +10,26 @@
 #          LaunchAgent that auto-starts UTM virtual machines
 #          (via `utmctl start`) every time a user logs in.
 #
-# Prerequisite -- per-user "Open at Login" walkthrough:
+# UTM.app launch (default ON):
 #   The LaunchAgent installed here is SYSTEM-WIDE: it triggers
-#   the helper at *every* user login on this Mac. But the helper
-#   can only start VMs while UTM.app itself is running, and
-#   UTM.app is a per-user GUI application -- macOS will not
-#   launch it system-wide. You must therefore add UTM.app to
-#   "Open at Login" for *every* user account whose VMs should
-#   auto-start. Users without it will still trigger the
-#   LaunchAgent at login, but the helper will wait
-#   $UTM_AUTOSTART_BOOT_TIMEOUT seconds for UTM.app, fail to
-#   find it, log an error to /var/log/bos-utm-vm-autostart.log,
-#   and exit non-zero -- so the Login Item is effectively the
-#   opt-in switch: no Login Item, no VM autostart for that user.
+#   the helper at *every* user login on this Mac, in that user's
+#   GUI session. The helper needs UTM.app running because
+#   `utmctl` talks to the running UTM.app process; UTM.app is a
+#   per-user GUI application that macOS will not launch system-
+#   wide on its own.
 #
-#   For each user that should have VMs auto-start, sign in as
-#   that user and do ONE of the following:
+#   By default the helper now launches UTM.app itself, in the
+#   background, with `open -ga /Applications/UTM.app`, so VM
+#   autostart works at every user's login WITHOUT any per-user
+#   'Open at Login' configuration. Setting
+#   UTM_AUTOSTART_LAUNCH_APP=false at install time bakes the
+#   helper into the legacy opt-in mode where the user must add
+#   UTM.app to Login Items themselves -- helpful if you only
+#   want autostart for users who took the explicit step.
+#
+#   For each user that should autostart VMs in the legacy
+#   opt-in mode (LAUNCH_APP=false), sign in as that user and
+#   do ONE of the following:
 #
 #     Option A -- GUI (per end user):
 #       1. System Settings -> General -> Login Items & Extensions.
@@ -249,6 +253,21 @@ defaultdelay=5                 # seconds between successive VM starts
 defaultboottimeout=60          # max seconds to wait for UTM.app
 defaultwaitpollinterval=1      # seconds between pgrep polls in wait loop
 defaultskiprunning="true"      # skip VMs not in 'stopped' state
+# defaultlaunchapp: when the helper runs at login and UTM.app isn't
+# already running, should it launch UTM.app itself (in the background
+# with `open -ga`)? Default ON so a fresh install "just works" without
+# requiring every user to add UTM.app to their Login Items. Set to
+# 'false' (or pass UTM_AUTOSTART_LAUNCH_APP=false at install time) for
+# the legacy opt-in behaviour where only users who explicitly added
+# UTM.app to Login Items will get VM autostart.
+defaultlaunchapp="true"
+# defaultdynamic: when auto mode is active and NEITHER UTM_AUTOSTART_VMS
+# NOR UTM_AUTOSTART_MATCH was provided, the helper starts EVERY VM that
+# 'utmctl list' returns (EXCLUDE regex, SKIP_RUNNING and USER_EXCLUDE
+# are still honored). Default ON so a no-config install "just works";
+# set UTM_AUTOSTART_DYNAMIC_FALLBACK=false (or flip this default) to get
+# the legacy behaviour where an unconfigured install is a no-op.
+defaultdynamic="true"
 # defaultopenapp: install-time only -- when 'true', the installer
 # bootstraps the LaunchAgent into the console user's GUI domain AND
 # launches UTM.app so the autostart pipeline runs immediately. When
@@ -268,12 +287,30 @@ waitpollinterval="${UTM_AUTOSTART_WAIT_POLL_INTERVAL:-${defaultwaitpollinterval}
 skiprunning_raw="${UTM_AUTOSTART_SKIP_RUNNING:-${defaultskiprunning}}"
 userexcluderaw="${UTM_AUTOSTART_USER_EXCLUDE:-${defaultuserexclude}}"
 openapp_raw="${UTM_AUTOSTART_OPEN_APP:-${defaultopenapp}}"
+dynamic_raw="${UTM_AUTOSTART_DYNAMIC_FALLBACK:-${defaultdynamic}}"
+launchapp_raw="${UTM_AUTOSTART_LAUNCH_APP:-${defaultlaunchapp}}"
 
 # Normalise UTM_AUTOSTART_SKIP_RUNNING to 'true' / 'false'.
 case "$(printf '%s' "$skiprunning_raw" | tr '[:upper:]' '[:lower:]')" in
     true|1|yes|y|on)   skiprunning="true" ;;
     false|0|no|n|off)  skiprunning="false" ;;
     *) echo "ERROR: UTM_AUTOSTART_SKIP_RUNNING must be true/false (got '$skiprunning_raw')"; exit 1 ;;
+esac
+
+# Normalise UTM_AUTOSTART_LAUNCH_APP to 'true' / 'false'. Baked into
+# the helper; consulted at every login before the pgrep wait loop.
+case "$(printf '%s' "$launchapp_raw" | tr '[:upper:]' '[:lower:]')" in
+    true|1|yes|y|on)   launchapp="true" ;;
+    false|0|no|n|off)  launchapp="false" ;;
+    *) echo "ERROR: UTM_AUTOSTART_LAUNCH_APP must be true/false (got '$launchapp_raw')"; exit 1 ;;
+esac
+
+# Normalise UTM_AUTOSTART_DYNAMIC_FALLBACK to 'true' / 'false'. Baked
+# into the helper; only the helper's auto-mode branch consults it.
+case "$(printf '%s' "$dynamic_raw" | tr '[:upper:]' '[:lower:]')" in
+    true|1|yes|y|on)   dynamic="true" ;;
+    false|0|no|n|off)  dynamic="false" ;;
+    *) echo "ERROR: UTM_AUTOSTART_DYNAMIC_FALLBACK must be true/false (got '$dynamic_raw')"; exit 1 ;;
 esac
 
 # Normalise UTM_AUTOSTART_OPEN_APP to 'true' / 'false'. This is an
@@ -332,8 +369,25 @@ Environment variables (apply + check):
                                 against 'utmctl list' at every login.
                                 Picks up new/renamed VMs without
                                 re-install.
-  UTM_AUTOSTART_EXCLUDE         Optional ERE; matching names are skipped
-                                (only relevant in regex mode)
+  UTM_AUTOSTART_EXCLUDE         Optional ERE; matching names are skipped.
+                                Honored in regex mode, in auto mode's
+                                regex fallback, and in auto mode's
+                                dynamic-all fallback.
+  UTM_AUTOSTART_DYNAMIC_FALLBACK
+                                true/false (default: ${defaultdynamic}). In auto mode
+                                with NO list and NO regex configured,
+                                autostart every VM utmctl reports.
+                                Set to false to make an unconfigured
+                                install a no-op (legacy behaviour).
+  UTM_AUTOSTART_LAUNCH_APP      true/false (default: ${defaultlaunchapp}). At login,
+                                if UTM.app isn't already running, have
+                                the helper launch it in the background
+                                (open -ga /Applications/UTM.app) before
+                                the boot-timeout wait. Removes the
+                                per-user 'Open at Login' prerequisite.
+                                Set to false for the legacy opt-in
+                                behaviour (user must add UTM.app to
+                                Login Items themselves).
 Common:
   UTM_AUTOSTART_DELAY_SECONDS   delay between VM starts (default: ${defaultdelay})
   UTM_AUTOSTART_BOOT_TIMEOUT    max wait for UTM.app (default: ${defaultboottimeout})
@@ -422,24 +476,38 @@ else
     match_pattern="${UTM_AUTOSTART_MATCH:-}"
     exclude_pattern="${UTM_AUTOSTART_EXCLUDE:-}"
     if [[ -z "$vmsraw" && -z "$match_pattern" && "$mode" != "uninstall" ]]; then
-        # No selection of any kind. Still proceed so the helper +
-        # LaunchAgent get installed; the helper will log "no VMs
-        # found" at every login until selection is provided.
-        printf '%s\n' >&2 "WARNING: no VMs configured.
+        # No explicit selection. With the dynamic fallback ON (the
+        # default) this is the "just works" path -- the helper will
+        # start every VM utmctl knows about at login -- so it's NOT a
+        # warning. With the fallback OFF, the install is intentionally
+        # a no-op until selection is provided, and we tell the operator
+        # exactly how to wire it up.
+        if [[ "$dynamic" == "true" ]]; then
+            printf '%s\n' >&2 "NOTE: no explicit VM list or regex configured.
+
+Auto mode + dynamic fallback (default) will start every VM 'utmctl list'
+returns at each login. Set UTM_AUTOSTART_EXCLUDE='regex' to mute noisy
+VMs, UTM_AUTOSTART_DYNAMIC_FALLBACK=false to disable the dynamic
+fallback, or UTM_AUTOSTART_VMS / UTM_AUTOSTART_MATCH to be explicit.
+Try --help for the full list of supported environment variables."
+        else
+            printf '%s\n' >&2 "WARNING: no VMs configured AND dynamic fallback disabled.
 
 Proceeding with install so the helper and LaunchAgent are in place,
 but no VMs will be started at login until selection is provided.
 
-To enable autostart, re-run this installer with one (or both) of:
+To enable autostart, re-run this installer with one of:
 
-  UTM_AUTOSTART_VMS='vm-one,vm-two'    (explicit name list)
-  UTM_AUTOSTART_MATCH='^prod-'         (POSIX ERE matched against 'utmctl list')
+  UTM_AUTOSTART_VMS='vm-one,vm-two'      (explicit name list)
+  UTM_AUTOSTART_MATCH='^prod-'           (POSIX ERE against 'utmctl list')
+  UTM_AUTOSTART_DYNAMIC_FALLBACK=true    (start every VM utmctl knows about)
 
-In auto mode (default), setting both makes the helper try the list
-first and fall back to the regex if no list names actually exist on
-this Mac at login. Edit the 'defaultvms' variable at the top of this
-script to bake in a deployment-specific fallback list. Try --help for
-the full list of supported environment variables."
+In auto mode (default), setting both VMS and MATCH makes the helper try
+the list first and fall back to the regex if no list names actually
+exist on this Mac at login. Edit the 'defaultvms' variable at the top
+of this script to bake in a deployment-specific fallback list. Try
+--help for the full list of supported environment variables."
+        fi
     fi
 fi
 
@@ -493,7 +561,9 @@ case "$LOG_LEVEL" in
     *) echo "ERROR: invalid LOG_LEVEL='$LOG_LEVEL' (trace|debug|info|warn|error)"; exit 1 ;;
 esac
 log_debug() { [[ $_ll_cur -le 1 ]] && echo "DEBUG: $*" || true; }
+log_info()  { [[ $_ll_cur -le 2 ]] && printf '%s | %s\n' "$(date)" "$*" || true; }
 log_warn()  { [[ $_ll_cur -le 3 ]] && echo "WARN: $*"  || true; }
+log_error() { printf '%s | ERROR: %s\n' "$(date)" "$*" >&2; }
 [[ "$LOG_LEVEL" == "trace" ]] && set -x
 
 # Begin Script Body
@@ -591,6 +661,8 @@ WAIT_POLL_INTERVAL=${waitpollinterval}
 DELAY=${delaybetween}
 SKIP_RUNNING=\"${skiprunning}\"
 AUTOSTART_MODE=\"${autostart_mode}\"
+DYNAMIC_FALLBACK=\"${dynamic}\"
+LAUNCH_APP=\"${launchapp}\"
 MATCH='${match_escaped}'
 EXCLUDE='${exclude_escaped}'
 EXPLICIT_VMS=(
@@ -647,8 +719,24 @@ if [[ -z \"\$utmctl\" ]]; then
 fi
 
 # Wait for UTM.app to be running. utmctl needs the UTM daemon, which
-# is the running UTM.app process. UTM.app itself is expected to launch
-# at login via its own Login Item.
+# is the running UTM.app process. With LAUNCH_APP=true (the default)
+# the helper launches UTM.app itself in the background; with
+# LAUNCH_APP=false the helper relies on the user having added UTM.app
+# to their Login Items.
+if [[ \"\$LAUNCH_APP\" == \"true\" ]] && ! pgrep -x ${utmprocess} >/dev/null 2>&1; then
+    if [[ -d \"${utmappdir}\" ]]; then
+        log \"UTM.app not running; launching in background (open -ga ${utmappdir})\"
+        # -g: don't bring UTM to the foreground (don't steal focus from
+        # whatever app the user is actually trying to use at login).
+        # -a: open the named application bundle.
+        # We fire-and-continue: if 'open' errors, the pgrep wait loop
+        # below will still time out cleanly with the existing error.
+        open -ga \"${utmappdir}\" >> \"\$LOGFILE\" 2>&1 \\
+            || log \"WARN: 'open -ga ${utmappdir}' returned non-zero; will wait anyway\"
+    else
+        log \"WARN: LAUNCH_APP=true but ${utmappdir} not found; relying on pgrep wait loop\"
+    fi
+fi
 waited=0
 while ! pgrep -x ${utmprocess} >/dev/null 2>&1; do
     if (( waited >= BOOT_TIMEOUT )); then
@@ -659,7 +747,6 @@ while ! pgrep -x ${utmprocess} >/dev/null 2>&1; do
     waited=\$((waited + WAIT_POLL_INTERVAL))
 done
 log \"UTM.app detected after \${waited}s; using \$utmctl\"
-
 # Parse 'utmctl list' to TSV: status<TAB>name (preserves spaces in names).
 # Header row is skipped. Output is cached once per run.
 list_vms() {
@@ -732,6 +819,23 @@ populate_wanted_from_regex() {
     done < <(printf '%s\n' \"\$list_cache\" | sort -t \$'\t' -k2,2)
 }
 
+# populate_wanted_from_all:
+#   Take EVERY VM 'utmctl list' returned (still honoring EXCLUDE if
+#   set). Used in 'auto' mode as the final fallback when neither the
+#   explicit list nor the regex was configured, so an unconfigured
+#   install actually starts something at login instead of being a
+#   silent no-op. EXCLUDE lets operators mute noisy VMs without having
+#   to enumerate the rest.
+populate_wanted_from_all() {
+    wanted=()
+    local status name
+    while IFS=\$'\t' read -r status name; do
+        [[ -z \"\$name\" ]] && continue
+        if [[ -n \"\$EXCLUDE\" && \"\$name\" =~ \$EXCLUDE ]]; then continue; fi
+        wanted+=(\"\$name\")
+    done < <(printf '%s\n' \"\$list_cache\" | sort -t \$'\t' -k2,2)
+}
+
 # Format \${wanted[@]} as 'a, b, c' for log output.
 join_names() {
     local sep=\"\" out=\"\" n
@@ -779,6 +883,22 @@ case \"\$AUTOSTART_MODE\" in
                 log \"Auto mode: regex matched \${#wanted[@]} VM(s).\"
             fi
         fi
+        # Dynamic-all fallback: only when neither selector was wired in,
+        # so an explicit selector that happened to match zero VMs stays a
+        # zero-result run (user intent was \"only these\") -- it does NOT
+        # cascade into starting everything. Gated by DYNAMIC_FALLBACK so
+        # operators can opt back into the old no-op behaviour.
+        if (( \${#wanted[@]} == 0 )) \\
+           && [[ \"\$DYNAMIC_FALLBACK\" == \"true\" \\
+                 && \${#EXPLICIT_VMS[@]} -eq 0 \\
+                 && -z \"\$MATCH\" ]]; then
+            log \"Auto mode: no explicit selectors configured; dynamic fallback -> start ALL VMs (EXCLUDE='\$EXCLUDE')\"
+            populate_wanted_from_all
+            if (( \${#wanted[@]} > 0 )); then
+                detected_method=\"all\"
+                log \"Auto mode: dynamic fallback matched \${#wanted[@]} VM(s).\"
+            fi
+        fi
         if (( \${#wanted[@]} == 0 )); then
             detected_method=\"none\"
         fi
@@ -793,7 +913,13 @@ if (( \${#wanted[@]} > 0 )); then
 else
     case \"\$AUTOSTART_MODE\" in
         auto)
-            log \"No VMs specified/found via either method (explicit list candidates=\${#EXPLICIT_VMS[@]}, regex MATCH='\$MATCH' EXCLUDE='\$EXCLUDE'). Nothing to autostart.\"
+            if [[ \"\$DYNAMIC_FALLBACK\" == \"true\" \\
+                  && \${#EXPLICIT_VMS[@]} -eq 0 \\
+                  && -z \"\$MATCH\" ]]; then
+                log \"Dynamic fallback: 'utmctl list' returned no VMs (or all excluded by EXCLUDE='\$EXCLUDE'). Nothing to autostart.\"
+            else
+                log \"No VMs specified/found (explicit list candidates=\${#EXPLICIT_VMS[@]}, regex MATCH='\$MATCH' EXCLUDE='\$EXCLUDE', dynamic_fallback=\$DYNAMIC_FALLBACK). Nothing to autostart.\"
+            fi
             ;;
         list)
             log \"List mode: EXPLICIT_VMS is empty. Nothing to autostart.\"
@@ -902,8 +1028,14 @@ run_preflight_audit() {
                 echo "Mode: auto  (explicit list only; no regex fallback configured)"
             elif [[ -n "$match_pattern" ]]; then
                 echo "Mode: auto  (regex only; no explicit list configured)"
+            elif [[ "$dynamic" == "true" ]]; then
+                if [[ -n "$exclude_pattern" ]]; then
+                    echo "Mode: auto  (dynamic fallback -- start ALL VMs at login, EXCLUDE='$exclude_pattern')"
+                else
+                    echo "Mode: auto  (dynamic fallback -- start ALL VMs 'utmctl list' returns at login)"
+                fi
             else
-                echo "Mode: auto  (NO selection configured -- helper will log 'no VMs found' at every login)"
+                echo "Mode: auto  (NO selection configured AND dynamic fallback disabled -- helper will log 'no VMs found' at every login)"
             fi
             ;;
         *)
@@ -1026,7 +1158,7 @@ fi
 # =============================================================
 if [[ "$mode" == "uninstall" ]]; then
     if [[ "$(id -u)" -ne 0 ]]; then
-        echo "$(date) | ERROR: must be run as root (try: sudo)"
+        log_error "must be run as root (try: sudo)"
         exit 1
     fi
 
@@ -1040,42 +1172,42 @@ if [[ "$mode" == "uninstall" ]]; then
     if [[ -n "$consoleuser" && "$consoleuser" != "root" && "$consoleuser" != "loginwindow" ]]; then
         uid="$(id -u "$consoleuser" 2>/dev/null || true)"
         if [[ -n "$uid" ]]; then
-            echo "$(date) | Unloading LaunchAgent from console user '$consoleuser' (uid $uid)"
+            log_info "Unloading LaunchAgent from console user '$consoleuser' (uid $uid)"
             launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
         fi
     else
-        echo "$(date) | No console user session detected; nothing to bootout."
+        log_info "No console user session detected; nothing to bootout."
     fi
 
     if [[ -f "$plistpath" ]]; then
-        echo "$(date) | Removing LaunchAgent plist: $plistpath"
+        log_info "Removing LaunchAgent plist: $plistpath"
         if rm -f "$plistpath"; then
             removed=$((removed + 1))
         else
-            echo "$(date) | ERROR: failed to remove $plistpath"
+            log_error "failed to remove $plistpath"
             exit 1
         fi
     else
-        echo "$(date) | LaunchAgent plist not present: $plistpath"
+        log_info "LaunchAgent plist not present: $plistpath"
         skipped=$((skipped + 1))
     fi
 
     if [[ -f "$helperpath" ]]; then
-        echo "$(date) | Removing helper script: $helperpath"
+        log_info "Removing helper script: $helperpath"
         if rm -f "$helperpath"; then
             removed=$((removed + 1))
         else
-            echo "$(date) | ERROR: failed to remove $helperpath"
+            log_error "failed to remove $helperpath"
             exit 1
         fi
     else
-        echo "$(date) | Helper script not present: $helperpath"
+        log_info "Helper script not present: $helperpath"
         skipped=$((skipped + 1))
     fi
 
-    echo "$(date) | $appname uninstall complete (removed=$removed, skipped=$skipped)"
-    echo "$(date) | Log retained:  $log"
-    echo "$(date) |   (delete manually if you no longer need it)"
+    log_info "$appname uninstall complete (removed=$removed, skipped=$skipped)"
+    log_info "Log retained:  $log"
+    log_info "  (delete manually if you no longer need it)"
     exit 0
 fi
 
@@ -1085,7 +1217,7 @@ fi
 
 # Must be root to write to /usr/local/bin and /Library/LaunchAgents.
 if [[ "$(id -u)" -ne 0 ]]; then
-    echo "$(date) | ERROR: must be run as root (try: sudo)"
+    log_error "must be run as root (try: sudo)"
     exit 1
 fi
 
@@ -1108,23 +1240,23 @@ if [[ ! -d "$utmappdir" ]]; then
 fi
 
 if [[ "$audit_fail" -eq 0 ]]; then
-    echo "$(date) | Pre-flight: all install locations in desired state; re-asserting permissions only (idempotent)."
+    log_info "Pre-flight: all install locations in desired state; re-asserting permissions only (idempotent)."
 else
-    echo "$(date) | Pre-flight: $audit_fail check(s) need reconciliation; replacing/installing only what differs..."
+    log_info "Pre-flight: $audit_fail check(s) need reconciliation; replacing/installing only what differs..."
 fi
 echo ""
 
 # ----- write helper script -----
 helper_changed=0
 if [[ -f "$helperpath" ]] && diff -q <(printf '%s\n' "$helper_content") "$helperpath" >/dev/null 2>&1; then
-    echo "$(date) | Helper script already up to date: $helperpath"
+    log_info "Helper script already up to date: $helperpath"
 else
-    echo "$(date) | Writing helper script: $helperpath"
+    log_info "Writing helper script: $helperpath"
     mkdir -p "$(dirname "$helperpath")"
     tmp="$(mktemp)"
     printf '%s\n' "$helper_content" > "$tmp"
     if ! mv "$tmp" "$helperpath"; then
-        echo "$(date) | Failed to write helper script"
+        log_error "failed to write helper script"
         rm -f "$tmp"
         exit 1
     fi
@@ -1136,14 +1268,14 @@ chmod "$helpermode" "$helperpath"
 # ----- write LaunchAgent plist -----
 plist_changed=0
 if [[ -f "$plistpath" ]] && diff -q <(printf '%s\n' "$plist_content") "$plistpath" >/dev/null 2>&1; then
-    echo "$(date) | LaunchAgent plist already up to date: $plistpath"
+    log_info "LaunchAgent plist already up to date: $plistpath"
 else
-    echo "$(date) | Writing LaunchAgent plist: $plistpath"
+    log_info "Writing LaunchAgent plist: $plistpath"
     mkdir -p "$(dirname "$plistpath")"
     tmp="$(mktemp)"
     printf '%s\n' "$plist_content" > "$tmp"
     if ! mv "$tmp" "$plistpath"; then
-        echo "$(date) | Failed to write LaunchAgent plist"
+        log_error "failed to write LaunchAgent plist"
         rm -f "$tmp"
         exit 1
     fi
@@ -1155,7 +1287,7 @@ chmod "$plistmode" "$plistpath"
 # Validate plist syntax (best effort).
 if command -v plutil >/dev/null 2>&1; then
     if ! plutil -lint "$plistpath" >/dev/null; then
-        echo "$(date) | ERROR: plutil rejected $plistpath"
+        log_error "plutil rejected $plistpath"
         exit 1
     fi
 fi
@@ -1194,7 +1326,7 @@ fi
 # logout. Bootout itself is silent (no UTM activation) -- we just
 # unload; we only re-bootstrap when openapp=true.
 if [[ -n "$uid" ]] && (( helper_changed || plist_changed )); then
-    echo "$(date) | Unloading any stale LaunchAgent instance for console user '$consoleuser' (uid $uid)"
+    log_info "Unloading any stale LaunchAgent instance for console user '$consoleuser' (uid $uid)"
     # Best-effort bootout; ignore "not loaded" errors.
     launchctl bootout "gui/${uid}/${label}" 2>/dev/null || true
 fi
@@ -1206,7 +1338,7 @@ if [[ "$openapp" == "true" ]]; then
     if [[ -z "$uid" ]]; then
         log_warn "UTM_AUTOSTART_OPEN_APP=true but no console user session detected; LaunchAgent will load at next login."
     else
-        echo "$(date) | Bootstrapping LaunchAgent into console user '$consoleuser' (uid $uid) -- UTM_AUTOSTART_OPEN_APP=true"
+        log_info "Bootstrapping LaunchAgent into console user '$consoleuser' (uid $uid) -- UTM_AUTOSTART_OPEN_APP=true"
         if ! launchctl bootstrap "gui/${uid}" "$plistpath"; then
             log_warn "launchctl bootstrap failed; LaunchAgent will load at next login."
         fi
@@ -1221,9 +1353,9 @@ if [[ "$openapp" == "true" ]]; then
         if [[ ! -d "$utmappdir" ]]; then
             log_warn "UTM_AUTOSTART_OPEN_APP=true but $utmappdir is not installed; cannot launch UTM.app."
         elif pgrep -x "$utmprocess" >/dev/null 2>&1; then
-            echo "$(date) | UTM.app already running; not launching again (UTM_AUTOSTART_OPEN_APP=true)."
+            log_info "UTM.app already running; not launching again (UTM_AUTOSTART_OPEN_APP=true)."
         else
-            echo "$(date) | Launching UTM.app for console user '$consoleuser' (uid $uid) -- UTM_AUTOSTART_OPEN_APP=true"
+            log_info "Launching UTM.app for console user '$consoleuser' (uid $uid) -- UTM_AUTOSTART_OPEN_APP=true"
             if ! launchctl asuser "$uid" sudo -u "$consoleuser" /usr/bin/open -a "$utmappdir" 2>/dev/null; then
                 log_warn "Failed to launch UTM.app for '$consoleuser'; user will need to open it manually."
             fi
@@ -1235,13 +1367,13 @@ else
     # Item). Make this explicit in the log so the operator knows why
     # the install is "quiet".
     if [[ -z "$uid" ]]; then
-        echo "$(date) | No console user session detected; LaunchAgent will load at next login."
+        log_info "No console user session detected; LaunchAgent will load at next login."
     elif (( helper_changed || plist_changed )); then
-        echo "$(date) | Files staged for console user '$consoleuser'; LaunchAgent will load at next login."
-        echo "$(date) |   To activate now without logging out, re-run with: UTM_AUTOSTART_OPEN_APP=true"
-        echo "$(date) |   (this will also launch UTM.app -- UTM.app's GUI may appear on the user's screen)"
+        log_info "Files staged for console user '$consoleuser'; LaunchAgent will load at next login."
+        log_info "  To activate now without logging out, re-run with: UTM_AUTOSTART_OPEN_APP=true"
+        log_info "  (this will also launch UTM.app -- UTM.app's GUI may appear on the user's screen)"
     else
-        echo "$(date) | No content changes; leaving existing LaunchAgent state alone."
+        log_info "No content changes; leaving existing LaunchAgent state alone."
     fi
 fi
 
@@ -1257,15 +1389,21 @@ if [[ "$audit_fail" -gt 0 ]]; then
     log_warn "Post-install verification found $audit_fail issue(s); review the audit above."
 else
     echo ""
-    echo "$(date) | Post-install verification: all checks PASS."
+    log_info "Post-install verification: all checks PASS."
 fi
 echo ""
 
-echo "$(date) | $appname installed"
-echo "$(date) | Helper script: $helperpath"
-echo "$(date) | LaunchAgent:   $plistpath"
-echo "$(date) | Log:           $log"
-echo "$(date) | NEXT STEP (per user): add ${utmappdir} to 'Open at Login'"
-echo "$(date) |   System Settings -> General -> Login Items & Extensions -> +"
-echo "$(date) |   (do this once per macOS account whose VMs should auto-start)"
+log_info "$appname installed"
+log_info "Helper script: $helperpath"
+log_info "LaunchAgent:   $plistpath"
+log_info "Log:           $log"
+if [[ "$launchapp" == "true" ]]; then
+    log_info "UTM.app launch: ENABLED (helper will open UTM.app at every login if not already running)"
+    log_info "  No per-user 'Open at Login' configuration required."
+else
+    log_info "UTM.app launch: DISABLED (UTM_AUTOSTART_LAUNCH_APP=false)"
+    log_info "NEXT STEP (per user): add ${utmappdir} to 'Open at Login'"
+    log_info "  System Settings -> General -> Login Items & Extensions -> +"
+    log_info "  (do this once per macOS account whose VMs should auto-start)"
+fi
 exit 0

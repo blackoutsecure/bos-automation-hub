@@ -22,7 +22,7 @@ machines on macOS at login.
 2. Renders a helper script at `/usr/local/bin/bos-utm-vm-autostart` that:
    - Resolves `utmctl` from `/usr/local/bin`, `/opt/homebrew/bin`, or `/Applications/UTM.app/Contents/MacOS/`.
    - Waits up to `UTM_AUTOSTART_BOOT_TIMEOUT` seconds for `UTM.app` to be running (UTM.app itself is expected to launch at login via its own Login Item — see "Prerequisite" below).
-   - Resolves the start list using one of three modes — `list` (a fixed set of VM names), `regex` (a POSIX ERE re-evaluated against `utmctl list` at every login), or `auto` (try the explicit list first; fall back to the regex if no explicit names match anything in `utmctl list`). See [Selection mode](#selection-mode--list-regex-or-auto) below.
+   - Resolves the start list using one of three modes — `list` (a fixed set of VM names), `regex` (a POSIX ERE re-evaluated against `utmctl list` at every login), or `auto` (try the explicit list first; fall back to the regex; and — when neither selector was configured AND `UTM_AUTOSTART_DYNAMIC_FALLBACK` is on (the default) — autostart **every** VM `utmctl list` returns). See [Selection mode](#selection-mode--list-regex-or-auto) below.
    - For each VM in order, optionally skips it if its current status is not `stopped`, then calls `utmctl start "<vm name>"` with `UTM_AUTOSTART_DELAY_SECONDS` between starts.
    - Logs every step to `/var/log/bos-utm-vm-autostart.log` (the same file the installer writes to, so every install run and every login-time helper run lands in one place).
    - Supports `bos-utm-vm-autostart --dry-run` to print the resolved start list (with current per-VM status) without invoking `utmctl start`.
@@ -53,7 +53,7 @@ login against the live `utmctl list` output.
 
 | `UTM_AUTOSTART_MODE` value | Behaviour |
 |---|---|
-| `auto` _(default)_ | Accept `UTM_AUTOSTART_VMS`, `UTM_AUTOSTART_MATCH`, or **both** (this is the only mode that allows both). At every login the helper: **(1)** tries the explicit list first, counting only names that actually exist in `utmctl list`; **(2)** if no list names matched, falls back to the regex; **(3)** if both yielded nothing, logs `"No VMs specified/found via either method..."` and exits 0. Missing list names are logged individually so you can spot typos. |
+| `auto` _(default)_ | Accept `UTM_AUTOSTART_VMS`, `UTM_AUTOSTART_MATCH`, or **both** (this is the only mode that allows both). At every login the helper: **(1)** tries the explicit list first, counting only names that actually exist in `utmctl list`; **(2)** if no list names matched, falls back to the regex; **(3)** if neither selector was configured AND `UTM_AUTOSTART_DYNAMIC_FALLBACK` is `true` (the default), starts **every** VM `utmctl list` returns (`UTM_AUTOSTART_EXCLUDE` is still honored); **(4)** if all three yielded nothing, logs `"Nothing to autostart."` and exits 0. Missing list names are logged individually so you can spot typos. |
 | `list` | Force list mode. Requires `UTM_AUTOSTART_VMS` (or a baked-in `defaultvms`). Errors fast if `UTM_AUTOSTART_MATCH` is also set. **Strict** — passes every name to `utmctl start` verbatim; missing names produce a `utmctl` error in the log (no silent skip). |
 | `regex` | Force regex mode. Requires `UTM_AUTOSTART_MATCH` to be set. Errors fast if `UTM_AUTOSTART_VMS` is also set. |
 
@@ -102,7 +102,8 @@ or, on total miss:
 |---|---|---|
 | `UTM_AUTOSTART_VMS` | _(unset)_ | **Explicit name list.** Newline- or comma-separated VM names, started in the order given. Predictable, version-controlled. Used by `list` mode and by `auto` mode's first-attempt resolution. |
 | `UTM_AUTOSTART_MATCH` | _(unset)_ | **Regex.** POSIX ERE tested against the name column of `utmctl list` at every login. Picks up renames and new VMs automatically with no installer re-run. Used by `regex` mode and by `auto` mode's fallback resolution. |
-| `UTM_AUTOSTART_EXCLUDE` | _(unset)_ | Optional ERE; names matching this are skipped during regex resolution (`regex` mode and `auto` mode's regex fallback). Does **not** apply to list resolution. |
+| `UTM_AUTOSTART_EXCLUDE` | _(unset)_ | Optional ERE; names matching this are skipped. Honored in `regex` mode, in `auto` mode's regex fallback, **and** in `auto` mode's dynamic-all fallback (so you can mute noisy VMs without enumerating the rest). Does **not** apply to list resolution. |
+| `UTM_AUTOSTART_DYNAMIC_FALLBACK` | `true` | **Auto-mode-only.** When `true` (default) and neither `UTM_AUTOSTART_VMS` nor `UTM_AUTOSTART_MATCH` is set, the helper autostarts **every** VM `utmctl list` returns at each login. Makes a no-config install "just work" while still respecting `UTM_AUTOSTART_EXCLUDE`, `UTM_AUTOSTART_SKIP_RUNNING`, and `UTM_AUTOSTART_USER_EXCLUDE`. Set to `false` if you want an unconfigured install to be an intentional no-op until you wire up `VMS` or `MATCH`. Ignored in `list` / `regex` mode. |
 
 In `auto` mode you may set `UTM_AUTOSTART_VMS` and `UTM_AUTOSTART_MATCH`
 simultaneously — the helper will try the explicit list first and fall
@@ -111,12 +112,19 @@ back to the regex if the list yielded nothing (see
 and `regex` modes reject the conflict at install time.
 
 When `UTM_AUTOSTART_MODE=auto` and neither selection env var is set,
-the installer falls back to the `defaultvms` variable defined in the
-variables block at the top of the installer (empty by default). If
-`defaultvms` is also empty, the installer warns loudly but still
-installs the helper + LaunchAgent — every login will log
-`"No VMs specified/found via either method..."` until a selection
-input is provided.
+the installer first falls back to the `defaultvms` variable defined in
+the variables block at the top of the installer (empty by default).
+If `defaultvms` is also empty (the out-of-the-box state):
+
+- **Dynamic fallback ON** (`UTM_AUTOSTART_DYNAMIC_FALLBACK=true`, the
+  default) — the helper starts **every** VM `utmctl list` returns at
+  each login. `UTM_AUTOSTART_EXCLUDE`, `UTM_AUTOSTART_SKIP_RUNNING`,
+  and `UTM_AUTOSTART_USER_EXCLUDE` are still honored. This is the
+  intended "install once and forget" path.
+- **Dynamic fallback OFF** (`UTM_AUTOSTART_DYNAMIC_FALLBACK=false`) —
+  the helper logs `"Nothing to autostart."` at every login until a
+  selector is provided. Choose this when you want install to be a
+  no-op until you've explicitly enumerated the VMs to start.
 
 ### Runtime tuning — always honored
 
