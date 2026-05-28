@@ -909,7 +909,15 @@ jobs:
     needs: [verify-required-checks]
     if: inputs.event_name == 'workflow_dispatch' && inputs.dispatched_mode == 'release'
     permissions:
+      # `contents: write` for the promote commit + tag push and the
+      # GitHub Release publish. `models: read` cascades through
+      # `release-promote.yml` -> `github-release.yml` -> the
+      # `render-release-notes` AI changelog step. Required
+      # statically at workflow-load time regardless of whether
+      # `release_ai_changelog` is true — GitHub Actions checks the
+      # permission cascade before evaluating that input.
       contents: write
+      models: read
     uses: blackoutsecure/bos-automation-hub/.github/workflows/release-promote.yml@main
     with:
       source_branch: ${{ inputs.source_branch }}

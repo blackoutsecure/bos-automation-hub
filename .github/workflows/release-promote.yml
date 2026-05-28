@@ -569,7 +569,16 @@ jobs:
     needs: promote
     if: ${{ needs.promote.outputs.promoted == 'true' && !inputs.dry_run }}
     permissions:
+      # `contents: write` to publish the GitHub Release tag/body via the
+      # nested `github-release.yml`. `models: read` cascades into the
+      # `publish` job so the renderer can call the GitHub Models
+      # inference API when `ai_changelog: 'true'`. GitHub Actions
+      # validates the cascade at workflow-load time and will refuse
+      # the call (`'models: read' but only allowed 'models: none'`)
+      # if this grant is missing, even when the caller has
+      # `ai_changelog: 'false'` — so the grant is unconditional.
       contents: write
+      models: read
     uses: blackoutsecure/bos-automation-hub/.github/workflows/github-release.yml@main
     with:
       tag_name:               ${{ needs.promote.outputs.tag_name }}
