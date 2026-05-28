@@ -1,0 +1,417 @@
+name: Generate Cloudflare Pages _headers file
+description: >-
+  Dynamically generate a Cloudflare Pages `_headers` file from composable
+  presets (security defaults, cache defaults, CORS for fonts, opkg-feed
+  rules) plus optional custom rules appended verbatim. Validates against
+  the Cloudflare 100-rule / 2000-char-per-line limits. Writes to
+  `<output_dir>/_headers`.
+
+  Format reference:
+    https://developers.cloudflare.com/pages/configuration/headers/
+
+  Pattern parity: composite action shape mirrors the four sibling
+  generators wired into `deploy-cloudflare-pages.yml`
+  (`bos-sitemap-generator`, `bos-robotstxt-generator`,
+  `bos-securitytxt-generator`, `bos-web-application-manifest-generator`),
+  but lives locally in the hub rather than as a separate repo.
+
+inputs:
+  output_dir:
+    description: >-
+      Repo-relative directory where the `_headers` file is written.
+      Almost always the same value the caller passes for `deploy_dir`
+      in `deploy-cloudflare-pages.yml`, since Cloudflare Pages reads
+      `_headers` from the upload root. Must be a non-empty,
+      repo-relative path that already exists (the stage-deploy-dir
+      step creates it earlier in the same job). Refused: empty,
+      absolute paths, paths containing `..`, paths containing
+      whitespace/newlines.
+    required: true
+  presets:
+    description: >-
+      Comma-separated list of preset blocks to enable. Order in this
+      input controls block order in the output (matters for CF Pages
+      header rule precedence — most specific paths last so they win
+      over `/*` defaults).
+
+      Supported tokens:
+        * `security`   — security headers on `/*` (X-Frame-Options,
+                         X-Content-Type-Options, Referrer-Policy,
+                         Permissions-Policy, HSTS, optional CSP via
+                         the `csp:` input).
+        * `cache`      — cache rules: HTML no-cache on `/*`, long-cache
+                         on `cache_assets_pattern`, image / favicon /
+                         manifest sensible defaults.
+        * `cors-fonts` — `Access-Control-Allow-Origin: *` + immutable
+                         cache on `/*.woff` and `/*.woff2`.
+        * `opkg-feed`  — `Content-Type: application/octet-stream` on
+                         `/*.ipk`, `Cache-Control: no-cache` on
+                         `/*/Packages`, `/*/Packages.gz`,
+                         `/*/Packages.sig`. For OpenWrt opkg feeds.
+        * `none`       — emit no preset blocks (use with `custom_rules:`
+                         only). The `none` token must appear alone.
+
+      Empty / unset = `security,cache` (the static-site default).
+    required: false
+    default: 'security,cache'
+  csp:
+    description: >-
+      Optional Content-Security-Policy value. When non-empty and the
+      `security` preset is enabled, appended to the `/*` security
+      block as `Content-Security-Policy: <value>`. Treated as a
+      single-line value — wrapping / multi-line CSPs are NOT
+      supported (Cloudflare enforces a 2000-char-per-line limit and
+      a `_headers` rule cannot span lines anyway). Set to empty to
+      omit CSP entirely.
+    required: false
+    default: ''
+  hsts_max_age:
+    description: >-
+      `Strict-Transport-Security` max-age in seconds. Default
+      `63072000` (2 years, the value preload-list submission
+      requires). Set to `0` to suppress HSTS entirely (e.g. when
+      preview deployments use untrusted subdomains where HSTS would
+      poison the browser cache). Always emitted with
+      `includeSubDomains; preload` when non-zero. Only takes effect
+      when the `security` preset is enabled.
+    required: false
+    default: '63072000'
+  permissions_policy:
+    description: >-
+      `Permissions-Policy` value applied to `/*` when the `security`
+      preset is enabled. Default disables the high-risk feature set
+      a static site never needs. Set to empty to omit the header
+      entirely (some callers prefer the browser default).
+    required: false
+    default: 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()'
+  cache_html_control:
+    description: >-
+      `Cache-Control` value applied to `/*` when the `cache` preset
+      is enabled. Default `public, max-age=0, must-revalidate` —
+      browser revalidates on every navigation, edge serves immediately
+      from cache. This is the safe default for any deploy that ships
+      HTML changes more often than once a day. Set to empty to omit.
+    required: false
+    default: 'public, max-age=0, must-revalidate'
+  cache_assets_pattern:
+    description: >-
+      Path pattern for the long-cache rule. Default `/assets/*` —
+      assumes the consumer puts fingerprinted assets (hashed
+      filenames) under `/assets/`. Override to e.g. `/_next/static/*`
+      for Next.js or `/_app/immutable/*` for SvelteKit. Only used
+      when the `cache` preset is enabled.
+    required: false
+    default: '/assets/*'
+  cache_assets_control:
+    description: >-
+      `Cache-Control` value applied to `cache_assets_pattern`.
+      Default `public, max-age=31536000, immutable` (1 year). Safe
+      ONLY for fingerprinted assets — never apply to mutable paths.
+    required: false
+    default: 'public, max-age=31536000, immutable'
+  custom_rules:
+    description: >-
+      Raw `_headers` content appended verbatim AFTER all preset
+      blocks. Each rule is a URL/path on one line followed by
+      `  Name: Value` lines indented with two spaces. Comments start
+      with `#`. Refer to the Cloudflare docs for full syntax. Use
+      this for per-site rules the presets don't cover (e.g. a
+      `/.well-known/security.txt` content-type override, or a
+      `/*.json` CORS rule). The hub-side validator still counts
+      these against the 100-rule / 2000-char limit.
+    required: false
+    default: ''
+  replace_existing:
+    description: >-
+      When `false` (default), the action fails if
+      `<output_dir>/_headers` already exists. This is a safety
+      interlock against silently clobbering a hand-maintained
+      `_headers` that the caller forgot to delete after migrating
+      to the generator. Set `true` once the migration is intentional
+      (or set it to `true` permanently once the consumer is fully
+      generator-driven).
+    required: false
+    default: 'false'
+
+outputs:
+  headers_path:
+    description: 'Absolute path to the written `_headers` file.'
+    value: ${{ steps.write.outputs.path }}
+  rule_count:
+    description: 'Number of rule blocks (URL/path lines) in the written file.'
+    value: ${{ steps.write.outputs.rule_count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs & generate _headers
+      id: write
+      shell: bash
+      env:
+        OUTPUT_DIR: ${{ inputs.output_dir }}
+        PRESETS: ${{ inputs.presets }}
+        CSP: ${{ inputs.csp }}
+        HSTS_MAX_AGE: ${{ inputs.hsts_max_age }}
+        PERMISSIONS_POLICY: ${{ inputs.permissions_policy }}
+        CACHE_HTML_CONTROL: ${{ inputs.cache_html_control }}
+        CACHE_ASSETS_PATTERN: ${{ inputs.cache_assets_pattern }}
+        CACHE_ASSETS_CONTROL: ${{ inputs.cache_assets_control }}
+        CUSTOM_RULES: ${{ inputs.custom_rules }}
+        REPLACE_EXISTING: ${{ inputs.replace_existing }}
+      run: |
+        set -euo pipefail
+
+        # --------------- 1. Input validation ----------------------------
+        fail() { echo "ERROR: $*" >&2; exit 1; }
+
+        case "${OUTPUT_DIR}" in
+          ''|/*|*..*|*$'\n'*|*$'\r'*|*$'\t'*|*' '*)
+            fail "output_dir must be a non-empty, repo-relative path without '..' or whitespace (got '${OUTPUT_DIR}')" ;;
+        esac
+        [ -d "${OUTPUT_DIR}" ] \
+          || fail "output_dir '${OUTPUT_DIR}' does not exist (run stage-deploy-dir first)"
+
+        case "${HSTS_MAX_AGE}" in
+          ''|*[!0-9]*) fail "hsts_max_age must be a non-negative integer (got '${HSTS_MAX_AGE}')" ;;
+        esac
+
+        case "${REPLACE_EXISTING}" in
+          true|false) ;;
+          *) fail "replace_existing must be 'true' or 'false' (got '${REPLACE_EXISTING}')" ;;
+        esac
+
+        # Reject any preset-affecting value that contains a newline —
+        # those would silently shred the generated block format.
+        for v_name in CSP PERMISSIONS_POLICY CACHE_HTML_CONTROL CACHE_ASSETS_PATTERN CACHE_ASSETS_CONTROL; do
+          eval "v_val=\${$v_name}"
+          case "${v_val}" in
+            *$'\n'*|*$'\r'*) fail "input '$(printf '%s' "${v_name}" | tr '[:upper:]' '[:lower:]')' must not contain newlines" ;;
+          esac
+        done
+
+        # Path pattern shape check: starts with '/' or 'http' (absolute URL).
+        case "${CACHE_ASSETS_PATTERN}" in
+          /*|http://*|https://*) ;;
+          *) fail "cache_assets_pattern must start with '/' or 'http(s)://' (got '${CACHE_ASSETS_PATTERN}')" ;;
+        esac
+
+        # --------------- 2. Resolve preset list -------------------------
+        # Normalize: strip whitespace, dedupe in input order, lowercase.
+        # `none` must appear alone.
+        normalized=""
+        # `IFS=read -ra` on an empty string under `set -u` leaves _tokens
+        # unbound; seed with a no-op element first so the loop is a no-op
+        # cleanly rather than tripping the unbound-variable trap.
+        _tokens=()
+        if [ -n "${PRESETS}" ]; then
+          IFS=',' read -ra _tokens <<< "${PRESETS}"
+        fi
+        for tok in "${_tokens[@]:-}"; do
+          tok="${tok#"${tok%%[![:space:]]*}"}"
+          tok="${tok%"${tok##*[![:space:]]}"}"
+          tok="$(printf '%s' "${tok}" | tr '[:upper:]' '[:lower:]')"
+          [ -z "${tok}" ] && continue
+          case "${tok}" in
+            security|cache|cors-fonts|opkg-feed|none) ;;
+            *) fail "unknown preset '${tok}' (allowed: security, cache, cors-fonts, opkg-feed, none)" ;;
+          esac
+          # Dedupe while preserving order.
+          case ",${normalized}," in
+            *",${tok},"*) ;;
+            *) normalized="${normalized:+${normalized},}${tok}" ;;
+          esac
+        done
+
+        if [ -z "${normalized}" ] && [ -z "${CUSTOM_RULES//[[:space:]]/}" ]; then
+          fail "no presets and no custom_rules — refusing to generate an empty _headers file"
+        fi
+        case ",${normalized}," in
+          *,none,*)
+            if [ "${normalized}" != "none" ]; then
+              fail "preset 'none' must appear alone (got '${normalized}')"
+            fi
+            normalized="" ;;
+        esac
+
+        # --------------- 3. Output-file guard ---------------------------
+        target="${OUTPUT_DIR%/}/_headers"
+        if [ -e "${target}" ] && [ "${REPLACE_EXISTING}" != "true" ]; then
+          fail "${target} already exists (set replace_existing: true to overwrite)"
+        fi
+
+        # --------------- 4. Block emitters ------------------------------
+        tmp="$(mktemp)"
+        trap 'rm -f "${tmp}"' EXIT
+
+        gen_header() {
+          {
+            echo '# ============================================================================'
+            echo '# AUTO-GENERATED by .github/actions/cf-pages-headers-generate in'
+            echo '# blackoutsecure/bos-automation-hub. DO NOT EDIT BY HAND — your changes'
+            echo '# will be overwritten on the next deploy. To change rules, update the'
+            echo '# `cloudflare_headers_*` inputs (or the `cloudflare.headers.*` block in'
+            echo '# `.bos-launchpad.yaml` when called through the launchpad).'
+            echo '#'
+            echo '# Format reference:'
+            echo '#   https://developers.cloudflare.com/pages/configuration/headers/'
+            echo '# Limits: 100 rule blocks max; 2000 chars per line max.'
+            echo '# ============================================================================'
+            echo
+          } >> "${tmp}"
+        }
+
+        gen_security() {
+          {
+            echo "# --- preset: security ---"
+            echo "/*"
+            echo "  X-Frame-Options: DENY"
+            echo "  X-Content-Type-Options: nosniff"
+            echo "  Referrer-Policy: strict-origin-when-cross-origin"
+            # X-XSS-Protection: 0 is the modern recommendation (legacy
+            # auditor flag aside). The legacy heuristic in IE / old
+            # WebKit was itself an XSS sink; modern browsers ignore it.
+            echo "  X-XSS-Protection: 0"
+            [ -n "${PERMISSIONS_POLICY}" ] \
+              && echo "  Permissions-Policy: ${PERMISSIONS_POLICY}"
+            [ "${HSTS_MAX_AGE}" != "0" ] \
+              && echo "  Strict-Transport-Security: max-age=${HSTS_MAX_AGE}; includeSubDomains; preload"
+            [ -n "${CSP}" ] \
+              && echo "  Content-Security-Policy: ${CSP}"
+            echo
+          } >> "${tmp}"
+        }
+
+        gen_cache() {
+          {
+            echo "# --- preset: cache ---"
+            if [ -n "${CACHE_HTML_CONTROL}" ]; then
+              echo "/*"
+              echo "  Cache-Control: ${CACHE_HTML_CONTROL}"
+              echo
+            fi
+            echo "${CACHE_ASSETS_PATTERN}"
+            echo "  Cache-Control: ${CACHE_ASSETS_CONTROL}"
+            echo
+            echo "/favicon.ico"
+            echo "  Cache-Control: public, max-age=604800"
+            echo
+            echo "/site.webmanifest"
+            echo "  Cache-Control: public, max-age=86400"
+            echo
+            for ext in png jpg jpeg svg webp gif avif; do
+              echo "/*.${ext}"
+              echo "  Cache-Control: public, max-age=2592000"
+              echo
+            done
+            echo "/sw.js"
+            echo "  Cache-Control: public, max-age=0, must-revalidate"
+            echo
+          } >> "${tmp}"
+        }
+
+        gen_cors_fonts() {
+          {
+            echo "# --- preset: cors-fonts ---"
+            for ext in woff2 woff; do
+              echo "/*.${ext}"
+              echo "  Cache-Control: public, max-age=31536000, immutable"
+              echo "  Access-Control-Allow-Origin: *"
+              echo
+            done
+          } >> "${tmp}"
+        }
+
+        gen_opkg_feed() {
+          {
+            echo "# --- preset: opkg-feed ---"
+            echo "/*.ipk"
+            echo "  Content-Type: application/octet-stream"
+            echo
+            for name in Packages Packages.gz Packages.sig; do
+              echo "/*/${name}"
+              echo "  Cache-Control: no-cache"
+              echo
+            done
+          } >> "${tmp}"
+        }
+
+        # --------------- 5. Assemble ------------------------------------
+        gen_header
+        if [ -n "${normalized}" ]; then
+          _enabled=()
+          IFS=',' read -ra _enabled <<< "${normalized}"
+          for p in "${_enabled[@]}"; do
+            case "${p}" in
+              security)   gen_security ;;
+              cache)      gen_cache ;;
+              cors-fonts) gen_cors_fonts ;;
+              opkg-feed)  gen_opkg_feed ;;
+            esac
+          done
+        fi
+
+        if [ -n "${CUSTOM_RULES//[[:space:]]/}" ]; then
+          {
+            echo "# --- custom_rules (appended verbatim) ---"
+            printf '%s\n' "${CUSTOM_RULES}"
+            echo
+          } >> "${tmp}"
+        fi
+
+        # --------------- 6. Validate against CF limits ------------------
+        # Cloudflare limits: <=100 rule blocks (URL/path lines),
+        # <=2000 chars per line (including the indent).
+        long_lines="$(awk 'length($0) > 2000 { print NR }' "${tmp}" || true)"
+        if [ -n "${long_lines}" ]; then
+          fail "generated _headers has line(s) exceeding 2000 chars (lines: ${long_lines})"
+        fi
+
+        # A "rule block" is any non-comment, non-blank line that is
+        # NOT indented (header value lines ARE indented with spaces).
+        rule_count="$(awk '
+          /^[[:space:]]*#/ { next }                # comments
+          /^[[:space:]]*$/ { next }                # blanks
+          /^[[:space:]]/   { next }                # indented => header value
+          { count++ }
+          END { print count + 0 }
+        ' "${tmp}")"
+
+        if [ "${rule_count}" -gt 100 ]; then
+          fail "generated _headers has ${rule_count} rule blocks (Cloudflare limit is 100)"
+        fi
+        if [ "${rule_count}" -eq 0 ]; then
+          fail "generated _headers contains zero rule blocks (presets='${PRESETS}', custom_rules empty)"
+        fi
+
+        # --------------- 7. Install + report ----------------------------
+        install -m 0644 "${tmp}" "${target}"
+
+        abs_path="$(cd "${OUTPUT_DIR}" && pwd)/_headers"
+        echo "path=${abs_path}" >> "${GITHUB_OUTPUT}"
+        echo "rule_count=${rule_count}" >> "${GITHUB_OUTPUT}"
+
+        # Step summary: list active presets + rule count + a preview of
+        # the first 40 lines (the rest is usually predictable / boring).
+        {
+          echo "### Cloudflare Pages \`_headers\` generated"
+          echo
+          echo "- **Output:** \`${target}\`"
+          echo "- **Presets:** \`${normalized:-(none — custom_rules only)}\`"
+          [ -n "${CSP}" ] && echo "- **CSP:** set (${#CSP} chars)"
+          [ "${HSTS_MAX_AGE}" = "0" ] \
+            && echo "- **HSTS:** disabled" \
+            || echo "- **HSTS:** max-age=${HSTS_MAX_AGE}"
+          echo "- **Rule blocks:** ${rule_count} / 100"
+          [ -n "${CUSTOM_RULES//[[:space:]]/}" ] \
+            && echo "- **Custom rules:** appended"
+          echo
+          echo "<details><summary>Generated \`_headers\` (first 40 lines)</summary>"
+          echo
+          echo '```'
+          head -n 40 "${target}"
+          echo '```'
+          echo
+          echo "</details>"
+        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+        echo "Wrote ${target} (${rule_count} rule blocks)"

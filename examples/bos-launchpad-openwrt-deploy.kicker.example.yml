@@ -1,0 +1,173 @@
+# =============================================================================
+# Blackout Secure Launchpad — OpenWrt Package Feed kicker (copy-into-consumer).
+#
+# Unlike `bos-launchpad-cf-pages.kicker.example.yml`, this file is NOT a
+# hub-managed sync target — there's no `.bos-launchpad.yaml` schema for
+# OpenWrt today because every value in the `with:` block (target,
+# subtarget, built_arch, packages_spec, feed_name, public_feed_base) is
+# intrinsic to the workflow and has no sensible cross-consumer default.
+#
+# Copy this file into your consumer repo at
+#   .github/workflows/openwrt-deploy.yml
+# and replace every `<…>` placeholder below with your own values. The
+# hub will NOT overwrite this file in your consumer repo.
+#
+# Calls `bos-launchpad-openwrt-deploy.yml` in
+# blackoutsecure/bos-automation-hub. The reusable workflow owns the
+# full pipeline:
+#   * download + cache the OpenWrt SDK tarball
+#   * stage upstream package sources, detect per-package metadata
+#   * configure & build the SDK
+#   * materialize per-arch feeds (one source build → many published arch
+#     labels; the control archive's `Architecture:` line is rewritten
+#     since ARMv8-A binaries are byte-identical across the relevant
+#     cortex-a53 variants)
+#   * generate opkg `Packages` indexes (via the SDK's own
+#     `ipkg-make-index.sh`)
+#   * usign-sign each index when `OPENWRT_USIGN_SECRET_KEY` is provided
+#   * render the caller's `site-src/` template into `site/`
+#   * deploy to Cloudflare Pages
+#
+# Caller responsibilities (NOT covered by the hub workflow):
+#   * `site-src/` in the consumer repo (or any path, passed via
+#     `site_src_dir:`) containing:
+#       - `index.html` with the renderer's `__TOKEN__` substitution
+#         markers — see the canonical token set in
+#         .github/scripts/openwrt/render-site.sh in the hub
+#       - `_headers` (Cloudflare Pages headers file)
+#       - per-package fragments `pkg-<name>.html` (optional)
+#   * The four operator inputs exposed below; the reusable workflow
+#     does NOT expose `workflow_dispatch` UI controls — that's the
+#     caller's job, so consumers can choose which knobs to expose.
+#
+# Required secrets (configure in the consumer repo):
+#   CLOUDFLARE_API_TOKEN     — Account → Cloudflare Pages → Edit
+#   CLOUDFLARE_ACCOUNT_ID    — the destination Cloudflare account
+#   OPENWRT_USIGN_SECRET_KEY — optional; when set the published
+#                              `Packages` indexes are usign-signed
+# =============================================================================
+name: OpenWrt Package Build & Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages_spec:
+        description: |
+          One package per entry: `name|ref|sub1,sub2|repo`, separated by `;;`.
+          - name : source package directory in the upstream repo
+          - ref  : git ref to fetch (required)
+          - subs : comma-separated extra binary sub-packages produced
+                   by the same Makefile (optional)
+          - repo : upstream git URL (optional; defaults to
+                   `feed_repo_default` in the `with:` block below)
+          NOTE: a multi-line `default:` here gets its newlines stripped
+          by GitHub when the form is submitted unchanged, silently
+          collapsing every package into one row, so keep the default
+          on a single line and use `;;` as the canonical separator.
+        type: string
+        default: '<package-name>|<git-ref>|<optional-sub-packages>|<optional-upstream-repo-url>'
+      publish_arches:
+        description: 'Space-separated arch labels to publish (must be ABI-compatible with built_arch).'
+        type: string
+        default: '<arch-1> <arch-2>'
+      extra_packages:
+        description: >-
+          Space-separated tokens of stock-feed deps to bundle. Each
+          token is either `<name>` (source dir == output package name)
+          or `<parent>:<o1>,<o2>,...` (build source dir `<parent>`,
+          ship only the listed sub-packages). Leave empty if your
+          target firmware's stock feeds already cover every dep.
+        type: string
+        default: ''
+      skip_unchanged_packages:
+        description: >-
+          When true (default), each spec package is rebuilt only if
+          its upstream commit has moved since the last published run.
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/openwrt-deploy.yml'
+      - 'site-src/**'
+
+permissions:
+  contents: read
+
+# Workflow-level serialization: the SDK build is not safe to cancel
+# mid-`make`. cancel-in-progress MUST stay false.
+concurrency:
+  group: openwrt-publish
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    name: Build & publish
+    # GHA requires explicit inheritance of permissions for reusable
+    # workflows. This workflow only needs `contents: read` (no push,
+    # no PR comment, no release publish).
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-openwrt-deploy.yml@main
+    with:
+      # ---- SDK + target identity --------------------------------------
+      # OpenWrt target and subtarget. Pick from
+      # https://downloads.openwrt.org/releases/<version>/targets/
+      target:                  '<openwrt-target>'      # e.g. ipq807x
+      subtarget:               '<openwrt-subtarget>'   # e.g. generic
+      sdk_url_base:            'https://downloads.openwrt.org/releases/<openwrt-version>/targets/<openwrt-target>/<openwrt-subtarget>'
+      # The arch label the SDK actually produces (look in the target
+      # dir's `sha256sums` for the `*-sdk-*` tarball name).
+      built_arch:              '<built-arch>'          # e.g. aarch64_cortex-a53
+      publish_arches:          ${{ inputs.publish_arches || '<arch-1> <arch-2>' }}
+
+      # ---- Package selection ------------------------------------------
+      packages_spec:           ${{ inputs.packages_spec || '<package-name>|<git-ref>|<optional-sub-packages>|<optional-upstream-repo-url>' }}
+      # Default git URL used when a spec entry's `repo` field is empty.
+      feed_repo_default:       'https://github.com/<owner>/<packages-fork>.git'
+      extra_packages:          ${{ inputs.extra_packages || '' }}
+      skip_unchanged_packages: ${{ inputs.skip_unchanged_packages != false }}
+
+      # ---- Feed identity ----------------------------------------------
+      # `feed_name` becomes the per-arch subdirectory under
+      #   <release_label>/packages/<arch>/<feed_name>/
+      # and the `src/gz <feed_name> <url>` token your users add to
+      # /etc/opkg/customfeeds.conf.
+      feed_name:               '<feed-name>'           # e.g. myfeed
+      # OpenWrt release label embedded in the published URL (e.g.
+      # `23.05-SNAPSHOT`). Independent of `sdk_url_base`'s actual
+      # version; this is the label your downstream routers identify
+      # their release as.
+      feed_release_label:      '<release-label>'       # e.g. 23.05-SNAPSHOT
+      # Canonical https:// URL your Cloudflare Pages project serves
+      # from. Used by the site renderer to emit the `src/gz` install
+      # snippet on the published index page.
+      public_feed_base:        'https://<your-feed-domain>'
+
+      # ---- Cloudflare Pages --------------------------------------------
+      cloudflare_project_name: '<cloudflare-pages-project-name>'
+      # Optional: branch passed to `wrangler pages deploy --branch=`.
+      # Pages treats deploys whose branch matches the project's
+      # production branch as production; everything else is a preview.
+      # cloudflare_deploy_branch: 'main'
+
+      # ---- _headers generator (opt-in) ---------------------------------
+      # When true, the hub writes `site/_headers` from composable
+      # presets via .github/actions/cf-pages-headers-generate. Delete
+      # the hand-maintained `site-src/_headers` from your repo when
+      # enabling this — `render-site.sh` already skips the copy when
+      # the source file is missing.
+      # cloudflare_generate_headers:        true
+      # cloudflare_headers_presets:         'opkg-feed,cache'
+      # cloudflare_headers_csp:             ''
+      # cloudflare_headers_custom_rules:    ''
+      # cloudflare_headers_replace_existing: false
+
+      # ---- Layout & runtime knobs (all optional) -----------------------
+      # site_src_dir:     'site-src'      # caller-repo dir with index.html
+      # runs_on:          'ubuntu-22.04'  # SDK build needs host toolchain pinned
+      # timeout_minutes:  60              # cold build ~45 min, warm ~10 min
+    secrets:
+      OPENWRT_USIGN_SECRET_KEY: ${{ secrets.OPENWRT_USIGN_SECRET_KEY }}
+      CLOUDFLARE_API_TOKEN:     ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID:    ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

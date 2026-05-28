@@ -1,0 +1,452 @@
+# Blackout Secure Launchpad — OpenWrt SDK Build & Publish (reusable)
+#
+# Single front-door for "build an opkg feed against the OpenWrt SDK and
+# publish it as a static site on Cloudflare Pages". Owns the full
+# pipeline end-to-end:
+#
+#   1.  Resolve PACKAGES_SPEC (caller-supplied string → /tmp/spec.tsv).
+#   2.  Install host build dependencies (apt).
+#   3.  Resolve + cache + extract the OpenWrt SDK tarball.
+#   4.  Clone each package's upstream source into `sdk/package/extra/`,
+#       record per-package metadata (`PKG_FEED_TYPE`, `PKG_PKGARCH`,
+#       `PKG_RUNTIME`, `PKG_CONF`, `PKG_KEEP_CONF`, `PKG_COMMIT`).
+#   5.  Decide per-package which `.ipk` files need rebuilding by
+#       comparing the upstream commit SHA against the previously
+#       published `state.json`. Forces a full rebuild when the SDK URL,
+#       BUILT_ARCH, PUBLISH_ARCHES or EXTRA_PACKAGES change, or when no
+#       prior state exists.
+#   6.  Configure the SDK (.config), build, materialize a per-arch feed
+#       for every entry in `publish_arches` (PKGARCH=all packages
+#       copied verbatim; others repacked by rewriting the control-tarball
+#       `Architecture:` label since ARMv8-A binaries are byte-identical
+#       across the `cortex-a53` / `cortex-a53_neon-vfpv4` distinction).
+#   7.  Generate opkg `Packages` + `Packages.gz` indexes via the SDK's
+#       own `ipkg-make-index.sh`.
+#   8.  Optionally `usign`-sign each per-arch index when the
+#       `OPENWRT_USIGN_SECRET_KEY` secret is provided.
+#   9.  Write `state.json` (incremental-rebuild ledger).
+#   10. Render the caller's `site-src/index.html` into `site/` using the
+#       per-package metadata captured in step 4 (no hand-maintained
+#       package table).
+#   11. Deploy the staged site to Cloudflare Pages via
+#       `cloudflare/wrangler-action@v4`.
+#
+# Scripts live under `.github/scripts/openwrt/` in this hub and are
+# pulled in by checking out this repo at the SHA of THIS workflow file
+# (`github.workflow_sha`) into `.bos-hub/`. That guarantees the script
+# revision always matches the workflow YAML the caller is invoking,
+# even when consumers pin `@<sha>` instead of `@main`.
+#
+# Caller contract:
+#   * Must provide `site-src/` (or override path via `site_src_dir`) in
+#     the caller repo, containing `index.html` (with `__TOKEN__`
+#     substitution markers — see `.github/scripts/openwrt/render-site.sh`
+#     for the supported token set), `_headers`, and per-package
+#     fragments `pkg-<name>.html` (optional; rendered into the package
+#     panel if present).
+#   * Must declare the canonical `packages_spec`, `built_arch`,
+#     `publish_arches`, `feed_*` and `cloudflare_*` inputs. Defaults are
+#     intentionally absent — there is no sensible cross-consumer default
+#     for any of these.
+#
+# Trigger model: this workflow is intended to be called from a thin
+# caller in a product repo (typically `push: branches: [main]` for
+# continuous deploy, plus `workflow_dispatch` with the four operator
+# inputs exposed below for manual reruns). It is **not** intended to
+# be triggered directly on this hub repo. See
+# `examples/bos-launchpad-openwrt-deploy.kicker.example.yml` for the
+# canonical caller shape.
+#
+# Concurrency: the caller is expected to set a workflow-level
+# `concurrency:` group (e.g. `openwrt-publish`) with
+# `cancel-in-progress: false`. The SDK build is not safe to cancel
+# mid-`make` — partial state in `sdk/staging_dir/` corrupts subsequent
+# runs until the SDK cache is invalidated.
+name: Blackout Secure Launchpad — OpenWrt (reusable)
+
+"on":
+  workflow_call:
+    inputs:
+      # ---- SDK + target identity ------------------------------------
+      target:
+        description: 'OpenWrt target (e.g. `ipq807x`).'
+        required: true
+        type: string
+      subtarget:
+        description: 'OpenWrt subtarget (e.g. `generic`).'
+        required: true
+        type: string
+      sdk_url_base:
+        description: >-
+          Base URL of the SDK target dir on downloads.openwrt.org
+          (e.g. `https://downloads.openwrt.org/releases/23.05.6/targets/ipq807x/generic`).
+          The SDK tarball name is auto-resolved from this directory's
+          `sha256sums` index.
+        required: true
+        type: string
+      built_arch:
+        description: >-
+          The arch label the SDK actually produces (e.g.
+          `aarch64_cortex-a53`). Used as `PKGARCH` fallback and as the
+          source for repacking into every other label in
+          `publish_arches`.
+        required: true
+        type: string
+      publish_arches:
+        description: >-
+          Space-separated arch labels to publish. Every label must be
+          ABI-compatible with `built_arch`; binaries are repacked
+          (control-archive Architecture: rewritten) per-arch.
+        required: true
+        type: string
+
+      # ---- Package selection ----------------------------------------
+      packages_spec:
+        description: >-
+          One package per entry, separated by `;;`. Each entry is
+          `name|ref|sub1,sub2|repo`:
+            * `name` — source-tree directory in the upstream repo
+            * `ref`  — git ref to fetch (required)
+            * `subs` — comma-separated extra binary sub-packages
+                       produced by the same Makefile (optional)
+            * `repo` — upstream git URL (optional; defaults to
+                       `feed_repo_default`)
+        required: true
+        type: string
+      feed_repo_default:
+        description: >-
+          Default git URL used for spec entries with an empty `repo`
+          field. Typically a fork of `openwrt/packages` carrying the
+          spec packages on their own branches.
+        required: true
+        type: string
+      extra_packages:
+        description: >-
+          Space-separated tokens of stock-feed deps to bundle alongside
+          the spec packages. Each token is either `<name>` (source dir
+          == output package name) or `<parent>:<o1>,<o2>,...` (build
+          source dir `<parent>`, ship only the listed sub-packages).
+          Empty disables; the canonical token set for SDR / WireGuard
+          consumers is `rtl-sdr:librtlsdr zstd:libzstd`.
+        required: false
+        type: string
+        default: ''
+      skip_unchanged_packages:
+        description: >-
+          When `true` (default), each spec package is rebuilt only when
+          its upstream commit has moved since the last published run;
+          otherwise its existing .ipk files are carried over verbatim
+          from the previously-published feed. Forced off (full rebuild)
+          when SDK URL, BUILT_ARCH, PUBLISH_ARCHES, or EXTRA_PACKAGES
+          change, or when no prior state.json exists.
+        required: false
+        type: boolean
+        default: true
+
+      # ---- Feed identity --------------------------------------------
+      feed_name:
+        description: >-
+          opkg feed name. Becomes the per-arch subdirectory under
+          `<release_label>/packages/<arch>/<feed_name>/` and the
+          `src/gz <feed_name> <url>` token users paste into
+          `customfeeds.conf`.
+        required: true
+        type: string
+      feed_release_label:
+        description: >-
+          OpenWrt release label embedded in the published URL
+          (e.g. `23.05-SNAPSHOT`). Independent of `sdk_url_base`'s
+          actual version; this is the label the consumer router
+          identifies its release as.
+        required: true
+        type: string
+      public_feed_base:
+        description: >-
+          Canonical https:// URL the Cloudflare Pages project is served
+          from (e.g. `https://openwrt.example.com`). Used to render the
+          `src/gz` install snippet in the published index.html.
+        required: true
+        type: string
+
+      # ---- Cloudflare Pages -----------------------------------------
+      cloudflare_project_name:
+        description: 'Cloudflare Pages project name.'
+        required: true
+        type: string
+      cloudflare_deploy_branch:
+        description: >-
+          Branch passed to `wrangler pages deploy --branch=`.
+          Cloudflare Pages treats deploys whose branch matches the
+          project's production branch as production; everything else
+          is a preview.
+        required: false
+        type: string
+        default: 'main'
+
+      # ---- _headers generator (hub-local composite action) ----------
+      # Opt-in alternative to shipping `site-src/_headers` by hand.
+      # When `cloudflare_generate_headers: true`, the consumer omits
+      # `site-src/_headers` and the hub writes `site/_headers` from
+      # composable presets after `render-site.sh` runs. The `opkg-feed`
+      # preset is enabled by default to apply the opkg-specific MIME
+      # type and Packages-index no-cache rules.
+      cloudflare_generate_headers:
+        description: 'Generate `site/_headers` from the hub composite action instead of copying `site-src/_headers`.'
+        required: false
+        type: boolean
+        default: false
+      cloudflare_headers_presets:
+        description: >-
+          Comma-separated preset list. Default `opkg-feed,cache` —
+          opkg MIME + Packages-index no-cache + safe cache defaults.
+          Tokens: `security`, `cache`, `cors-fonts`, `opkg-feed`,
+          `none` (alone with `cloudflare_headers_custom_rules`).
+        required: false
+        type: string
+        default: 'opkg-feed,cache'
+      cloudflare_headers_csp:
+        description: >-
+          Optional single-line `Content-Security-Policy` value
+          appended to the security preset's `/*` block (no-op unless
+          `security` is listed in `cloudflare_headers_presets`).
+        required: false
+        type: string
+        default: ''
+      cloudflare_headers_custom_rules:
+        description: >-
+          Raw `_headers` content appended verbatim after preset
+          blocks. Use for per-feed rules the presets don't cover.
+        required: false
+        type: string
+        default: ''
+      cloudflare_headers_replace_existing:
+        description: >-
+          Safety interlock: when `false` (default), the generator
+          fails if `site/_headers` already exists. Set `true` to
+          overwrite (e.g. when migrating from hand-maintained
+          `site-src/_headers`).
+        required: false
+        type: boolean
+        default: false
+
+      # ---- Layout & runtime knobs -----------------------------------
+      site_src_dir:
+        description: >-
+          Repo-relative directory in the caller repo containing
+          `index.html`, `_headers`, and optional per-package
+          `pkg-<name>.html` fragments.
+        required: false
+        type: string
+        default: 'site-src'
+      runs_on:
+        description: >-
+          Runner label. Defaults to `ubuntu-22.04` — the SDK build
+          needs the host toolchain pinned. Override only when you've
+          validated SDK compatibility with a different image.
+        required: false
+        type: string
+        default: 'ubuntu-22.04'
+      timeout_minutes:
+        description: >-
+          Job timeout in minutes. Cold SDK builds with ~3 packages
+          run ~45 min; warm SDK cache + no package changes ~10 min.
+          Default 60 leaves headroom for either.
+        required: false
+        type: number
+        default: 60
+
+    secrets:
+      OPENWRT_USIGN_SECRET_KEY:
+        description: >-
+          Optional. When set, each per-arch `Packages` index is signed
+          with `usign` and a `Packages.sig` companion is published
+          alongside it. When unset, the signing step is skipped
+          silently — opkg accepts unsigned feeds with `option check_signature 0`
+          on the client.
+        required: false
+      CLOUDFLARE_API_TOKEN:
+        description: >-
+          Cloudflare API token with `Account → Cloudflare Pages → Edit`.
+          Required.
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: >-
+          Cloudflare account ID. Required (no auto-resolve in this
+          workflow — wrangler needs it explicitly for `pages deploy`).
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    name: Build once, publish to Cloudflare Pages
+    runs-on: ${{ inputs.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    env:
+      # Forwarded verbatim to every script under .bos-hub/.github/scripts/openwrt/.
+      # The scripts validate presence via `req` (see lib.sh); keep the
+      # set in sync with the union of every `req` call across the
+      # script tree.
+      TARGET:                  ${{ inputs.target }}
+      SUBTARGET:               ${{ inputs.subtarget }}
+      SDK_URL_BASE:            ${{ inputs.sdk_url_base }}
+      BUILT_ARCH:              ${{ inputs.built_arch }}
+      PUBLISH_ARCHES:          ${{ inputs.publish_arches }}
+      EXTRA_PACKAGES:          ${{ inputs.extra_packages }}
+      # Same coercion trick as the legacy caller: the input is a real
+      # boolean (true/false), but `${{ … || 'true' }}` only kicks in
+      # for empty strings — `false` is a real value and survives.
+      # check-changes.sh treats anything other than the literal string
+      # 'true' as off.
+      SKIP_UNCHANGED_PACKAGES: ${{ inputs.skip_unchanged_packages && 'true' || 'false' }}
+      FEED_NAME:               ${{ inputs.feed_name }}
+      FEED_RELEASE_LABEL:      ${{ inputs.feed_release_label }}
+      FEED_REPO:               ${{ inputs.feed_repo_default }}
+      PUBLIC_FEED_BASE:        ${{ inputs.public_feed_base }}
+      # PACKAGES_SPEC_FALLBACK is consumed by resolve-spec.sh whenever
+      # the workflow runs without operator-supplied PACKAGES_SPEC env
+      # (push events). Carry the canonical single-line `;;`-joined form
+      # — resolve-spec.sh translates `;;` back into newlines.
+      PACKAGES_SPEC_FALLBACK:  ${{ inputs.packages_spec }}
+      USIGN_SECRET_KEY:        ${{ secrets.OPENWRT_USIGN_SECRET_KEY }}
+      CLOUDFLARE_API_TOKEN:    ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID:   ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      # Third-party actions are SHA-pinned with a trailing version
+      # comment, matching the rest of the hub's launchpad chain.
+      - name: Checkout caller repo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Pull in the hub-managed scripts at the SAME ref as this
+      # workflow file. `github.workflow_sha` is the commit SHA of the
+      # reusable workflow itself (NOT the caller), so consumers that
+      # pin `@<sha>` get a script set that matches the workflow YAML
+      # byte-for-byte. Falls back implicitly to the resolved SHA when
+      # consumers reference `@main`.
+      - name: Checkout bos-automation-hub (SDK build scripts)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ github.workflow_sha }}
+          path: .bos-hub
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts/openwrt
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve PACKAGES_SPEC
+        run: .bos-hub/.github/scripts/openwrt/resolve-spec.sh
+
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ccache file gawk gettext git \
+            libelf-dev libncurses5-dev libssl-dev \
+            python3 python3-setuptools python3-dev \
+            rsync unzip wget curl zlib1g-dev zstd
+
+      - name: Resolve SDK URL
+        id: sdk-url
+        run: .bos-hub/.github/scripts/openwrt/resolve-sdk-url.sh
+
+      - name: Cache SDK tarball
+        id: sdk-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: sdk.tar
+          key: openwrt-sdk-${{ steps.sdk-url.outputs.file }}
+
+      - name: Download SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: curl -fsSL -o sdk.tar "${{ steps.sdk-url.outputs.url }}"
+
+      - name: Extract SDK
+        run: .bos-hub/.github/scripts/openwrt/extract-sdk.sh
+
+      - name: Stage package sources & detect metadata
+        working-directory: sdk
+        run: $GITHUB_WORKSPACE/.bos-hub/.github/scripts/openwrt/stage-sources.sh
+
+      - name: Decide which packages need rebuilding
+        env:
+          SDK_URL: ${{ steps.sdk-url.outputs.url }}
+        run: .bos-hub/.github/scripts/openwrt/check-changes.sh
+
+      - name: Configure SDK (.config)
+        working-directory: sdk
+        run: $GITHUB_WORKSPACE/.bos-hub/.github/scripts/openwrt/configure-sdk.sh
+
+      - name: Build packages
+        working-directory: sdk
+        run: $GITHUB_WORKSPACE/.bos-hub/.github/scripts/openwrt/build-packages.sh
+
+      - name: Materialize feeds for each PUBLISH_ARCH
+        id: materialize
+        working-directory: sdk
+        run: $GITHUB_WORKSPACE/.bos-hub/.github/scripts/openwrt/materialize-feeds.sh
+
+      - name: Generate opkg Packages indexes
+        env:
+          SITE_BASE: ${{ steps.materialize.outputs.site_base }}
+        run: .bos-hub/.github/scripts/openwrt/index-feeds.sh
+
+      - name: Sign feeds with usign (optional)
+        if: env.USIGN_SECRET_KEY != ''
+        env:
+          SITE_BASE: ${{ steps.materialize.outputs.site_base }}
+        run: .bos-hub/.github/scripts/openwrt/sign-feeds.sh
+
+      - name: Write state.json (incremental-rebuild ledger)
+        env:
+          SDK_URL: ${{ steps.sdk-url.outputs.url }}
+        run: .bos-hub/.github/scripts/openwrt/write-state.sh
+
+      - name: Stage Cloudflare Pages site
+        env:
+          # render-site.sh reads $GITHUB_WORKSPACE/site-src by default,
+          # but accept a caller override so consumers can keep their
+          # site sources under any path.
+          SITE_SRC_DIR: ${{ inputs.site_src_dir }}
+        run: |
+          # The script reads $GITHUB_WORKSPACE/site-src hard-coded; if
+          # the caller's site sources live somewhere else, symlink them
+          # into the expected location before rendering. Idempotent.
+          if [ "${SITE_SRC_DIR}" != "site-src" ] && [ ! -e site-src ]; then
+            ln -s "${SITE_SRC_DIR}" site-src
+          fi
+          .bos-hub/.github/scripts/openwrt/render-site.sh
+
+      # Optional dynamic `_headers` generation. When enabled the
+      # consumer should omit `site-src/_headers` — `render-site.sh`
+      # already skips the copy when the source file is missing, but
+      # `replace_existing: true` makes the generator clobber any
+      # hand-maintained file if both paths run.
+      - name: Generate site/_headers
+        if: inputs.cloudflare_generate_headers
+        uses: ./.bos-hub/.github/actions/cf-pages-headers-generate
+        with:
+          output_dir: site
+          presets: ${{ inputs.cloudflare_headers_presets }}
+          csp: ${{ inputs.cloudflare_headers_csp }}
+          custom_rules: ${{ inputs.cloudflare_headers_custom_rules }}
+          replace_existing: ${{ inputs.cloudflare_headers_replace_existing }}
+
+      # `cloudflare/wrangler-action` installs wrangler via `npm install -g`
+      # and needs Node + npm on PATH. Pinning an explicit setup-node
+      # step keeps the workflow runner-agnostic. wrangler v4 needs
+      # Node 20+; Node 22 is the current LTS.
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
+        with:
+          apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=${{ inputs.cloudflare_project_name }} --branch=${{ inputs.cloudflare_deploy_branch }}

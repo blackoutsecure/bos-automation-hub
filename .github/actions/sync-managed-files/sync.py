@@ -1232,6 +1232,19 @@ jobs:
       cloudflare_manifest_dir:              ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_dir || '' }}
       cloudflare_manifest_categories:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_categories || '' }}
       cloudflare_manifest_icons_dir:        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_icons_dir || '' }}
+
+      # ----- _headers generator (hub-local composite action) -----
+      cloudflare_generate_headers:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.generate == true }}
+      cloudflare_headers_presets:           ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.presets || 'security,cache' }}
+      cloudflare_headers_csp:               ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.csp || '' }}
+      cloudflare_headers_hsts_max_age:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.hsts_max_age || '63072000' }}
+      cloudflare_headers_permissions_policy: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.permissions_policy || 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()' }}
+      cloudflare_headers_cache_html_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.cache_html_control || 'public, max-age=0, must-revalidate' }}
+      cloudflare_headers_cache_assets_pattern: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.cache_assets_pattern || '/assets/*' }}
+      cloudflare_headers_cache_assets_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.cache_assets_control || 'public, max-age=31536000, immutable' }}
+      cloudflare_headers_custom_rules: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.custom_rules || '' }}
+      cloudflare_headers_replace_existing:  ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.replace_existing == true }}
     secrets:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

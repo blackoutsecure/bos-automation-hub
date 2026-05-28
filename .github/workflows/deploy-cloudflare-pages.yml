@@ -237,6 +237,91 @@ name: Cloudflare Pages Deploy (reusable)
         required: false
         type: string
         default: ''
+
+      # ── _headers generator (hub-local composite action) ────────────
+      generate_headers:
+        description: >-
+          Run the hub's `cf-pages-headers-generate` composite action
+          before deploy. Writes `_headers` into `deploy_dir` from
+          composable presets (security, cache, cors-fonts, opkg-feed)
+          plus optional CSP and custom rules. See
+          `.github/actions/cf-pages-headers-generate/action.yml` for
+          full input docs.
+        required: false
+        type: boolean
+        default: false
+      headers_presets:
+        description: >-
+          Comma-separated preset list for the `_headers` generator.
+          Tokens: `security`, `cache`, `cors-fonts`, `opkg-feed`, or
+          `none` (alone, with `headers_custom_rules` for fully custom
+          output). Default `security,cache`.
+        required: false
+        type: string
+        default: 'security,cache'
+      headers_csp:
+        description: >-
+          Optional `Content-Security-Policy` value appended to the
+          security preset's `/*` block. Must be a single line
+          (Cloudflare limit: 2000 chars per line).
+        required: false
+        type: string
+        default: ''
+      headers_hsts_max_age:
+        description: >-
+          `Strict-Transport-Security` max-age in seconds. Default
+          `63072000` (2 years, preload-list requirement). Set to `0`
+          to suppress HSTS entirely.
+        required: false
+        type: string
+        default: '63072000'
+      headers_permissions_policy:
+        description: >-
+          `Permissions-Policy` value. Default disables the high-risk
+          feature set a static site never needs. Set empty to omit.
+        required: false
+        type: string
+        default: 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()'
+      headers_cache_html_control:
+        description: >-
+          `Cache-Control` value applied to `/*` by the `cache` preset.
+          Default `public, max-age=0, must-revalidate`.
+        required: false
+        type: string
+        default: 'public, max-age=0, must-revalidate'
+      headers_cache_assets_pattern:
+        description: >-
+          Path pattern for the long-cache rule emitted by the `cache`
+          preset. Default `/assets/*`. Override for framework-specific
+          fingerprinted paths (e.g. `/_next/static/*`).
+        required: false
+        type: string
+        default: '/assets/*'
+      headers_cache_assets_control:
+        description: >-
+          `Cache-Control` value applied to `headers_cache_assets_pattern`.
+          Default `public, max-age=31536000, immutable`. Safe ONLY for
+          fingerprinted assets — never apply to mutable paths.
+        required: false
+        type: string
+        default: 'public, max-age=31536000, immutable'
+      headers_custom_rules:
+        description: >-
+          Raw `_headers` content appended verbatim AFTER all preset
+          blocks. One URL/path per line followed by `  Name: Value`
+          lines indented with two spaces.
+        required: false
+        type: string
+        default: ''
+      headers_replace_existing:
+        description: >-
+          When `false` (default), the generator fails if `_headers`
+          already exists in `deploy_dir`. Set `true` once you have
+          migrated away from a hand-maintained `_headers` (or
+          permanently once the consumer is fully generator-driven).
+        required: false
+        type: boolean
+        default: false
     secrets:
       CLOUDFLARE_API_TOKEN:
         description: >-
@@ -456,6 +541,7 @@ jobs:
           GENERATE_ROBOTS: ${{ inputs.generate_robots }}
           GENERATE_SECURITY_TXT: ${{ inputs.generate_security_txt }}
           GENERATE_MANIFEST: ${{ inputs.generate_manifest }}
+          GENERATE_HEADERS: ${{ inputs.generate_headers }}
           SECURITY_CONTACT: ${{ inputs.security_contact }}
           MANIFEST_NAME: ${{ inputs.manifest_name }}
           MANIFEST_THEME_COLOR: ${{ inputs.manifest_theme_color }}
@@ -463,6 +549,9 @@ jobs:
           MANIFEST_DIR: ${{ inputs.manifest_dir }}
           MANIFEST_LANG: ${{ inputs.manifest_lang }}
           MANIFEST_ORIENTATION: ${{ inputs.manifest_orientation }}
+          HEADERS_PRESETS: ${{ inputs.headers_presets }}
+          HEADERS_HSTS_MAX_AGE: ${{ inputs.headers_hsts_max_age }}
+          HEADERS_CACHE_ASSETS_PATTERN: ${{ inputs.headers_cache_assets_pattern }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           set -euo pipefail
@@ -594,6 +683,42 @@ jobs:
             fi
           fi
 
+          if [ "${GENERATE_HEADERS}" = "true" ]; then
+            # Tokenize headers_presets and reject unknown / malformed values
+            # at the workflow boundary, so callers get a fast actionable
+            # error before the composite action runs.
+            saw_none=false
+            saw_other=false
+            _hp_toks=()
+            if [ -n "${HEADERS_PRESETS}" ]; then
+              IFS=',' read -ra _hp_toks <<< "${HEADERS_PRESETS}"
+            fi
+            for tok in "${_hp_toks[@]:-}"; do
+              tok="${tok#"${tok%%[![:space:]]*}"}"
+              tok="${tok%"${tok##*[![:space:]]}"}"
+              tok="$(printf '%s' "${tok}" | tr '[:upper:]' '[:lower:]')"
+              [ -z "${tok}" ] && continue
+              case "${tok}" in
+                security|cache|cors-fonts|opkg-feed) saw_other=true ;;
+                none) saw_none=true ;;
+                *) fail "input 'headers_presets' contains unknown token '${tok}' (allowed: security, cache, cors-fonts, opkg-feed, none)" ;;
+              esac
+            done
+            if [ "${saw_none}" = "true" ] && [ "${saw_other}" = "true" ]; then
+              fail "input 'headers_presets': 'none' must appear alone"
+            fi
+
+            case "${HEADERS_HSTS_MAX_AGE}" in
+              ''|*[!0-9]*) fail "input 'headers_hsts_max_age' must be a non-negative integer (got '${HEADERS_HSTS_MAX_AGE}')" ;;
+            esac
+
+            # Path pattern shape check: starts with '/' or 'http(s)://'.
+            case "${HEADERS_CACHE_ASSETS_PATTERN}" in
+              /*|http://*|https://*) ;;
+              *) fail "input 'headers_cache_assets_pattern' must start with '/' or 'http(s)://' (got '${HEADERS_CACHE_ASSETS_PATTERN}')" ;;
+            esac
+          fi
+
           [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
           echo "Preflight OK."
 
@@ -685,6 +810,25 @@ jobs:
           security_contact: ${{ inputs.security_contact }}
           site_url: ${{ inputs.site_url }}
           public_dir: ${{ inputs.deploy_dir }}
+
+      # Hub-local composite action — not pinned because it lives in the
+      # same repo as this workflow. Runs LAST among the generators so
+      # `_headers` lands in the staged deploy dir after every other
+      # generator-emitted asset is in place.
+      - name: Generate _headers
+        if: inputs.generate_headers
+        uses: blackoutsecure/bos-automation-hub/.github/actions/cf-pages-headers-generate@main
+        with:
+          output_dir: ${{ inputs.deploy_dir }}
+          presets: ${{ inputs.headers_presets }}
+          csp: ${{ inputs.headers_csp }}
+          hsts_max_age: ${{ inputs.headers_hsts_max_age }}
+          permissions_policy: ${{ inputs.headers_permissions_policy }}
+          cache_html_control: ${{ inputs.headers_cache_html_control }}
+          cache_assets_pattern: ${{ inputs.headers_cache_assets_pattern }}
+          cache_assets_control: ${{ inputs.headers_cache_assets_control }}
+          custom_rules: ${{ inputs.headers_custom_rules }}
+          replace_existing: ${{ inputs.headers_replace_existing }}
 
       - name: Compose wrangler command
         id: cmd

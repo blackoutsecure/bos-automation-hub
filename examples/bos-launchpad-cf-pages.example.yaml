@@ -29,10 +29,13 @@ cloudflare:
   # Files & directories to stage into `deploy_dir` from `public_dir`.
   # One path per line; `|-` chomps the trailing newline so multi-line
   # values stay byte-stable through the forwarding chain.
+  #
+  # NOTE: omit `_headers` from `copy_files` when `headers.generate: true`
+  # below — the generator writes `_headers` directly into `deploy_dir`
+  # and (by default) refuses to overwrite an existing file.
   copy_files: |-
     index.html
     _redirects
-    _headers
     humans.txt
   copy_dirs: |-
     assets
@@ -63,3 +66,56 @@ cloudflare:
   manifest_dir: 'ltr'
   manifest_categories: 'utilities,productivity'
   manifest_icons_dir: 'assets/icons'
+
+  # ----- _headers generator (hub-local composite action) -----
+  # Dynamically writes `<deploy_dir>/_headers` from composable presets
+  # following Cloudflare's _headers spec. Omit `_headers` from
+  # `copy_files` above when this is enabled.
+  #
+  # Docs: https://developers.cloudflare.com/pages/configuration/headers/
+  # Action: .github/actions/cf-pages-headers-generate/ (in bos-automation-hub)
+  headers:
+    generate: true
+
+    # Comma-separated preset list. Order matters (later blocks win
+    # for the same path under CF Pages first-match rules).
+    #   security   — HSTS, X-Frame-Options, X-Content-Type-Options,
+    #                Referrer-Policy, Permissions-Policy, optional CSP.
+    #   cache      — HTML no-cache, /assets/* immutable 1y, images 1mo,
+    #                /favicon.ico 1w, /site.webmanifest 1d, /sw.js no-cache.
+    #   cors-fonts — /*.woff and /*.woff2 immutable + Access-Control-Allow-Origin: *
+    #   opkg-feed  — *.ipk octet-stream + Packages*/no-cache (OpenWrt feeds).
+    #   none       — emit no presets (use with `custom_rules` only).
+    presets: 'security,cache,cors-fonts'
+
+    # Optional Content-Security-Policy value (single line, ≤2000 chars).
+    # Appended to the security preset's `/*` block. Tailor the allowlist
+    # to your site's actual third-party origins.
+    csp: "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://cloudflareinsights.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+    # HSTS max-age in seconds. Default 63072000 (2 years, preload-list
+    # requirement). Set to '0' to suppress HSTS entirely (useful for
+    # preview deployments on untrusted subdomains).
+    hsts_max_age: '63072000'
+
+    # Permissions-Policy denylist. Default disables high-risk features
+    # a static site never needs. Set empty to omit the header.
+    permissions_policy: 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()'
+
+    # Cache-Control values for the `cache` preset.
+    cache_html_control: 'public, max-age=0, must-revalidate'
+    cache_assets_pattern: '/assets/*'
+    cache_assets_control: 'public, max-age=31536000, immutable'
+
+    # Raw `_headers` content appended verbatim AFTER all preset blocks.
+    # Use this for per-site rules the presets don't cover.
+    custom_rules: |-
+      /.well-known/security.txt
+        Content-Type: text/plain; charset=utf-8
+      /robots.txt
+        Content-Type: text/plain; charset=utf-8
+
+    # Set true once migrated away from a hand-maintained `_headers`.
+    # Default false (safety interlock against silently clobbering a
+    # file the caller forgot to delete from `public_dir`).
+    replace_existing: true

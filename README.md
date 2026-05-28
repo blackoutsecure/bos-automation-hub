@@ -2059,6 +2059,21 @@ cloudflare:
   manifest_dir: ''
   manifest_categories: ''
   manifest_icons_dir: ''
+
+  # Cloudflare _headers generator (hub-local composite action).
+  # Dynamically writes `<deploy_dir>/_headers` from composable presets.
+  # When enabled, omit `_headers` from `copy_files` above.
+  headers:
+    generate: false
+    presets: 'security,cache'                 # security,cache,cors-fonts,opkg-feed,none
+    csp: ''                                   # single-line CSP value
+    hsts_max_age: '63072000'                  # '0' to suppress HSTS
+    permissions_policy: 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()'
+    cache_html_control: 'public, max-age=0, must-revalidate'
+    cache_assets_pattern: '/assets/*'
+    cache_assets_control: 'public, max-age=31536000, immutable'
+    custom_rules: ''                          # raw _headers blocks appended verbatim
+    replace_existing: false                   # set true once you stop hand-maintaining _headers
 ```
 
 **Repo-side `vars`:** the kicker defaults to looking up `vars.DOCKERHUB_NAMESPACE`
@@ -2678,11 +2693,17 @@ path.
   `clean_deploy_dir: true`. A `prebuild_command` may run beforehand
   (e.g. `npm ci && npm run build`).
 - **Generators are opt-in.** Each of `generate_sitemap`,
-  `generate_robots`, `generate_security_txt`, and `generate_manifest`
-  defaults to `false`. Enabling any of the first three requires
-  `site_url:` to be set; enabling `generate_security_txt` additionally
-  requires `security_contact:`; enabling `generate_manifest` requires
-  `manifest_name:`.
+  `generate_robots`, `generate_security_txt`, `generate_manifest`,
+  and `generate_headers` defaults to `false`. Enabling any of the
+  first three requires `site_url:` to be set; enabling
+  `generate_security_txt` additionally requires `security_contact:`;
+  enabling `generate_manifest` requires `manifest_name:`. The
+  `_headers` generator (hub-local composite action — see
+  `.github/actions/cf-pages-headers-generate/`) writes
+  `<deploy_dir>/_headers` from composable presets (`security`,
+  `cache`, `cors-fonts`, `opkg-feed`) per the
+  [Cloudflare Pages headers spec](https://developers.cloudflare.com/pages/configuration/headers/);
+  when enabled, omit `_headers` from `copy_files`.
 - **Concurrency:** Cloudflare Pages serialises deploys per project, so
   in-progress runs are never cancelled.
 - **Production vs preview:** wrangler treats the deploy as a production
@@ -2753,6 +2774,16 @@ the auto-resolve round trip on every run.
 | `manifest_dir` | string | `''` | PWA manifest `dir` (`ltr`/`rtl`/`auto`). |
 | `manifest_categories` | string | `''` | PWA manifest `categories` (comma-separated). |
 | `manifest_icons_dir` | string | `''` | Directory inside `deploy_dir` to scan for icons. |
+| `generate_headers` | boolean | `false` | Run hub-local `cf-pages-headers-generate` (writes `<deploy_dir>/_headers` from composable presets). |
+| `headers_presets` | string | `'security,cache'` | Comma-separated preset list: `security`, `cache`, `cors-fonts`, `opkg-feed`, or `none` (alone with `headers_custom_rules`). |
+| `headers_csp` | string | `''` | Single-line `Content-Security-Policy` value appended to the security preset's `/*` block. |
+| `headers_hsts_max_age` | string | `'63072000'` | HSTS `max-age` (seconds). `'0'` suppresses HSTS. |
+| `headers_permissions_policy` | string | (safe default denylist) | `Permissions-Policy` value applied to `/*` by the security preset. |
+| `headers_cache_html_control` | string | `'public, max-age=0, must-revalidate'` | `Cache-Control` value applied to `/*` by the cache preset. |
+| `headers_cache_assets_pattern` | string | `'/assets/*'` | Path pattern for the long-cache rule. Override for framework-specific fingerprinted paths. |
+| `headers_cache_assets_control` | string | `'public, max-age=31536000, immutable'` | `Cache-Control` applied to `headers_cache_assets_pattern`. Safe only for fingerprinted assets. |
+| `headers_custom_rules` | string | `''` | Raw `_headers` content appended verbatim after preset blocks. |
+| `headers_replace_existing` | boolean | `false` | Safety interlock: overwrite an existing `_headers` only when `true`. |
 
 ### Outputs
 

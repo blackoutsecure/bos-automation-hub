@@ -594,6 +594,80 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         type: string
         default: ''
 
+      # ----- _headers generator (hub-local composite action) --------------
+      cloudflare_generate_headers:
+        description: >-
+          Run the hub's `cf-pages-headers-generate` composite action
+          before deploy to dynamically build a Cloudflare Pages
+          `_headers` file from composable presets. See the
+          `.bos-launchpad.yaml` `cloudflare.headers.*` block for the
+          full input schema.
+        required: false
+        type: boolean
+        default: false
+      cloudflare_headers_presets:
+        description: >-
+          Comma-separated preset list. Tokens: `security`, `cache`,
+          `cors-fonts`, `opkg-feed`, or `none` (alone with
+          `cloudflare_headers_custom_rules` for fully custom output).
+          Default `security,cache`.
+        required: false
+        type: string
+        default: 'security,cache'
+      cloudflare_headers_csp:
+        description: >-
+          Optional `Content-Security-Policy` value. Appended to the
+          security preset's `/*` block. Single-line only.
+        required: false
+        type: string
+        default: ''
+      cloudflare_headers_hsts_max_age:
+        description: >-
+          `Strict-Transport-Security` max-age in seconds. Default
+          `63072000` (2 years). Set to `0` to suppress HSTS.
+        required: false
+        type: string
+        default: '63072000'
+      cloudflare_headers_permissions_policy:
+        description: >-
+          `Permissions-Policy` value. Defaults to a safe denylist for
+          static sites. Set empty to omit.
+        required: false
+        type: string
+        default: 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()'
+      cloudflare_headers_cache_html_control:
+        description: '`Cache-Control` value applied to `/*` by the `cache` preset.'
+        required: false
+        type: string
+        default: 'public, max-age=0, must-revalidate'
+      cloudflare_headers_cache_assets_pattern:
+        description: >-
+          Path pattern for the long-cache rule emitted by the `cache`
+          preset. Default `/assets/*`.
+        required: false
+        type: string
+        default: '/assets/*'
+      cloudflare_headers_cache_assets_control:
+        description: '`Cache-Control` value applied to `cloudflare_headers_cache_assets_pattern`.'
+        required: false
+        type: string
+        default: 'public, max-age=31536000, immutable'
+      cloudflare_headers_custom_rules:
+        description: >-
+          Raw `_headers` content appended verbatim AFTER preset
+          blocks. Use for per-site rules the presets don't cover.
+        required: false
+        type: string
+        default: ''
+      cloudflare_headers_replace_existing:
+        description: >-
+          When `false` (default), the generator fails if a `_headers`
+          file already exists in `deploy_dir`. Safety interlock
+          against clobbering a hand-maintained file during migration.
+        required: false
+        type: boolean
+        default: false
+
       # ----- Release pipeline: GitHub Release stage ------------------------
       release_template_path:
         description: 'Path to a Markdown template inside the caller repo.'
@@ -1116,6 +1190,16 @@ jobs:
       manifest_dir:               ${{ inputs.cloudflare_manifest_dir }}
       manifest_categories:        ${{ inputs.cloudflare_manifest_categories }}
       manifest_icons_dir:         ${{ inputs.cloudflare_manifest_icons_dir }}
+      generate_headers:           ${{ inputs.cloudflare_generate_headers }}
+      headers_presets:            ${{ inputs.cloudflare_headers_presets }}
+      headers_csp:                ${{ inputs.cloudflare_headers_csp }}
+      headers_hsts_max_age:       ${{ inputs.cloudflare_headers_hsts_max_age }}
+      headers_permissions_policy: ${{ inputs.cloudflare_headers_permissions_policy }}
+      headers_cache_html_control: ${{ inputs.cloudflare_headers_cache_html_control }}
+      headers_cache_assets_pattern: ${{ inputs.cloudflare_headers_cache_assets_pattern }}
+      headers_cache_assets_control: ${{ inputs.cloudflare_headers_cache_assets_control }}
+      headers_custom_rules:       ${{ inputs.cloudflare_headers_custom_rules }}
+      headers_replace_existing:   ${{ inputs.cloudflare_headers_replace_existing }}
     secrets:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
