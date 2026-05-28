@@ -145,6 +145,22 @@ name: Release promote (reusable)
         required: false
         type: boolean
         default: false
+      update_major_tag:
+        description: >-
+          When `true` (default), force-push the floating major tag
+          (e.g. `v1`) to point at the new release commit on every
+          successful promote. Standard Marketplace convention:
+          consumers pin `uses: owner/repo@v1` and automatically
+          receive non-breaking updates. Set `false` to opt out (the
+          immutable `vX.Y.Z` tag is still created).
+
+          Defaults to `true` because every BlackoutSecure Marketplace
+          kit publishes a floating major tag — leaving this `false`
+          (the promote composite's own default) silently strands
+          `@vN` consumers on the previous release.
+        required: false
+        type: boolean
+        default: true
 
       # ----- GitHub Release publishing (forwarded to github-release.yml) ----
       release_name:
@@ -489,6 +505,7 @@ jobs:
           tag_name:              ${{ steps.resolve_tag.outputs.tag_name }}
           commit_message:        ${{ inputs.commit_message }}
           dry_run:               ${{ inputs.dry_run }}
+          update_major_tag:      ${{ inputs.update_major_tag }}
 
       - name: Job summary
         if: always()
