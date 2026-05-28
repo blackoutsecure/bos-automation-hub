@@ -397,7 +397,22 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         type: boolean
         default: true
       security_scan_codeql_languages:
-        description: 'JSON array string of CodeQL languages (e.g. `["python", "actions"]`). Empty (default) skips the CodeQL sub-job entirely. MUST be valid JSON with double-quoted strings — `[python, actions]` is REJECTED by `fromJSON`.'
+        description: >-
+          What CodeQL should analyse. Three modes (forwarded as-is to
+          the code-scan reusable's `codeql_languages` input):
+          1. Empty string (default) — skip the CodeQL sub-job entirely.
+          2. Literal string `'auto'` — detect languages from the kit
+             repo's GitHub linguist stats + presence of
+             `.github/workflows/*.yml` files. Matches the language-
+             selection behaviour of GitHub's own "CodeQL default
+             setup" UI. If nothing supported is detected the CodeQL
+             sub-job is silently skipped — no failure.
+          3. JSON array string of CodeQL language identifiers (e.g.
+             `["python", "actions"]`). MUST be valid JSON with
+             double-quoted strings — `[python, actions]` is REJECTED
+             by `fromJSON`. Prefer this when you want a deterministic
+             language list independent of linguist drift (recommended
+             for kits whose source mix is audit-relevant).
         required: false
         type: string
         default: ''
@@ -406,6 +421,24 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
         required: false
         type: string
         default: security-and-quality
+      security_scan_codeql_runs_on:
+        description: >-
+          Optional runner override for the CodeQL matrix job. Empty
+          resolves the code-scan reusable''s built-in chain: hosted
+          `ubuntu-latest`. Diverges from `vars.DEFAULT_RUNNER` because
+          (a) the CodeQL CLI has no `linux/arm64` build (see
+          https://codeql.github.com/docs/codeql-overview/system-requirements/)
+          and (b) the bundled Temurin 21 JIT routinely SIGILLs on
+          self-hosted "X64"-labelled pools whose hardware turns out to
+          be amd64-under-qemu emulation on arm64 hosts. The hub
+          deliberately does NOT auto-fall-back to `vars.RUNNER_X64` —
+          set this input explicitly to a self-hosted label ONLY if you
+          have VERIFIED-native amd64 hardware. Accepts a bare label
+          (`ubuntu-latest`) or a JSON-array string of labels
+          (`["self-hosted","Linux","X64"]`).
+        required: false
+        type: string
+        default: ''
 
       proposed_name:
         description: 'Marketplace name to probe; empty reads `name:` from manifest. Only used when `dispatched_mode: name-check`.'
@@ -690,6 +723,7 @@ jobs:
       enable_upload:        ${{ inputs.security_scan_enable_upload }}
       codeql_languages:     ${{ inputs.security_scan_codeql_languages }}
       codeql_queries:       ${{ inputs.security_scan_codeql_queries }}
+      codeql_runs_on:       ${{ inputs.security_scan_codeql_runs_on }}
       use_advanced_pat:     ${{ inputs.security_scan_use_advanced_pat }}
     secrets:
       # Optional pass-through. The code-scan reusable only consults this

@@ -88,14 +88,37 @@ name: Repo Security Scan (reusable)
         default: true
       codeql_languages:
         description: >-
-          JSON array string of CodeQL languages to analyze (e.g.
-          `["python", "actions"]`, `["javascript-typescript"]`,
-          `["go"]`). Empty string (default) skips the `codeql` job
-          entirely. Entries must be valid CodeQL language identifiers
-          AND must be double-quoted JSON strings — the value is parsed
-          with `fromJSON` to drive a matrix, so YAML's flow-list
-          shorthand `[python, actions]` is REJECTED with
-          `fromJSON: Unexpected symbol: 'python'`.
+          What CodeQL should analyse. Three modes:
+
+          1. Empty string (default) — skip the `codeql` job entirely.
+             Cheapest option; pick this when the kit composite alone is
+             enough or when the repo has no CodeQL-supported source.
+
+          2. Literal string `'auto'` — language autodetect. The
+             `resolve-codeql-languages` job calls the GitHub linguist
+             API (`/repos/{owner}/{repo}/languages`) to identify the
+             dominant source languages in the caller repo, then maps
+             them to CodeQL's supported set:
+             `Python→python`, `JavaScript|TypeScript→javascript-typescript`,
+             `Go→go`, `Java|Kotlin→java-kotlin`, `C|C++→c-cpp`,
+             `C#→csharp`, `Ruby→ruby`, `Swift→swift`. The presence of
+             any `.github/workflows/*.{yml,yaml}` file additionally adds
+             `actions` (covers reusable-workflow taint analysis). If the
+             detected set is empty the `codeql` job is silently skipped
+             — no failure. Matches the language-selection behaviour of
+             GitHub's own "CodeQL default setup" UI.
+
+          3. JSON array string of CodeQL language identifiers (e.g.
+             `["python", "actions"]`, `["javascript-typescript"]`,
+             `["go"]`). The value is parsed with `fromJSON` to drive a
+             matrix, so entries MUST be double-quoted JSON strings —
+             YAML's flow-list shorthand `[python, actions]` is REJECTED
+             with `fromJSON: Unexpected symbol: 'python'`. Pick this
+             mode when you want deterministic language coverage
+             regardless of how the repo's linguist stats drift over time
+             (recommended for producer kits whose source mix is stable
+             and audit-relevant — e.g. bos-marketplace-kit pins
+             `["python", "actions"]`).
         required: false
         type: string
         default: ''
@@ -126,6 +149,38 @@ name: Repo Security Scan (reusable)
           `preflight-runner-config` job (see README.md "Runner
           configuration") so a job that reaches this stage is
           guaranteed to evaluate against a valid label set.
+          NOTE: This input drives the `scan` (kit composite) job
+          only. The `codeql` matrix job has its own `codeql_runs_on`
+          input because the CodeQL CLI has no `linux/arm64` build
+          AND because the bundled Temurin 21 JIT cannot survive
+          x86_64 emulation — see `codeql_runs_on` below for the
+          full rationale.
+        required: false
+        type: string
+        default: ''
+      codeql_runs_on:
+        description: >-
+          Optional runner override for the CodeQL matrix job.
+          Independent from `runs_on` because the CodeQL CLI does NOT
+          support `linux/arm64` (see
+          https://codeql.github.com/docs/codeql-overview/system-requirements/),
+          AND because CodeQL's bundled Temurin 21 JIT routinely
+          SIGILLs on x86_64 containers running under qemu-user
+          emulation or on CPUs lacking modern instruction extensions
+          — a class of failure observed on self-hosted "X64"-labelled
+          runner pools that turned out to be amd64 images running on
+          arm64 hardware. Resolution order when empty:
+          1. `inputs.codeql_runs_on`  (caller override — set to a
+             self-hosted label only if you have VERIFIED-native
+             amd64 hardware whose CPU can JIT Temurin 21 without
+             SIGILL; the hub deliberately does NOT auto-fall-back
+             to `vars.RUNNER_X64` because that var's hardware
+             topology is opaque to the hub).
+          2. `ubuntu-latest`          (hosted x64 fallback — free
+             for public repos, real amd64, full instruction set;
+             the strongly-recommended default for CodeQL).
+          Accepts a bare label or a JSON-array string of labels;
+          parsed via `fromJSON` at runtime like `runs_on`.
         required: false
         type: string
         default: ''
@@ -174,6 +229,129 @@ jobs:
           default_runner: ${{ vars.DEFAULT_RUNNER }}
           runner_x64: ${{ vars.RUNNER_X64 }}
           runner_arm64: ${{ vars.RUNNER_ARM64 }}
+
+  # ---------------------------------------------------------------------------
+  # Resolve the CodeQL language matrix. Single source of truth that the
+  # `codeql` job consumes — handles all three modes of `codeql_languages`:
+  #
+  #   * `'auto'`           — linguist API + workflow-file scan. Matches
+  #                          GitHub's first-party "CodeQL default setup"
+  #                          UX. See input docs above for the language
+  #                          mapping table.
+  #   * JSON array string  — echoed back unchanged (caller-supplied
+  #                          deterministic list).
+  #   * empty string       — job is skipped entirely (the `if:` gate);
+  #                          downstream `codeql` job sees
+  #                          `needs.resolve-codeql-languages.result == 'skipped'`
+  #                          and skips itself via the `!cancelled()`
+  #                          + `result == 'success'` guard.
+  #
+  # Always runs on hosted `ubuntu-latest` — the work is a single API call
+  # plus a sparse-checkout filename scan, no compute weight. Stays off
+  # `vars.DEFAULT_RUNNER` to avoid the same self-hosted-arch traps that
+  # forced `codeql` itself to default to hosted (see `codeql_runs_on`).
+  # ---------------------------------------------------------------------------
+  resolve-codeql-languages:
+    name: Resolve CodeQL languages
+    needs: preflight-runner-config
+    if: inputs.codeql_languages != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      # `gh api repos/{owner}/{repo}/languages` works on the default
+      # `GITHUB_TOKEN` for both public and private repos — `contents:
+      # read` is the minimum the languages endpoint asserts. We also
+      # sparse-checkout `.github/workflows/` to detect the `actions`
+      # language, which is the same `contents: read` scope.
+      contents: read
+    outputs:
+      languages: ${{ steps.resolve.outputs.languages }}
+    steps:
+      # Only checkout when we need to inspect `.github/workflows/`.
+      # Sparse-checkout avoids fetching the whole tree just to list
+      # one directory.
+      - if: inputs.codeql_languages == 'auto'
+        name: Checkout (sparse — workflows only)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows
+          sparse-checkout-cone-mode: false
+      - id: resolve
+        name: Resolve language matrix
+        env:
+          INPUT_LANGUAGES: ${{ inputs.codeql_languages }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${INPUT_LANGUAGES}" != 'auto' ]; then
+            # Mode 3: deterministic JSON array — echo back verbatim.
+            # `fromJSON` validation happens later in the codeql
+            # job's matrix expression; a malformed value fails LOUDLY
+            # there rather than silently here.
+            printf 'languages=%s\n' "${INPUT_LANGUAGES}" >> "${GITHUB_OUTPUT}"
+            echo "Mode: deterministic. Forwarded language list: ${INPUT_LANGUAGES}"
+            exit 0
+          fi
+
+          # Mode 2: auto-detect via linguist API.
+          echo "Mode: auto. Querying linguist for ${REPO}"
+          api_json="$(gh api "repos/${REPO}/languages" 2>/dev/null || echo '{}')"
+          echo "linguist response: ${api_json}"
+
+          # Map linguist's source-language names to CodeQL-supported
+          # language identifiers. Keep this list in sync with
+          # https://codeql.github.com/docs/codeql-overview/supported-languages-and-frameworks/
+          # Note: linguist returns historical names (e.g. "C++" with the
+          # plus signs literal, "C#" with the hash literal) — quote them
+          # carefully in the case statement below.
+          map_lang() {
+            case "$1" in
+              Python)              echo python ;;
+              JavaScript|TypeScript) echo javascript-typescript ;;
+              Go)                  echo go ;;
+              Java|Kotlin)         echo java-kotlin ;;
+              C|'C++')             echo c-cpp ;;
+              'C#')                echo csharp ;;
+              Ruby)                echo ruby ;;
+              Swift)               echo swift ;;
+              *)                   echo '' ;;
+            esac
+          }
+
+          detected=()
+          while IFS= read -r lang; do
+            [ -z "${lang}" ] && continue
+            mapped="$(map_lang "${lang}")"
+            [ -n "${mapped}" ] && detected+=("${mapped}")
+          done < <(printf '%s' "${api_json}" | jq -r 'keys[]?')
+
+          # `actions` is its own CodeQL language (analyses workflow
+          # files for taint, untrusted-input expressions, etc.). Always
+          # include when ANY workflow file is present, regardless of
+          # what linguist reported (linguist often miscounts YAML
+          # because workflow files are <2KB each).
+          if compgen -G ".github/workflows/*.yml"  > /dev/null 2>&1 \
+             || compgen -G ".github/workflows/*.yaml" > /dev/null 2>&1; then
+            detected+=(actions)
+          fi
+
+          if [ ${#detected[@]} -eq 0 ]; then
+            # No CodeQL-supported language detected — emit `[]` so the
+            # codeql job's `if:` guard skips it cleanly.
+            echo 'languages=[]' >> "${GITHUB_OUTPUT}"
+            echo 'No CodeQL-supported languages detected. The codeql job will be skipped.'
+            exit 0
+          fi
+
+          # Deduplicate (e.g. JavaScript + TypeScript both → javascript-typescript).
+          # awk preserves first-occurrence order so the matrix-job display order is stable.
+          result="$(printf '%s\n' "${detected[@]}" | awk '!seen[$0]++' | jq -R . | jq -s -c .)"
+          printf 'languages=%s\n' "${result}" >> "${GITHUB_OUTPUT}"
+          echo "Detected CodeQL languages: ${result}"
 
   scan:
     name: bos-code-scanning-kit
@@ -230,10 +408,50 @@ jobs:
   # ---------------------------------------------------------------------------
   codeql:
     name: Analyze (${{ matrix.language }})
-    needs: preflight-runner-config
-    if: inputs.codeql_languages != ''
-    # Same runner-resolution shape as the `scan` job above.
-    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER)) }}
+    needs: [preflight-runner-config, resolve-codeql-languages]
+    # `!cancelled()` lets this job evaluate even when
+    # `resolve-codeql-languages` was skipped (which happens when
+    # `codeql_languages == ''`). The follow-up `result == 'success'`
+    # check then causes a clean skip in that case — the `if` evaluates
+    # to false because `result == 'skipped'`, not `'success'`. When
+    # autodetect returns an empty set the resolver outputs `[]` and we
+    # skip via the final `languages != '[]'` guard. All three skip
+    # paths surface as a green "skipped" badge rather than a failure.
+    if: >-
+      !cancelled()
+      && needs.resolve-codeql-languages.result == 'success'
+      && needs.resolve-codeql-languages.outputs.languages != ''
+      && needs.resolve-codeql-languages.outputs.languages != '[]'
+    # CodeQL has TWO independent reasons not to share `runs_on` /
+    # `vars.DEFAULT_RUNNER` with the `scan` job:
+    #   (a) CodeQL CLI has no `linux/arm64` build — see
+    #       https://codeql.github.com/docs/codeql-overview/system-requirements/
+    #       — so an arm64 `DEFAULT_RUNNER` fails with `Exec format
+    #       error` when CodeQL invokes its bundled
+    #       `tools/linux64/java` binary.
+    #   (b) Even on "X64"-labelled self-hosted pools, CodeQL's
+    #       bundled Temurin 21 JIT routinely SIGILLs on amd64
+    #       containers running under qemu-user emulation (common
+    #       when the pool is actually arm64 hardware advertising an
+    #       X64 label) or on older CPUs missing modern instruction
+    #       extensions. Observed in bos-marketplace-kit run
+    #       26553990634 with `c1` (basic JIT) failing inside a
+    #       trivial `Spliterator.forEachRemaining` — a fingerprint
+    #       consistent with emulation, not a CodeQL bug.
+    # The hub therefore deliberately does NOT auto-fall-back to
+    # `vars.RUNNER_X64`. Callers with VERIFIED-native amd64 hardware
+    # can opt back into self-hosted by passing `codeql_runs_on`
+    # explicitly (e.g. via `security_scan_codeql_runs_on` on the
+    # launchpad wrappers).
+    # Resolution order:
+    #   1. `inputs.codeql_runs_on`  — caller override; accepts a
+    #      bare label or a JSON-array string of labels.
+    #   2. `ubuntu-latest`          — hosted x64 fallback. Free for
+    #      public repos and inexpensive for private ones; CodeQL has
+    #      no compute weight that justifies forcing self-hosted, and
+    #      hosted runners guarantee a CPU + Java JIT combination
+    #      that CodeQL was actually tested against.
+    runs-on: ${{ fromJSON(startsWith(inputs.codeql_runs_on || 'ubuntu-latest', '[') && (inputs.codeql_runs_on || 'ubuntu-latest') || format('"{0}"', inputs.codeql_runs_on || 'ubuntu-latest')) }}
     timeout-minutes: ${{ inputs.codeql_timeout_minutes }}
     permissions:
       # Required by github/codeql-action to upload SARIF to the
@@ -249,7 +467,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ${{ fromJSON(inputs.codeql_languages) }}
+        # Consume the resolver's output rather than `inputs.codeql_languages`
+        # directly so the `'auto'` mode works without special-casing here.
+        # For deterministic-mode callers the resolver echoes the input
+        # back unchanged, so behaviour is identical to the pre-autodetect
+        # version.
+        language: ${{ fromJSON(needs.resolve-codeql-languages.outputs.languages) }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

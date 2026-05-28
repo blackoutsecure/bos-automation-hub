@@ -41,7 +41,7 @@ automatically picks them up — no caller changes needed.
 | Variable | Used for |
 |----------|----------|
 | `vars.DEFAULT_RUNNER` | Lightweight orchestration jobs (setup, plan, manifest, release publish, etc.). |
-| `vars.RUNNER_X64` | The amd64 leg of the multi-arch Docker build matrix in `docker-build-push.yml`, all Docker Scout jobs, and the amd64-pinned balena `publish` / `deploy` jobs (`deploy-to-balena-action` is amd64-only). |
+| `vars.RUNNER_X64` | The amd64 leg of the multi-arch Docker build matrix in `docker-build-push.yml`, all Docker Scout jobs, and the amd64-pinned balena `publish` / `deploy` jobs (`deploy-to-balena-action` is amd64-only). NOT used by the `codeql` job in `bos-launchpad-code-scan.yml` — CodeQL defaults to hosted `ubuntu-latest` because the bundled Temurin 21 JIT routinely SIGILLs on self-hosted "X64" pools that are actually emulated (CodeQL [system requirements](https://codeql.github.com/docs/codeql-overview/system-requirements/)). Callers with verified-native amd64 hardware can opt back in via `security_scan_codeql_runs_on` on the launchpad wrappers. |
 | `vars.RUNNER_ARM64` | The arm64 leg of the multi-arch Docker build matrix in `docker-build-push.yml`. |
 
 Values may be either a single bare label (e.g. `ubuntu-latest`) or a
@@ -95,6 +95,7 @@ Per-workflow requirements:
 | `release.yml`, `github-release.yml`, `openwrt-readsb-wiedehopf-bump.yml`, `deploy-cloudflare-pages.yml` | `DEFAULT_RUNNER` |
 | `balena-block-publish.yml`, `balena-fleet-deploy.yml` | `DEFAULT_RUNNER` + `RUNNER_X64` |
 | `docker-build-push.yml` | `DEFAULT_RUNNER` + `RUNNER_X64` + `RUNNER_ARM64` |
+| `bos-launchpad-code-scan.yml` | `DEFAULT_RUNNER` (always, for the `scan` job); the `codeql` matrix job defaults to hosted `ubuntu-latest` — see `codeql_runs_on` input docs |
 | `lint.yml`, `monitor-upstream-release.yml` | _(pinned to `ubuntu-latest` by design)_ |
 | `sync-managed-files.yml` | _(uses caller-supplied `inputs.runs_on` directly)_ |
 | `bos-launchpad-release.yml`, `bos-launchpad-marketplace.yml` | _(pure delegator; each downstream workflow runs its own preflight)_ |
@@ -142,7 +143,7 @@ is also validated by preflight on the source variable.
 | [.github/workflows/release-promote.yml](.github/workflows/release-promote.yml) | Reusable workflow | **Marketplace-compliant release.** Promotes an allowlisted set of paths from a source branch (typically `dev`) to a target branch (typically `main`), tags the promoted SHA, and chains into `github-release.yml` to publish a GitHub Release. Paths under `.github/workflows/**` are hard-rejected by the underlying primitive — keeps Marketplace Action repos' default branch clean of CI workflow files. Called via [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml). |
 | [.github/workflows/marketplace-repo-guard.yml](.github/workflows/marketplace-repo-guard.yml) | Reusable workflow | **Marketplace compliance guard.** PR-time check that fails any PR whose diff (or post-merge tree state) would add a file under `.github/workflows/**` to the default branch. Defense-in-depth companion to the org-level ruleset in [`scripts/marketplace-repo/`](scripts/marketplace-repo/). Called via [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml). |
 | [.github/workflows/marketplace-action-ci.yml](.github/workflows/marketplace-action-ci.yml) | Reusable workflow | **Marketplace Action CI.** PR-time `check` (manifest + LICENSE + README + branding + community-health) + `branding-preview` (Marketplace card SVG, uploaded as artifact) + opt-in `name-check` (Marketplace name availability). Drives every PR into `dev` on a Marketplace Action repo. Called via [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml). |
-| [.github/workflows/bos-launchpad-code-scan.yml](.github/workflows/bos-launchpad-code-scan.yml) | Reusable workflow | **Consolidated security scan wrapper.** Wraps the published [`blackoutsecure/bos-code-scanning-kit@v1`](https://github.com/marketplace/actions/bos-code-scanning-kit) composite (posture audit + bundled scanners: actionlint / gitleaks / shellcheck + unified SARIF upload) AND `github/codeql-action` (matrix-parallel semantic analysis) behind one reusable. Two independent sub-jobs (`scan`, `codeql`) gated by `enable_kit_composite` + `codeql_languages`; producer-kit escape hatch (`enable_kit_composite: false`) lets kits get CodeQL-only coverage without running the published @v1 against their dev source. Shared by [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml) (PR-time gate, default `fail_on: fail`) and [`bos-launchpad-release.yml`](.github/workflows/bos-launchpad-release.yml) (deploy-time advisory, default `fail_on: never`). Direct callers like [`bos-marketplace-kit/.github/workflows/codeql.yml`](https://github.com/blackoutsecure/bos-marketplace-kit/blob/dev/.github/workflows/codeql.yml) also consume it. |
+| [.github/workflows/bos-launchpad-code-scan.yml](.github/workflows/bos-launchpad-code-scan.yml) | Reusable workflow | **Consolidated security scan wrapper.** Wraps the published [`blackoutsecure/bos-code-scanning-kit@v1`](https://github.com/marketplace/actions/bos-code-scanning-kit) composite (posture audit + bundled scanners: actionlint / gitleaks / shellcheck + unified SARIF upload) AND `github/codeql-action` (matrix-parallel semantic analysis) behind one reusable. Three sub-jobs (`scan`, `resolve-codeql-languages`, `codeql`) gated by `enable_kit_composite` + `codeql_languages` (`''`, `'auto'`, or a JSON array — see [§8. CodeQL language autodetect](#8-codeql-language-autodetect--codeql_languages-auto)); producer-kit escape hatch (`enable_kit_composite: false`) lets kits get CodeQL-only coverage without running the published @v1 against their dev source. Shared by [`bos-launchpad-marketplace.yml`](.github/workflows/bos-launchpad-marketplace.yml) (PR-time gate, default `fail_on: fail`) and [`bos-launchpad-release.yml`](.github/workflows/bos-launchpad-release.yml) (deploy-time advisory, default `fail_on: never`). Direct callers like [`bos-marketplace-kit/.github/workflows/bos-launchpad-code-scan.yml`](https://github.com/blackoutsecure/bos-marketplace-kit/blob/dev/.github/workflows/bos-launchpad-code-scan.yml) also consume it. |
 | [.github/workflows/bos-launchpad-marketplace.yml](.github/workflows/bos-launchpad-marketplace.yml) | Reusable **meta-workflow** | Single front-door composer (Blackout Secure Marketplace Launchpad). Composes `marketplace-action-ci.yml` + `bos-launchpad-code-scan.yml` (opt-in security scan) + `marketplace-repo-guard.yml` + `release-promote.yml` with internal event routing: PRs / pushes to `dev` → CI (+ security scan when enabled); PRs to `main` → guard; `workflow_dispatch` mode `release` → promote + GH Release; `workflow_dispatch` mode `name-check` → one-shot name probe. Consumers drop a ~60-line thin caller on their `dev` branch ([`examples/bos-launchpad-marketplace.example.yaml`](examples/bos-launchpad-marketplace.example.yaml)); all orchestration logic lives here. Sibling to [`bos-launchpad-release.yml`](.github/workflows/bos-launchpad-release.yml) for the container/site family. |
 | [bos-code-scanning-kit](https://github.com/marketplace/actions/bos-code-scanning-kit) (external) | Marketplace Action | Source of the posture-audit + bundled-scanners composite consumed by [`bos-launchpad-code-scan.yml`](.github/workflows/bos-launchpad-code-scan.yml). SHA / version pin uses the floating `@v1` tag in the wrapper so a single bump there propagates everywhere. |
 | [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit) (external) | Marketplace Action | Source of the `check` / `guard` / `promote` / `name-check` / `branding-preview` composite primitives consumed by `marketplace-repo-guard.yml`, `release-promote.yml`, and `marketplace-action-ci.yml`. SHA-pinned to `v0.1.1`; Dependabot tracks bumps. |
@@ -593,7 +594,72 @@ is already wired and ignores the toggle when the secret is absent
    account (e.g. a dedicated `bos-bot` machine user) so rotation
    isn't coupled to any individual contributor's offboarding.
 
-### 8. Release-time gating — `require_workflow_success`
+### 8. CodeQL language autodetect — `codeql_languages: 'auto'`
+
+[`bos-launchpad-code-scan.yml`](.github/workflows/bos-launchpad-code-scan.yml)
+accepts three values for `codeql_languages` (forwarded as
+`security_scan_codeql_languages` from both launchpads):
+
+| Mode               | Value                              | Behaviour                                                                                                                                                                                                                                                                                                                  |
+| ------------------ | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Off (default)      | `''` (empty string)                | The `codeql` matrix job is skipped entirely. The `resolve-codeql-languages` preflight is also skipped — zero cost when CodeQL isn't wanted. The kit composite (`scan` job) is unaffected.                                                                                                                                  |
+| **Autodetect**     | `'auto'`                           | The `resolve-codeql-languages` job runs first on hosted `ubuntu-latest`. It queries the caller repo's [GitHub linguist stats](https://docs.github.com/en/rest/repos/repos#list-repository-languages) (`/repos/{owner}/{repo}/languages`), maps them to the CodeQL-supported language set (see table below), and additionally appends `actions` whenever `.github/workflows/*.{yml,yaml}` exists. The detected set drives the `codeql` matrix. If nothing supported is detected the matrix job is silently skipped — no failure. Mirrors the language-selection behaviour of GitHub's first-party ["CodeQL default setup"](https://docs.github.com/en/code-security/code-scanning/enabling-code-scanning/configuring-default-setup-for-code-scanning) UI. |
+| Explicit           | JSON array string, e.g. `'["python", "actions"]'` | The `resolve-codeql-languages` job echoes the value back unchanged; the `codeql` matrix runs once per listed language. Use this when the source mix is audit-relevant and shouldn't drift with linguist's view of the repo — e.g. `bos-marketplace-kit` pins `'["python", "actions"]'` to guarantee Python CLI + workflow taint coverage every run, regardless of how much Markdown / YAML accrues. **MUST** be valid JSON with double-quoted strings (`'[python, actions]'` is REJECTED with `fromJSON: Unexpected symbol`). |
+
+**Linguist → CodeQL language mapping (used by `'auto'` mode)**
+
+| Linguist name (from `/languages` API) | CodeQL language identifier   |
+| ------------------------------------- | ---------------------------- |
+| `Python`                              | `python`                     |
+| `JavaScript`, `TypeScript`            | `javascript-typescript`      |
+| `Go`                                  | `go`                         |
+| `Java`, `Kotlin`                      | `java-kotlin`                |
+| `C`, `C++`                            | `c-cpp`                      |
+| `C#`                                  | `csharp`                     |
+| `Ruby`                                | `ruby`                       |
+| `Swift`                               | `swift`                      |
+| _(any)_ + `.github/workflows/*.yml`   | `actions` (always appended)  |
+
+Languages outside this table (e.g. `Shell`, `HTML`, `Dockerfile`,
+`Makefile`) are silently dropped — CodeQL has no analyser for them.
+Deduplication is automatic: a repo with both JavaScript and
+TypeScript source emits `javascript-typescript` once, not twice.
+Compiled languages (`java-kotlin`, `c-cpp`, `csharp`, `go`, `swift`)
+require an in-caller build step before this reusable runs — the
+autodetect path does NOT inject one. For build-capable languages,
+either (a) keep `codeql_languages: ''` and use the kit composite
+only, or (b) author your own CodeQL workflow with the appropriate
+autobuild / manual-build steps and invoke `github/codeql-action`
+directly.
+
+**Why a separate `resolve-codeql-languages` job?** Putting the
+detection inside the `codeql` matrix would create a chicken-and-egg
+problem (the matrix needs the language list to define its strategy,
+but the strategy expression is evaluated at workflow-load time —
+before any step can run). The resolver job emits a JSON-array string
+output that the `codeql` job's `matrix.language` consumes via
+`fromJSON`, which is the standard GHA pattern for dynamic matrices.
+
+**When NOT to use `'auto'`**
+
+- **Producer kits** where the source mix is part of the audit
+  surface. `bos-marketplace-kit` keeps its `["python", "actions"]`
+  pin so a future docs / TypeScript snippet drop can't silently
+  expand the CodeQL workload mid-release.
+- **Compiled-language repos** that need a custom build matrix —
+  autodetect would happily emit `c-cpp` or `java-kotlin` but the
+  reusable has no autobuild step, so the analyser would error.
+  Pin an explicit list AND wire the build steps yourself.
+- **Repos with intentionally narrow CodeQL coverage** — e.g. you
+  only care about the `actions` analyser for workflow taint and
+  explicitly do NOT want Python source scanned. Pin
+  `'["actions"]'`.
+
+**Cost.** The resolver job is one API call + one sparse-checkout
++ one shell script; typically completes in ≈10 s. It's gated on
+`codeql_languages != ''` so callers with CodeQL disabled pay zero.
+
+### 9. Release-time gating — `require_workflow_success`
 
 The marketplace launchpad's nested `ci` and `security_scan` jobs run
 on `pull_request` / `push` events (the PR-time gates), but are
