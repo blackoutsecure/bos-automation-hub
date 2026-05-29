@@ -207,6 +207,19 @@ name: Repo Security Scan (reusable)
           from caller: `secrets: inherit` and define `SCANNING_PAT` at
           the org or repo level.
         required: false
+    outputs:
+      scan_outcome:
+        description: >-
+          Severity-tier verdict from the kit composite: `success` (no
+          findings at any level), `warn` (only warning/note-level
+          findings), `failure` (at least one error-level finding), or
+          empty string (the `scan` job was skipped via
+          `enable_kit_composite: false`). Lets callers (notably the
+          `bos-launchpad-release.yml` launchpad) gate downstream jobs
+          on the verdict independently of whether the `scan` job
+          itself exited non-zero — useful when `fail_on: never`
+          collapses error-level findings into a green job.
+        value: ${{ jobs.scan.outputs.outcome }}
 
 permissions: {}
 
@@ -413,6 +426,14 @@ jobs:
       contents:        read
       security-events: write
       actions:         read
+    # Surface the kit's severity-tier `outcome` as a job output so the
+    # workflow-level `scan_outcome` can forward it to callers. Captured
+    # from the kit composite's `summary` step output. Empty string when
+    # the kit step itself errored before reaching the summary step (e.g.
+    # network failure during `pip install`) — treat empty as "unknown
+    # outcome" in callers, not as success.
+    outputs:
+      outcome: ${{ steps.kit.outputs.outcome }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -422,7 +443,8 @@ jobs:
           # writes via the runner's GITHUB_TOKEN.
           persist-credentials: false
 
-      - name: Run BOS Code Scanning Kit
+      - id: kit
+        name: Run BOS Code Scanning Kit
         # `@v1` floats across v1.x.y for automatic patch + minor uptake.
         # Bump this pin (or switch to a SHA) here to roll out a new
         # major across every opted-in kit in one hub commit.

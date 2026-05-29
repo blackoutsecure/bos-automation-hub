@@ -25,17 +25,16 @@
 #                                       `github/codeql-action` (matrix).
 #                                       Gated by `enable_security_scan` input,
 #                                       default `false`. Runs in PARALLEL
-#                                       with monitor (no `needs:`) and is
-#                                       INDEPENDENT of release — findings
-#                                       surface in the Security tab + (when
-#                                       `security_scan_fail_on: fail`) mark
-#                                       the workflow run failed, but do NOT
-#                                       block the deploy stages. This is the
-#                                       advisory model that matches Docker
-#                                       Scout's role inside `docker-build-push`.
-#                                       For hard-gated security scanning,
-#                                       run a separate PR-time caller using
-#                                       `bos-launchpad-code-scan.yml` directly.
+#                                       with monitor. By default GATES the
+#                                       release: the `release` and
+#                                       `cloudflare-pages` jobs `needs:` this
+#                                       stage and skip themselves when scan
+#                                       fails. Opt out with
+#                                       `security_scan_blocks_release: false`
+#                                       to keep the legacy advisory model
+#                                       (scan runs in parallel, deploy never
+#                                       waits). Default policy mirrors the
+#                                       Marketplace launchpad (`fail_on: fail`).
 #
 # Two canonical use cases:
 #
@@ -700,14 +699,41 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         default: false
 
       # ----- Security scan stage (opt-in) ----------------------------------
-      # Independent advisory stage: runs in parallel with `monitor` and
-      # has no `needs:` cascade into `release` or `cloudflare-pages`.
-      # Findings surface in the caller repo's Security tab via SARIF
-      # upload, and — when `security_scan_fail_on: fail` — a failing
-      # finding marks the workflow run failed, but does NOT block any
-      # deploy stage. Mirrors the Docker Scout pattern already in
-      # `docker-build-push.yml`: scanners are observational, deploy
-      # gating is via explicit toggles + the operator's eyeballs.
+      # Two independent knobs control the security scan's relationship
+      # to the deploy pipeline:
+      #
+      #   * `security_scan_fail_on` (kit policy)
+      #       Forwarded to the kit composite. Controls whether the
+      #       `security_scan` job itself exits non-zero on findings.
+      #       Default `fail` — matches the Marketplace launchpad and
+      #       the kit's own default. Override to `never` to keep the
+      #       scan job green even when findings exist (still uploads
+      #       SARIF + writes the summary table).
+      #
+      #   * `security_scan_blocks_release` (launchpad gating)
+      #       Controls whether the `release` and `cloudflare-pages`
+      #       jobs `needs:` the `security_scan` job and gate on its
+      #       result. Default `true` — deploy stages WAIT for scan
+      #       to finish AND require it to succeed (or be skipped via
+      #       `enable_security_scan: false`). Set `false` to revert
+      #       to the pre-Nov 2026 advisory-only behaviour (scan runs
+      #       in parallel, deploy proceeds regardless).
+      #
+      # The two knobs are orthogonal. Common combinations:
+      #
+      #   fail_on=fail  + blocks=true  (DEFAULT, secure)
+      #     → error-level findings fail scan AND skip release.
+      #   fail_on=fail  + blocks=false (escape hatch)
+      #     → findings fail scan but release still proceeds; useful
+      #       when you want red CI status on findings but cannot
+      #       block time-sensitive deploys yet.
+      #   fail_on=never + blocks=true  (gated observability)
+      #     → release waits for scan but proceeds even on findings;
+      #       useful for "always-green dashboard" mode where the
+      #       SARIF tab + summary table are the only signal.
+      #   fail_on=never + blocks=false (legacy advisory)
+      #     → matches the pre-Nov 2026 default — scan runs in
+      #       parallel, deploy never waits.
       #
       # PERMISSIONS REQUIREMENT (STATIC, UNCONDITIONAL):
       # The caller workflow MUST grant `security-events: write` and
@@ -725,24 +751,21 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       # job's `gh workflow run` calls, and `security-events: write` for
       # Docker Scout SARIF upload — so this requirement happens to be
       # met by the existing perm block, but it is not redundant.
-      #
-      # The default `fail_on: never` is intentionally LOOSER than the
-      # Marketplace launchpad's `fail_on: fail` default — deploy
-      # pipelines are time-sensitive (cron-driven container releases,
-      # push-driven site deploys), and a posture rule misfire shouldn't
-      # mark an otherwise-clean release as failed. Override to `fail`
-      # in `.bos-launchpad.yaml` / caller `with:` once findings have
-      # been triaged.
       enable_security_scan:
         description: 'Enable consolidated security scanning (kit composite + CodeQL) via the launchpad. Default `false`. NOTE: caller MUST grant `security-events: write` + `actions: read` at workflow level UNCONDITIONALLY (even when this input is `false`) — GitHub validates the nested `security_scan` job''s permission cascade statically, before the `if:` gate.'
         required: false
         type: boolean
         default: false
       security_scan_fail_on:
-        description: 'Forwarded to the kit `fail_on`. `never` (default for deploy context) surfaces findings without marking the workflow failed; `fail` gates the workflow on findings (but still does NOT block the deploy stages — see header doc).'
+        description: 'Forwarded to the kit `fail_on`. `fail` (default, matches Marketplace launchpad + kit default) marks the security_scan job failed on error-level findings; combined with `security_scan_blocks_release: true` this skips the release. `never` collects findings without failing the job.'
         required: false
         type: string
-        default: never
+        default: fail
+      security_scan_blocks_release:
+        description: 'When `true` (default), the `release` and `cloudflare-pages` jobs `needs:` the security_scan job AND skip themselves unless it succeeded or was disabled. Set `false` to keep the pre-Nov 2026 advisory model (scan runs in parallel, deploy never waits or gates).'
+        required: false
+        type: boolean
+        default: true
       security_scan_enable_kit_composite:
         description: 'Run the published `bos-code-scanning-kit@v1` composite sub-job inside the wrapper. Default `true`. Set `false` for CodeQL-only mode.'
         required: false
@@ -960,10 +983,15 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Stage 0 — Consolidated security scan (opt-in, advisory).
-  # Runs in parallel with `monitor` (no `needs:`). Has NO downstream
-  # `needs:` consumers — findings are advisory, not deploy-gating. See the
-  # top-of-file header doc for the full rationale.
+  # Stage 0 — Consolidated security scan (opt-in, gating by default).
+  # Runs in parallel with `monitor` so the wall-clock impact on the
+  # deploy pipeline is bounded by the longer of the two. The `release`
+  # and `cloudflare-pages` jobs `needs:` this job, so the deploy stages
+  # WAIT for scan to finish AND skip themselves when the scan fails —
+  # unless the caller explicitly opts out via
+  # `security_scan_blocks_release: false` (the pre-Nov 2026 advisory
+  # behaviour). See the top-of-file `security_scan_*` input docs for
+  # the full knob matrix.
   #
   # Caller MUST grant `security-events: write` + `actions: read` at workflow
   # level so the permission cascade reaches both sub-jobs inside
@@ -1075,8 +1103,8 @@ jobs:
   # ---------------------------------------------------------------------------
   release:
     name: Release v${{ needs.monitor.outputs.upstream_version }}
-    needs: monitor
-    # Four gates, all must hold:
+    needs: [monitor, security_scan]
+    # Five gates, all must hold:
     #   1. The run is NOT cancelled. `always()` alone would happily start
     #      the release job after a web-UI "Cancel workflow" click, which
     #      defeats the whole point of the cancel button (see GitHub docs:
@@ -1089,12 +1117,25 @@ jobs:
     #   3. Either the upstream version changed or the operator forced a re-run.
     #   4. At least one of the release stages is enabled (skip the whole job
     #      when the caller only wants the Cloudflare Pages stage).
+    #   5. Security scan is not blocking the release. This holds when ANY
+    #      of: (a) the caller disabled gating via
+    #      `security_scan_blocks_release: false`; (b) scan succeeded; (c)
+    #      scan was skipped (caller passed `enable_security_scan: false`,
+    #      which leaves `needs.security_scan.result == 'skipped'`). A
+    #      `failure` or `cancelled` result on the scan correctly skips
+    #      this job rather than letting the deploy proceed against
+    #      unaddressed error-level findings.
     if: >-
       always()
       && !cancelled()
       && needs.monitor.result == 'success'
       && (needs.monitor.outputs.changed == 'true' || inputs.force_run)
       && (inputs.docker || inputs.companion_docker || inputs.balena || inputs.github_release)
+      && (
+        !inputs.security_scan_blocks_release
+        || needs.security_scan.result == 'success'
+        || needs.security_scan.result == 'skipped'
+      )
     permissions:
       contents:        write   # balena sync_balena_yml + GitHub Release publish
       pull-requests:   write   # nested docker-build-push declares this for Docker
@@ -1188,7 +1229,22 @@ jobs:
   # ---------------------------------------------------------------------------
   cloudflare-pages:
     name: Cloudflare Pages deploy
-    if: ${{ inputs.cloudflare_pages }}
+    needs: [security_scan]
+    # `!cancelled()` lets this job evaluate even when `security_scan`
+    # was skipped (caller passed `enable_security_scan: false`), which
+    # would otherwise propagate as a default skip. Combined with the
+    # explicit `result` checks below this preserves the original
+    # "fires whenever `cloudflare_pages: true`" semantic when scan is
+    # disabled or gating is off.
+    if: >-
+      always()
+      && !cancelled()
+      && inputs.cloudflare_pages
+      && (
+        !inputs.security_scan_blocks_release
+        || needs.security_scan.result == 'success'
+        || needs.security_scan.result == 'skipped'
+      )
     permissions:
       contents: read
     uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
