@@ -117,9 +117,6 @@ jobs:
       actions:         write   # nested monitor (`gh workflow run`)
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
-      models:          read    # cascades to hub `release.yml` -> `github-release.yml`
-                               # `publish` job for the AI changelog step (validated
-                               # at workflow-load time regardless of caller settings).
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # ----- Monitor stage -----

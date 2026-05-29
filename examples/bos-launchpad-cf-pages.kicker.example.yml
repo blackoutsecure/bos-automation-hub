@@ -102,9 +102,6 @@ jobs:
       actions:         write
       pull-requests:   write
       security-events: write
-      models:          read    # cascades to hub `release.yml` -> `github-release.yml`
-                               # `publish` job for the AI changelog step (validated
-                               # at workflow-load time regardless of caller settings).
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # ----- Cloudflare Pages stage -----
