@@ -262,17 +262,21 @@ name: Blackout Secure Launchpad — OpenWrt (reusable)
         default: ''
       timeout_minutes:
         description: >-
-          Job timeout in minutes. Cold runs (no `sdk/staging_dir`
-          cache hit) take ~60 min when the spec packages pull in deep
-          dep chains (gmp -> nettle -> gnutls, nghttp2 -> libcurl,
-          etc.) that the upstream SDK tarball does NOT pre-build.
-          Warm runs (staging_dir cache hit + no spec changes) finish
-          in ~10-15 min. Default 90 leaves headroom for the cold
-          case; the workflow-level `concurrency:` group prevents
+          Job timeout in minutes. The worst case is a cold
+          `sdk/staging_dir` cache combined with multiple spec
+          packages needing rebuild — the resulting dep tree pulls
+          in `gmp -> nettle`, `nghttp2 -> libcurl`, `coreutils`
+          (which fans out into 100+ sub-utility ipks), `bash`,
+          `jq`, `mbedtls`, etc., none of which the upstream SDK
+          tarball pre-builds. Empirically that case exceeds 90
+          min on a self-hosted 4 vCPU runner. Warm runs (cache
+          hit + no spec changes) finish in ~10-15 min. Default
+          180 leaves headroom for the cold case; the
+          workflow-level `concurrency:` group prevents
           overlapping runs so a long single run won't pile up.
         required: false
         type: number
-        default: 90
+        default: 180
       hub_ref:
         description: >-
           Git ref (branch / tag / SHA) in `blackoutsecure/bos-automation-hub`
@@ -470,14 +474,23 @@ jobs:
       # automatically. BUILT_ARCH guards against accidental reuse
       # across different target arches.
       #
-      # Save semantics: actions/cache only saves on JOB SUCCESS, so a
-      # timeout-killed run mid-`make` won't persist a corrupt
-      # staging_dir. This preserves the safety property the
-      # workflow's `concurrency: cancel-in-progress: false` was
-      # added to enforce.
-      - name: Cache SDK build state (staging_dir / build_dir / dl / ccache)
+      # Save semantics: the cache is split into a restore step
+      # (here) and an explicit save step that runs `if: always()`
+      # after `Build packages`. This is the
+      # actions/cache-team-recommended replacement for the
+      # deprecated `save-always: true`. Why save-on-cancellation is
+      # safe here: OpenWrt's `make` is reentrant — a SIGTERM
+      # mid-compile just leaves the in-progress package's build_dir
+      # half-populated, and the next run will detect that and
+      # rebuild only that one package. Everything that finished
+      # installing into `staging_dir` is already at a clean
+      # boundary (atomic per-package install). Without
+      # save-on-cancellation we hit a chicken-and-egg:
+      # cold runs time out, no save happens, the next run is also
+      # cold, repeat forever.
+      - name: Restore SDK build state (staging_dir / build_dir / dl / ccache)
         id: sdk-state-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             sdk/staging_dir
@@ -504,6 +517,23 @@ jobs:
       - name: Build packages
         working-directory: sdk
         run: $GITHUB_WORKSPACE/.bos-hub/.github/scripts/openwrt/build-packages.sh
+
+      # Save the SDK build state even if `Build packages` was killed
+      # by the job timeout or otherwise failed. See the restore step
+      # above for why save-on-cancellation is safe with OpenWrt's
+      # reentrant make. Gated on a non-empty primary key so the step
+      # is a no-op if the restore step never ran (e.g. earlier setup
+      # step failed).
+      - name: Save SDK build state cache
+        if: always() && steps.sdk-state-cache.outputs.cache-primary-key != ''
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            sdk/staging_dir
+            sdk/build_dir
+            sdk/dl
+            ~/.ccache
+          key: ${{ steps.sdk-state-cache.outputs.cache-primary-key }}
 
       - name: Materialize feeds for each PUBLISH_ARCH
         id: materialize
