@@ -254,10 +254,10 @@ jobs:
   #   * JSON array string  — echoed back unchanged (caller-supplied
   #                          deterministic list).
   #   * empty string       — job is skipped entirely (the `if:` gate);
-  #                          downstream `codeql` job sees
-  #                          `needs.resolve-codeql-languages.result == 'skipped'`
-  #                          and skips itself via the `!cancelled()`
-  #                          + `result == 'success'` guard.
+  #                          downstream `codeql` job allows `skipped`
+  #                          via its `!cancelled()` guard and then
+  #                          drops itself entirely via the matrix
+  #                          `|| '[]'` fallback (no Checks UI row).
   #
   # Always runs on hosted `ubuntu-latest` — the work is a single API call
   # plus a sparse-checkout filename scan, no compute weight. Stays off
@@ -473,19 +473,33 @@ jobs:
   codeql:
     name: Analyze (${{ matrix.language }})
     needs: [preflight-runner-config, resolve-codeql-languages]
-    # `!cancelled()` lets this job evaluate even when
-    # `resolve-codeql-languages` was skipped (which happens when
-    # `codeql_languages == ''`). The follow-up `result == 'success'`
-    # check then causes a clean skip in that case — the `if` evaluates
-    # to false because `result == 'skipped'`, not `'success'`. When
-    # autodetect returns an empty set the resolver outputs `[]` and we
-    # skip via the final `languages != '[]'` guard. All three skip
-    # paths surface as a green "skipped" badge rather than a failure.
+    # IMPORTANT — this `if:` MUST evaluate to true in the no-work
+    # case, not short-circuit to false. The job's `name:` template
+    # references `matrix.language`; if the job-level `if:` is false
+    # the matrix never expands and the Checks UI shows the literal
+    # placeholder string `Analyze (${{ matrix.language }})` as a
+    # skipped row (ugly + confuses required-check rules).
+    #
+    # To OMIT the job entirely (no skipped row at all) the `if:` has
+    # to pass AND the matrix has to evaluate to `[]` — only then does
+    # GitHub Actions drop the job from the run completely.
+    #
+    # So this guard intentionally allows `resolve-codeql-languages`
+    # to be EITHER `success` OR `skipped`:
+    #   * `success` + non-empty array  → matrix expands → jobs spawn.
+    #   * `success` + `'[]'` (autodetect found nothing)
+    #                                  → matrix `|| '[]'` → `[]` → omitted.
+    #   * `skipped` (caller passed `codeql_languages: ''`)
+    #                                  → outputs is `''` → matrix
+    #                                    `|| '[]'` → `[]` → omitted.
+    # Only `failure` / `cancelled` upstream actually skips this job
+    # (and produces the placeholder row), which is the correct
+    # behaviour for a real upstream failure — operator needs to see it.
     if: >-
       !cancelled()
-      && needs.resolve-codeql-languages.result == 'success'
-      && needs.resolve-codeql-languages.outputs.languages != ''
-      && needs.resolve-codeql-languages.outputs.languages != '[]'
+      && needs.preflight-runner-config.result == 'success'
+      && (needs.resolve-codeql-languages.result == 'success'
+          || needs.resolve-codeql-languages.result == 'skipped')
     # CodeQL has TWO independent reasons not to share `runs_on` /
     # `vars.DEFAULT_RUNNER` with the `scan` job:
     #   (a) CodeQL CLI has no `linux/arm64` build — see
@@ -537,19 +551,20 @@ jobs:
         # back unchanged, so behaviour is identical to the pre-autodetect
         # version.
         #
-        # The `|| '[]'` fallback is critical for the `inputs.codeql_languages
-        # == ''` case (caller opting out of advanced CodeQL — typically
-        # because they're using GitHub's first-party Default Setup). In
-        # that case `resolve-codeql-languages` is skipped, and a skipped
-        # job's outputs are the empty string — `fromJSON('')` is invalid
-        # JSON. Without the fallback, GitHub Actions doesn't drop the
-        # job; it falls back to instantiating a single placeholder
-        # matrix entry with no expanded values and surfaces the literal
-        # job-name template (`Analyze (${{ matrix.language }})`) in the
-        # Checks UI. With `|| '[]'` the matrix legitimately resolves to
-        # zero entries and the job is omitted entirely. The job-level
-        # `if:` above is the deterministic skip guard; this fallback
-        # exists purely to make the empty-matrix UX clean.
+        # The `|| '[]'` fallback is THE skip mechanism for the no-work
+        # cases (caller passed `codeql_languages: ''` so resolver was
+        # skipped → outputs is `''`; or autodetect found no supported
+        # languages → outputs is `'[]'`). The job-level `if:` above
+        # intentionally lets both flow through to here; this matrix
+        # then evaluates to `[]` and GitHub Actions DROPS THE JOB
+        # ENTIRELY from the run (no skipped row in the Checks UI).
+        #
+        # The empty-string handling is critical because skipped jobs
+        # propagate `''` for their outputs and `fromJSON('')` is
+        # invalid JSON. Without `|| '[]'` GitHub falls back to
+        # instantiating a single placeholder matrix entry with no
+        # expanded values and surfaces the literal job-name template
+        # (`Analyze (${{ matrix.language }})`) as a skipped row.
         language: ${{ fromJSON(needs.resolve-codeql-languages.outputs.languages || '[]') }}
     steps:
       - name: Checkout
