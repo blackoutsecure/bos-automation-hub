@@ -241,13 +241,33 @@ runs:
         # mid-run, so reference the explicit dir as a fallback.
         BALENA_BIN: ${{ steps.install.outputs.balena_bin }}
       run: |
+        # NB: no `set -x`. The `--token "$BALENA_TOKEN"` invocation
+        # below would leak the secret into the job log otherwise.
         set -euo pipefail
         export PATH="${BALENA_BIN}:${PATH}"
-        # `balena login --token` reads from a file or stdin; piping
-        # avoids leaking the token via argv/ps. `whoami` verifies the
-        # session in one round-trip so an invalid token fails here
-        # rather than mid-push.
-        printf '%s' "${BALENA_TOKEN}" | balena login --token
+
+        # `balena login` declares `--token` as a *boolean flag* AND a
+        # separate hidden *positional argument* (see
+        # https://github.com/balena-io/balena-cli/blob/v25.1.7/src/commands/login/index.ts
+        # — `Args.string({hidden:true})` + `Flags.boolean({char:'t'})`).
+        # The token VALUE must be passed as the positional, not piped
+        # on stdin: piping causes the CLI to fall through to
+        # `getCliForm().ask({type:'input'})` (inquirer), which then
+        # blows up with `ERR_USE_AFTER_CLOSE` the moment stdin hits
+        # EOF — so the token never reaches the SDK and the next
+        # command sees "Login required".
+        #
+        # argv leak via `/proc/$pid/cmdline` is not a meaningful
+        # concern here: GHA actions runners are single-tenant per job
+        # and the same uid already has `BALENA_TOKEN` visible via
+        # `/proc/$pid/environ`. The upstream `deploy-to-balena-action`
+        # Dockerfile does the same `balena login --token "$TOKEN"`.
+        # GitHub Actions' secret-masking still redacts the token from
+        # the job log regardless of how it's passed.
+        balena login --token "${BALENA_TOKEN}" >/dev/null
+
+        # whoami fails fast if the token didn't take, instead of
+        # letting the failure surface mid-push.
         balena whoami >/dev/null
         echo "Logged in to ${BALENARC_BALENA_URL}."
 
