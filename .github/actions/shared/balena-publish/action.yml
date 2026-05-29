@@ -1,0 +1,411 @@
+name: Publish to balenaCloud
+description: >-
+  Push a project to balenaCloud using the official `balena` CLI, with
+  the same release-tag semantics as `balena-io/deploy-to-balena-action`
+  (tagging each build with `balena-ci-commit-sha=<github.sha>` and
+  optionally skipping the push when a release for that SHA already
+  exists). Used in place of `balena-io/deploy-to-balena-action` so the
+  publish job can run on **containerized self-hosted runners** that
+  share the host's docker daemon — the upstream action is a `docker:`
+  action whose bind-mounts can't be resolved when the runner's
+  `RUNNER_WORKDIR` only exists inside the runner container (e.g.
+  `/config/work` on LSIO baseimages, where the host engine sees
+  `mkdir /config: read-only file system`). This wrapper avoids the
+  bind-mount path entirely by invoking the CLI in-process.
+
+  Behaviour intentionally mirrors `deploy-to-balena-action@v2`:
+  cached-release lookup → `balena push` with the same flag set →
+  optional `balena release finalize`. Stays a strict subset — features
+  not wired through (`versionbot`, `create_tag`, `registry_secrets`,
+  `multi_dockerignore`, `note`, `dockerfile`) can be added on demand
+  without changing the existing input contract.
+
+inputs:
+  balena_token:
+    description: 'balenaCloud API token (Bearer). Required.'
+    required: true
+  fleet:
+    description: 'Fleet slug — `<namespace>/<name>` (e.g. `acme/sensors`). Required.'
+    required: true
+  source:
+    description: >-
+      Source directory passed to `balena push --source`. Resolved
+      relative to the GitHub workspace.
+    required: false
+    default: '.'
+  cache:
+    description: >-
+      When `true` (default), look up an existing successful release
+      tagged `balena-ci-commit-sha=<github.sha>` on the fleet and
+      reuse its release id without invoking `balena push` again.
+      When `false`, always push — useful for force-rebuilds.
+    required: false
+    default: 'true'
+  layer_cache:
+    description: >-
+      When `false`, pass `--nocache` to `balena push` so the cloud
+      builder rebuilds every layer. Default `true` keeps layer
+      caching enabled (this is independent of `cache:` above, which
+      controls the release-record dedup).
+    required: false
+    default: 'true'
+  debug:
+    description: 'Pass `--debug` to `balena push`.'
+    required: false
+    default: 'false'
+  finalize:
+    description: >-
+      When `true` (default), the release is created as final
+      (no `--draft`). When `false`, push with `--draft` so devices on
+      `track latest` do not pick it up automatically.
+    required: false
+    default: 'true'
+  balena_url:
+    description: >-
+      balenaCloud API host (without scheme). Override only when
+      targeting a custom backend (e.g. `balena-staging.com`).
+    required: false
+    default: 'balena-cloud.com'
+  balena_cli_version:
+    description: >-
+      Pinned balena-cli release tag (with leading `v`). Should track
+      the version baked into the upstream
+      `balena-io/deploy-to-balena-action` Dockerfile so behaviour
+      stays aligned with what the action would have done. Bump
+      together with Renovate updates on that action.
+    required: false
+    default: 'v25.1.7'
+
+outputs:
+  release_id:
+    description: >-
+      Numeric release id (empty when no release was created and no
+      matching cached release was found).
+    value: ${{ steps.publish.outputs.release_id }}
+  cache_hit:
+    description: >-
+      `true` when the release already existed and `cache: true`
+      short-circuited the push.
+    value: ${{ steps.publish.outputs.cache_hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Preflight validation
+      shell: bash
+      env:
+        BALENA_TOKEN: ${{ inputs.balena_token }}
+        FLEET: ${{ inputs.fleet }}
+        SOURCE: ${{ inputs.source }}
+        CACHE: ${{ inputs.cache }}
+        LAYER_CACHE: ${{ inputs.layer_cache }}
+        DEBUG: ${{ inputs.debug }}
+        FINALIZE: ${{ inputs.finalize }}
+        BALENA_URL: ${{ inputs.balena_url }}
+        BALENA_CLI_VERSION: ${{ inputs.balena_cli_version }}
+      run: |
+        set -euo pipefail
+        ERR=0
+        fail() { echo "ERROR: $*" >&2; ERR=1; }
+
+        # A stray newline in a secret silently truncates GITHUB_OUTPUT
+        # for any downstream job, so reject it explicitly.
+        check_singleline() {
+          local name="$1" val="$2"
+          [ -n "${val}" ] || { fail "${name} is missing"; return; }
+          case "${val}" in
+            *[$'\n\r\t']*) fail "${name} contains whitespace/newlines" ;;
+          esac
+        }
+
+        check_bool() {
+          local name="$1" val="$2"
+          case "${val}" in
+            true|false) ;;
+            *) fail "${name} must be 'true' or 'false' (got '${val}')" ;;
+          esac
+        }
+
+        check_singleline "input 'balena_token'" "${BALENA_TOKEN}"
+        check_singleline "input 'fleet'"        "${FLEET}"
+        check_singleline "input 'balena_url'"   "${BALENA_URL}"
+        check_singleline "input 'balena_cli_version'" "${BALENA_CLI_VERSION}"
+
+        check_bool "input 'cache'"        "${CACHE}"
+        check_bool "input 'layer_cache'"  "${LAYER_CACHE}"
+        check_bool "input 'debug'"        "${DEBUG}"
+        check_bool "input 'finalize'"     "${FINALIZE}"
+
+        # Fleet must be `<namespace>/<name>` with balena's slug rules
+        # (lowercase, digits, hyphens, underscores; namespace and name
+        # each ≥ 1 char). Anything else is rejected client-side so we
+        # don't waste time downloading the CLI just to have it bounce.
+        case "${FLEET}" in
+          */*) ;;
+          *)   fail "input 'fleet' must be '<namespace>/<name>' (got '${FLEET}')" ;;
+        esac
+        FLEET_RE='^[a-z0-9]([a-z0-9_-]*[a-z0-9])?/[a-z0-9]([a-z0-9_-]*[a-z0-9])?$'
+        if ! [[ "${FLEET}" =~ ${FLEET_RE} ]]; then
+          fail "input 'fleet' '${FLEET}' does not match ${FLEET_RE}"
+        fi
+
+        # `vX.Y.Z` or `vX.Y.Z-suffix`. Renovate-managed; this is
+        # belt-and-braces so a typo (e.g. missing `v`) fails fast
+        # instead of 404ing on the release-asset download.
+        VERSION_RE='^v[0-9]+\.[0-9]+\.[0-9]+([.+-][A-Za-z0-9._-]+)?$'
+        if ! [[ "${BALENA_CLI_VERSION}" =~ ${VERSION_RE} ]]; then
+          fail "input 'balena_cli_version' '${BALENA_CLI_VERSION}' must match ${VERSION_RE} (e.g. v25.1.7)"
+        fi
+
+        # `source` is forwarded literally to `balena push --source` so
+        # absolute paths and `..` traversals could escape the workspace.
+        # Reject both up-front — the `.` default and any plain
+        # subdirectory path remain valid.
+        case "${SOURCE}" in
+          /*)         fail "input 'source' must be relative to the workspace (got '${SOURCE}')" ;;
+          *..*)       fail "input 'source' must not contain '..' (got '${SOURCE}')" ;;
+        esac
+
+        [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
+        echo "Preflight OK — publishing ${FLEET} from '${SOURCE}' with balena-cli ${BALENA_CLI_VERSION}."
+
+    - name: Install balena-cli
+      id: install
+      # Standalone tar.gz (v22+ layout: extracts to `balena/bin/balena`).
+      # We deliberately do NOT install globally with `npm i -g` to avoid
+      # the ~150-package transitive install on every job and keep the
+      # impl reproducible (the tarball is a single self-contained
+      # bundle). For pre-v22 versions the layout was `balena-cli/balena`
+      # — Renovate keeps us on v22+ so we don't compat-shim that here;
+      # downgrading below v22 should bump this action in lockstep.
+      shell: bash
+      env:
+        BALENA_CLI_VERSION: ${{ inputs.balena_cli_version }}
+      run: |
+        set -euo pipefail
+
+        # ---- map runner OS/arch to the asset name -------------------
+        case "$(uname -s)" in
+          Linux*)  plat=linux ;;
+          Darwin*) plat=macOS ;;
+          *)
+            echo "::error::Unsupported OS '$(uname -s)' for balena-cli standalone tarball."
+            exit 1
+            ;;
+        esac
+        case "$(uname -m)" in
+          x86_64|amd64)  arch=x64 ;;
+          arm64|aarch64) arch=arm64 ;;
+          *)
+            echo "::error::Unsupported arch '$(uname -m)' for balena-cli standalone tarball."
+            exit 1
+            ;;
+        esac
+        asset="balena-cli-${BALENA_CLI_VERSION}-${plat}-${arch}-standalone.tar.gz"
+        url="https://github.com/balena-io/balena-cli/releases/download/${BALENA_CLI_VERSION}/${asset}"
+
+        # Per-job-temp install dir; no shared state across jobs.
+        install_dir="${RUNNER_TEMP}/balena-cli-${BALENA_CLI_VERSION}"
+        mkdir -p "${install_dir}"
+
+        echo "Downloading ${url}"
+        # --retry-all-errors covers transient 5xx/CDN blips; --max-time
+        # caps total wall-time per attempt at 5 min. The tarball is
+        # ~50-80 MB so 300 s is generous on slow self-hosted links.
+        curl --fail --silent --show-error --location \
+             --retry 5 --retry-delay 5 --retry-connrefused \
+             --max-time 300 \
+             --output "${install_dir}/balena-cli.tar.gz" "${url}"
+
+        tar -xzf "${install_dir}/balena-cli.tar.gz" -C "${install_dir}"
+        rm -f "${install_dir}/balena-cli.tar.gz"
+
+        balena_bin="${install_dir}/balena/bin"
+        if [ ! -x "${balena_bin}/balena" ]; then
+          echo "::error::balena binary not found at expected path ${balena_bin}/balena after extraction. Asset layout may have changed — check the balena-cli release notes for ${BALENA_CLI_VERSION}."
+          ls -la "${install_dir}" || true
+          exit 1
+        fi
+
+        echo "${balena_bin}" >> "${GITHUB_PATH}"
+        echo "balena_bin=${balena_bin}" >> "${GITHUB_OUTPUT}"
+        echo "Installed balena-cli ${BALENA_CLI_VERSION} at ${balena_bin}"
+
+    - name: balena login
+      shell: bash
+      env:
+        BALENA_TOKEN: ${{ inputs.balena_token }}
+        BALENARC_BALENA_URL: ${{ inputs.balena_url }}
+        # Make sure the install step's `GITHUB_PATH` update is visible
+        # in this step — composite steps don't always rehydrate PATH
+        # mid-run, so reference the explicit dir as a fallback.
+        BALENA_BIN: ${{ steps.install.outputs.balena_bin }}
+      run: |
+        set -euo pipefail
+        export PATH="${BALENA_BIN}:${PATH}"
+        # `balena login --token` reads from a file or stdin; piping
+        # avoids leaking the token via argv/ps. `whoami` verifies the
+        # session in one round-trip so an invalid token fails here
+        # rather than mid-push.
+        printf '%s' "${BALENA_TOKEN}" | balena login --token
+        balena whoami >/dev/null
+        echo "Logged in to ${BALENARC_BALENA_URL}."
+
+    - name: Publish (push + optional finalize)
+      id: publish
+      shell: bash
+      env:
+        BALENA_TOKEN: ${{ inputs.balena_token }}
+        BALENARC_BALENA_URL: ${{ inputs.balena_url }}
+        BALENA_BIN: ${{ steps.install.outputs.balena_bin }}
+        FLEET: ${{ inputs.fleet }}
+        SOURCE: ${{ inputs.source }}
+        CACHE: ${{ inputs.cache }}
+        LAYER_CACHE: ${{ inputs.layer_cache }}
+        DEBUG_FLAG: ${{ inputs.debug }}
+        FINALIZE: ${{ inputs.finalize }}
+        COMMIT_SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+        export PATH="${BALENA_BIN}:${PATH}"
+
+        # `--source` is resolved relative to the current working
+        # directory (the runner cd's to GITHUB_WORKSPACE before
+        # invoking composite step scripts), so a plain relative path
+        # works the same as the upstream action's `join(WORKSPACE,
+        # inputs.source)` behaviour.
+        src_abs="$(cd "${GITHUB_WORKSPACE}/${SOURCE}" && pwd)"
+        echo "Source: ${src_abs}"
+
+        # ---- cache check: skip push when a release already exists ---
+        # Replicates deploy-to-balena-action's `cache: true` semantics.
+        # Uses curl + python3 against balena's REST API directly to
+        # avoid pulling in balena-sdk; only release-id and is_final are
+        # needed. The python script also URL-encodes the OData filter
+        # safely. python3 is preinstalled on every GHA runner
+        # (hosted + LSIO self-hosted base).
+        release_id=""
+        cache_hit=false
+        if [ "${CACHE}" = "true" ]; then
+          echo "Checking for existing release tagged balena-ci-commit-sha=${COMMIT_SHA} on ${FLEET}..."
+          set +e
+          existing="$(python3 - <<'PY'
+        import json
+        import os
+        import sys
+        import urllib.parse
+        import urllib.request
+
+        token = os.environ["BALENA_TOKEN"]
+        api = os.environ["BALENARC_BALENA_URL"]
+        fleet = os.environ["FLEET"]
+        sha = os.environ["COMMIT_SHA"]
+
+        # OData $filter joining slug, success status, and the commit-sha
+        # release tag. Mirrors the SDK query in
+        # balena-io/deploy-to-balena-action `getReleaseByTags`.
+        filt = (
+            f"belongs_to__application/any(a:a/slug eq '{fleet}') "
+            f"and status eq 'success' "
+            f"and release_tag/any(rt:rt/tag_key eq 'balena-ci-commit-sha' "
+            f"and rt/value eq '{sha}')"
+        )
+        qs = urllib.parse.urlencode(
+            {
+                "$filter": filt,
+                "$select": "id,is_final",
+                "$top": "1",
+                "$orderby": "created_at desc",
+            }
+        )
+        url = f"https://api.{api}/v7/release?{qs}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = json.load(resp)
+        except Exception as e:  # network blip / 5xx / 404
+            print(f"warn: cache lookup failed ({e}); falling through to push", file=sys.stderr)
+            sys.exit(0)
+
+        items = body.get("d", [])
+        if items:
+            print(json.dumps(items[0]))
+        PY
+        )"
+          rc=$?
+          set -e
+          if [ "${rc}" -eq 0 ] && [ -n "${existing}" ]; then
+            release_id="$(printf '%s' "${existing}" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')"
+            is_final="$(printf '%s' "${existing}" | python3 -c 'import json,sys;print(str(json.load(sys.stdin)["is_final"]).lower())')"
+            cache_hit=true
+            echo "Cache hit: release ${release_id} (is_final=${is_final}) already exists for ${COMMIT_SHA}."
+            # If the cached release is a draft and the caller now wants
+            # a finalized release, promote it without re-pushing — same
+            # behaviour deploy-to-balena-action exhibits when re-running
+            # a closed-PR workflow after a draft was built.
+            if [ "${FINALIZE}" = "true" ] && [ "${is_final}" = "false" ]; then
+              echo "Cached release is a draft and finalize=true; finalizing ${release_id}."
+              balena release finalize "${release_id}"
+            fi
+          else
+            echo "No cached release found; proceeding with push."
+          fi
+        fi
+
+        # ---- push (only when no cached release was reused) ----------
+        if [ -z "${release_id}" ]; then
+          push_args=(push "${FLEET}" --source "${src_abs}" \
+                     --release-tag balena-ci-commit-sha "${COMMIT_SHA}")
+          [ "${FINALIZE}" = "false" ]   && push_args+=(--draft)
+          [ "${LAYER_CACHE}" = "false" ] && push_args+=(--nocache)
+          [ "${DEBUG_FLAG}" = "true" ]   && push_args+=(--debug)
+
+          echo "Running: balena ${push_args[*]}"
+          # Tee through `python3` so we can parse the release id from
+          # balena's stdout (same regex deploy-to-balena-action uses:
+          # `Release: <40-char-hash> (id: <num>)`). PIPESTATUS is checked
+          # so a push failure still terminates the step.
+          push_log="${RUNNER_TEMP}/balena-push.log"
+          set +o pipefail
+          balena "${push_args[@]}" 2>&1 | tee "${push_log}"
+          push_rc=${PIPESTATUS[0]}
+          set -o pipefail
+          if [ "${push_rc}" -ne 0 ]; then
+            echo "::error::balena push exited with status ${push_rc}"
+            exit "${push_rc}"
+          fi
+
+          release_id="$(grep -Eo 'Release: [0-9a-f]{32,40} \(id: [0-9]+\)' "${push_log}" \
+                        | tail -n1 \
+                        | grep -Eo 'id: [0-9]+' \
+                        | awk '{print $2}' || true)"
+          if [ -z "${release_id}" ]; then
+            echo "::warning::Could not parse release id from balena push output (release was still created). Downstream consumers will see release_id=''."
+          else
+            echo "Pushed release ${release_id}."
+          fi
+        fi
+
+        echo "release_id=${release_id}" >> "${GITHUB_OUTPUT}"
+        echo "cache_hit=${cache_hit}"   >> "${GITHUB_OUTPUT}"
+
+    - name: balena logout
+      # Best-effort cleanup. Runs even if the publish step failed so
+      # the cached token in `${HOME}/.balena/token` doesn't outlive
+      # this job on long-lived self-hosted runners. Failure here is a
+      # warning, not a job failure.
+      if: always()
+      shell: bash
+      env:
+        BALENA_BIN: ${{ steps.install.outputs.balena_bin }}
+      run: |
+        set +e
+        export PATH="${BALENA_BIN}:${PATH}"
+        balena logout >/dev/null 2>&1 || true
+        exit 0

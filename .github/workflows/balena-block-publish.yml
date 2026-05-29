@@ -492,11 +492,19 @@ jobs:
 
       - name: Publish to balenaCloud
         id: deploy
-        uses: balena-io/deploy-to-balena-action@a1ad4ddddc982b50533e86d3fdc4731c5184f497 # v2.2.3
+        # Wraps balena-cli directly instead of `balena-io/deploy-to-
+        # balena-action` (which is a container action and breaks on
+        # containerized self-hosted runners that share the host docker
+        # socket — the action's `/github/workspace` bind-mount points
+        # at a path that only exists inside the runner container, not
+        # on the host's read-only rootfs). See
+        # `.github/actions/shared/balena-publish/action.yml` for the
+        # full rationale; input contract is a strict subset.
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/balena-publish@main
         with:
           balena_token: ${{ secrets.BALENA_API_TOKEN }}
-          fleet: ${{ needs.setup.outputs.fleet }}
-          source: ${{ inputs.source }}
+          fleet:        ${{ needs.setup.outputs.fleet }}
+          source:       ${{ inputs.source }}
           # `force: true` overrides `cache: true` so the action
           # always builds a fresh release even when a release already
           # exists for this commit SHA. `layer_cache` is untouched so
@@ -511,10 +519,10 @@ jobs:
           # it returns false; when force is false it returns whatever
           # `inputs.cache` is set to. Both shapes are stringified by GHA
           # to 'true'/'false' before being passed to the action.
-          cache: ${{ !inputs.force && inputs.cache }}
-          layer_cache: ${{ inputs.layer_cache }}
-          debug: ${{ inputs.debug }}
-          finalize: ${{ inputs.draft && 'false' || 'true' }}
+          cache:        ${{ !inputs.force && inputs.cache }}
+          layer_cache:  ${{ inputs.layer_cache }}
+          debug:        ${{ inputs.debug }}
+          finalize:     ${{ inputs.draft && 'false' || 'true' }}
 
       - name: Job summary
         if: always()
