@@ -88,11 +88,21 @@ name: Blackout Secure Marketplace Launchpad
 # and GitHub validates the cascade statically at workflow-load time
 # BEFORE evaluating any `if:` gate. Omitting them produces a hard
 # load-time error referencing the `security_scan` job.
+#
+# `models: read` is required UNCONDITIONALLY for the same reason: the
+# hub's `release` job -> `release-promote.yml` -> `github-release.yml`
+# publish job statically requests `models: read` so the AI changelog
+# renderer can call the GitHub Models inference API. The cascade is
+# validated at workflow-load time regardless of `release_ai_changelog`
+# — omitting the grant fails the load with:
+#   The nested job 'release' is requesting 'models: read', but is
+#   only allowed 'models: none'.
 permissions:
   contents: write       # required by the release stage (promote + tag + GH Release)
   pull-requests: read   # required by the guard stage (PR diff inspection)
   security-events: write  # statically required by the `security_scan` nested job (see note above)
   actions: read           # statically required by the `security_scan` nested job (see note above)
+  models: read            # statically required by the `release` job's AI changelog cascade (see note above)
 
 # Per-event concurrency: PRs cancel themselves on new pushes; releases
 # never cancel each other (so a manual re-run of a release waits in
@@ -115,6 +125,7 @@ jobs:
       pull-requests: read
       security-events: write  # statically required by the `security_scan` nested job; see workflow-level note
       actions: read           # statically required by the `security_scan` nested job; see workflow-level note
+      models: read            # statically required by the `release` AI changelog cascade; see workflow-level note
     with:
       # ----- Event-routing context (forwarded from the caller event) -----
       event_name:      ${{ github.event_name }}
