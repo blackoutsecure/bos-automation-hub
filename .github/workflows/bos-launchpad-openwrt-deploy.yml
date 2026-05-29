@@ -306,9 +306,18 @@ name: Blackout Secure Launchpad — OpenWrt (reusable)
         required: true
       CLOUDFLARE_ACCOUNT_ID:
         description: >-
-          Cloudflare account ID. Required (no auto-resolve in this
-          workflow — wrangler needs it explicitly for `pages deploy`).
-        required: true
+          **Back-compat input. Prefer `vars.CLOUDFLARE_ACCOUNT_ID`** —
+          account IDs are public Cloudflare identifiers, not secrets,
+          and storing them as secrets makes the runner mask the value.
+          When neither this secret nor `vars.CLOUDFLARE_ACCOUNT_ID` is
+          set, the workflow auto-resolves the account via
+          `GET /accounts` against `CLOUDFLARE_API_TOKEN`. An
+          account-scoped Pages:Edit token returns exactly one account,
+          so the lookup is unambiguous. Provide it explicitly only
+          when the token can access multiple accounts, or to skip the
+          lookup round trip on every run. Matches the resolution
+          pattern in `deploy-cloudflare-pages.yml`.
+        required: false
 
 permissions:
   contents: read
@@ -378,7 +387,13 @@ jobs:
       PACKAGES_SPEC_FALLBACK:  ${{ inputs.packages_spec }}
       USIGN_SECRET_KEY:        ${{ secrets.OPENWRT_USIGN_SECRET_KEY }}
       CLOUDFLARE_API_TOKEN:    ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID:   ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Cloudflare account ID: prefer `vars.*` (public identifier,
+      # not masked by the runner); fall back to `secrets.*` for
+      # back-compat. When both are empty, the `Auto-resolve Cloudflare
+      # account ID` step below derives it from the API token via
+      # `GET /accounts`. Matches the resolution pattern in
+      # `deploy-cloudflare-pages.yml`.
+      CLOUDFLARE_ACCOUNT_ID:   ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       # Third-party actions are SHA-pinned with a trailing version
       # comment, matching the rest of the hub's launchpad chain.
@@ -405,6 +420,7 @@ jobs:
           sparse-checkout: |
             .github/scripts/openwrt
             .github/actions/cf-pages-headers-generate
+            .github/actions/shared/cloudflare-resolve-id
           sparse-checkout-cone-mode: false
 
       - name: Resolve PACKAGES_SPEC
@@ -595,9 +611,77 @@ jobs:
         with:
           node-version: '22'
 
+      # Account ID resolution: prefer the inherited `env.CLOUDFLARE_ACCOUNT_ID`
+      # (set from `vars.*` or back-compat `secrets.*` at the job level).
+      # When neither is set, look the account up via `GET /accounts`.
+      # Mirrors the auto-resolve step in `deploy-cloudflare-pages.yml`.
+      - name: Auto-resolve Cloudflare account ID
+        id: account_autoresolve
+        if: env.CLOUDFLARE_ACCOUNT_ID == ''
+        env:
+          API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, sys, urllib.error, urllib.request
+
+          token = (os.environ.get("API_TOKEN") or "").strip()
+          if not token:
+              sys.exit("ERROR: CLOUDFLARE_API_TOKEN is required for account auto-resolve")
+          if any(c.isspace() for c in token):
+              sys.exit("ERROR: CLOUDFLARE_API_TOKEN contains whitespace/newlines")
+
+          req = urllib.request.Request(
+              "https://api.cloudflare.com/client/v4/accounts",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/json",
+                  "User-Agent": "bos-automation-hub/bos-launchpad-openwrt-deploy",
+              },
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  status, payload = resp.status, json.loads(resp.read() or b"{}")
+          except urllib.error.HTTPError as exc:
+              status = exc.code
+              payload = json.loads(exc.read() or b"{}") if exc.headers.get("Content-Type", "").startswith("application/json") else {"_raw": (exc.read() or b"").decode("utf-8", "replace")}
+
+          if status != 200 or not payload.get("success"):
+              print(f"ERROR: Cloudflare /accounts returned HTTP {status}", file=sys.stderr)
+              print("Hint: token must be valid and have at least one account-scoped permission.", file=sys.stderr)
+              print(json.dumps(payload)[:600], file=sys.stderr)
+              sys.exit(1)
+
+          result = payload.get("result") or []
+          if not result:
+              sys.exit("ERROR: token returned zero accounts (no account-scoped permissions).")
+          if len(result) > 1:
+              names = ", ".join(a.get("name", "?") for a in result)
+              sys.exit(
+                  f"ERROR: token can access {len(result)} accounts; set vars.CLOUDFLARE_ACCOUNT_ID "
+                  f"(or the back-compat secret) explicitly to pick one. Accounts: {names}"
+              )
+
+          acct_id = (result[0].get("id") or "").strip()
+          if not re.match(r"^[0-9a-f]{32}$", acct_id):
+              sys.exit(f"ERROR: parsed account ID is not 32-char hex: {acct_id!r}")
+
+          print(f"Auto-resolved Cloudflare account ID: {acct_id}", file=sys.stderr)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"value={acct_id}\n")
+          PY
+
+      - name: Resolve & validate Cloudflare account ID
+        id: account
+        uses: ./.bos-hub/.github/actions/shared/cloudflare-resolve-id
+        with:
+          value: ${{ env.CLOUDFLARE_ACCOUNT_ID || steps.account_autoresolve.outputs.value }}
+          kind: account
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
+          accountId: ${{ steps.account.outputs.value }}
           command: pages deploy site --project-name=${{ inputs.cloudflare_project_name }} --branch=${{ inputs.cloudflare_deploy_branch }}
