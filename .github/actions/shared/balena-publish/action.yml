@@ -387,10 +387,10 @@ runs:
           [ "${DEBUG_FLAG}" = "true" ]   && push_args+=(--debug)
 
           echo "Running: balena ${push_args[*]}"
-          # Tee through `python3` so we can parse the release id from
-          # balena's stdout (same regex deploy-to-balena-action uses:
-          # `Release: <40-char-hash> (id: <num>)`). PIPESTATUS is checked
-          # so a push failure still terminates the step.
+          # Tee through `tee` so we can parse the release id from
+          # balena's stdout AFTER the push has streamed live to the
+          # job log. PIPESTATUS is checked so a push failure still
+          # terminates the step.
           push_log="${RUNNER_TEMP}/balena-push.log"
           set +o pipefail
           balena "${push_args[@]}" 2>&1 | tee "${push_log}"
@@ -401,12 +401,36 @@ runs:
             exit "${push_rc}"
           fi
 
-          release_id="$(grep -Eo 'Release: [0-9a-f]{32,40} \(id: [0-9]+\)' "${push_log}" \
+          # balena-cli uses chalk for output, and chalk detects
+          # `CI=true` / `GITHUB_ACTIONS=true` and emits ANSI color
+          # escape sequences even when stdout isn't a TTY (which it
+          # isn't here — we're tee'd to a pipe). Those escape codes
+          # break a naive `grep -Eo 'Release: [0-9a-f]{32,40} ...'`
+          # because the commit hash gets bracketed by `\e[1m...\e[0m`.
+          # Strip ANSI first (same approach the upstream
+          # `deploy-to-balena-action` takes — see its `stripAnsi()` in
+          # src/balena-utils.ts), then match against the same regex
+          # shape the upstream uses: `Release: .{32} \(id: (\d+)\)`.
+          # The `.{32}` matches the 32-char short commit; the trailing
+          # `(id: <num>)` is the parenthesized numeric release id.
+          ANSI_RE=$'\x1b\\[[0-9;?]*[A-Za-z]'
+          release_id="$(sed -E "s/${ANSI_RE}//g" "${push_log}" \
+                        | grep -Eo 'Release: .{32} \(id: [0-9]+\)' \
                         | tail -n1 \
                         | grep -Eo 'id: [0-9]+' \
                         | awk '{print $2}' || true)"
           if [ -z "${release_id}" ]; then
-            echo "::warning::Could not parse release id from balena push output (release was still created). Downstream consumers will see release_id=''."
+            # Last-ditch fallback: some output paths print the id on
+            # its own line ("Release ID: <num>") rather than inline
+            # with the commit. Catch that shape too.
+            release_id="$(sed -E "s/${ANSI_RE}//g" "${push_log}" \
+                          | grep -Eo 'Release ID:[[:space:]]*[0-9]+' \
+                          | tail -n1 \
+                          | grep -Eo '[0-9]+' \
+                          | tail -n1 || true)"
+          fi
+          if [ -z "${release_id}" ]; then
+            echo "::warning::Could not parse release id from balena push output (release was still created). Downstream consumers will see release_id=''. Inspect ${push_log} on the runner to update the parser if balena-cli changed its output format."
           else
             echo "Pushed release ${release_id}."
           fi
