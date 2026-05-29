@@ -148,6 +148,36 @@ runs:
         echo "Sniffed platforms from ${IMAGE_REF}: ${PLATFORMS}"
         echo "platforms=${PLATFORMS}" >> "${GITHUB_OUTPUT}"
 
+    - id: ensure-pyyaml
+      shell: bash
+      # `render.py` + the defensive re-parse below `import yaml`. GitHub-
+      # hosted `ubuntu-latest` ships PyYAML in the system Python, but the
+      # `blackoutsecure/docker-github-runner` self-hosted image only bakes
+      # `python3` + `python3-pip` (PyYAML is not in the apt list on older
+      # tags). Install on demand so the action works on both surfaces.
+      # Ubuntu 24.04 noble enforces PEP 668, so fall through to
+      # `--break-system-packages` when plain `--user` is refused.
+      run: |
+        set -euo pipefail
+        if python3 -c 'import yaml' >/dev/null 2>&1; then
+          exit 0
+        fi
+        echo "PyYAML not importable; installing via pip --user"
+        ERR="$(mktemp)"
+        if ! python3 -m pip install --quiet --disable-pip-version-check \
+               --user 'pyyaml>=6.0' 2>"${ERR}"; then
+          if grep -qE 'externally-managed-environment|break-system-packages' "${ERR}"; then
+            python3 -m pip install --quiet --disable-pip-version-check \
+              --user --break-system-packages 'pyyaml>=6.0'
+          else
+            cat "${ERR}" >&2
+            rm -f "${ERR}"
+            exit 1
+          fi
+        fi
+        rm -f "${ERR}"
+        python3 -c 'import yaml; print(f"PyYAML {yaml.__version__} ready")'
+
     - id: render
       shell: bash
       env:
