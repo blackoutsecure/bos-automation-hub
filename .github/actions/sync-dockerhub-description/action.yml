@@ -91,12 +91,147 @@ runs:
         [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
         echo "Preflight OK — syncing description for ${REPOSITORY}"
 
+    # ---------------------------------------------------------------
+    # Render the README to be uploaded to Docker Hub.
+    #
+    # Docker Hub caps the full description at 25,000 bytes; above
+    # that, `peter-evans/dockerhub-description` blindly truncates at
+    # the byte boundary, which can chop mid-paragraph, mid-table, or
+    # mid-code-fence and breaks the rendered Markdown on Hub.
+    #
+    # This step renders to a temp file with two-tier truncation:
+    #
+    #   1. Marker (preferred, maintainer-controlled): if the README
+    #      contains an `<!-- DOCKERHUB_DESCRIPTION_END -->` HTML
+    #      comment on its own line, cut at that line (exclusive) so
+    #      maintainers pick the exact section boundary.
+    #
+    #   2. Section-aware auto (fallback, no maintainer action): find
+    #      the last `## ` heading whose starting byte is at or below
+    #      `(LIMIT - footer)`. Cut BEFORE that heading so every
+    #      published section is whole. If no heading fits, fall back
+    #      to a hard byte cut (matches peter-evans behaviour but
+    #      with our footer appended).
+    #
+    # Either path appends a "Full README on GitHub" footer pointing
+    # at the exact commit SHA so the published Hub copy + the link
+    # target are always coherent (no race where the link points at
+    # a later HEAD that doesn't match the snapshot Hub shows).
+    # Always writes to `${RUNNER_TEMP}` so the original README on
+    # disk is never mutated (avoids polluting subsequent build steps).
+    # ---------------------------------------------------------------
+    - name: Render Docker Hub description (truncate if oversized)
+      id: render
+      shell: bash
+      env:
+        README_FILEPATH: ${{ inputs.readme_filepath }}
+      run: |
+        set -euo pipefail
+
+        # Docker Hub's documented hard cap on the full description body.
+        # `peter-evans/dockerhub-description` emits a `::warning` at this
+        # threshold and silently truncates — we beat it to the punch.
+        LIMIT=25000
+        MARKER='<!-- DOCKERHUB_DESCRIPTION_END -->'
+
+        size="$(wc -c < "${README_FILEPATH}")"
+        # `mktemp -p` honours the runner-managed temp dir; falls back
+        # to the system default if `RUNNER_TEMP` is unset (local dev).
+        trimmed="$(mktemp -p "${RUNNER_TEMP:-/tmp}" dockerhub-readme.XXXXXX.md)"
+
+        has_marker=false
+        if grep -qF "${MARKER}" "${README_FILEPATH}"; then
+          has_marker=true
+        fi
+
+        if [ "${has_marker}" = 'false' ] && [ "${size}" -le "${LIMIT}" ]; then
+          # Common case: small enough, no marker — passthrough.
+          cp -- "${README_FILEPATH}" "${trimmed}"
+          {
+            echo "readme=${trimmed}"
+            echo "trimmed=false"
+            echo "reason=passthrough"
+            echo "original_size=${size}"
+            echo "final_size=${size}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "README is ${size} bytes (under ${LIMIT}, no marker) — uploading as-is."
+          exit 0
+        fi
+
+        # Permalink to the exact README that was rendered. Using
+        # ${GITHUB_SHA} (not a branch ref) guarantees the link target
+        # matches what we just uploaded, even if `main` advances
+        # between this run and someone clicking the link on Hub.
+        permalink="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/${README_FILEPATH}"
+        # Newline-prefixed so it always lands cleanly even when the
+        # truncated body doesn't end with a newline.
+        footer=$'\n\n---\n\n_The description above is a condensed version. View the full README on GitHub: '"${permalink}"$'_\n'
+        footer_size=${#footer}
+
+        if [ "${has_marker}" = 'true' ]; then
+          reason='marker'
+          # Stop at the first marker occurrence (exclusive).
+          # `sed` `,$d` deletes from the marker line to end-of-file.
+          sed "/${MARKER}/,\$d" "${README_FILEPATH}" > "${trimmed}"
+        else
+          reason='auto-section'
+          budget=$((LIMIT - footer_size))
+          # Find the last `## ` heading whose starting position is
+          # within `budget`. Cut BEFORE that heading. Fall back to a
+          # hard byte cut at `budget` if no heading fits.
+          awk -v BUDGET="${budget}" '
+            { lines[NR] = $0; lens[NR] = length($0) + 1 }
+            /^##[[:space:]]/ { if (acc <= BUDGET) cut = NR }
+            { acc += lens[NR] }
+            END {
+              if (cut > 0) {
+                for (i = 1; i < cut; i++) print lines[i]
+              } else {
+                n = 0
+                for (i = 1; i <= NR; i++) {
+                  if (n + lens[i] > BUDGET) {
+                    rem = BUDGET - n
+                    if (rem > 0) printf "%s", substr(lines[i], 1, rem)
+                    break
+                  }
+                  print lines[i]
+                  n += lens[i]
+                }
+              }
+            }
+          ' "${README_FILEPATH}" > "${trimmed}"
+        fi
+
+        printf '%s' "${footer}" >> "${trimmed}"
+
+        final_size="$(wc -c < "${trimmed}")"
+        if [ "${final_size}" -gt "${LIMIT}" ]; then
+          # Should be unreachable (`auto-section` budget already
+          # accounted for footer; `marker` truncation is maintainer-
+          # controlled), but guard anyway so we never silently push
+          # an oversized body that Hub would reject or re-truncate.
+          echo "::error::Trimmed README is still ${final_size} bytes (limit ${LIMIT}). Move the ${MARKER} marker earlier in ${README_FILEPATH}, or shorten an early section." >&2
+          exit 1
+        fi
+
+        echo "::notice::Docker Hub README trimmed (${reason}): ${size} → ${final_size} bytes (limit ${LIMIT}). Footer link: ${permalink}"
+        {
+          echo "readme=${trimmed}"
+          echo "trimmed=true"
+          echo "reason=${reason}"
+          echo "original_size=${size}"
+          echo "final_size=${final_size}"
+        } >> "${GITHUB_OUTPUT}"
+
     - name: Push description to Docker Hub
       uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
       with:
         username: ${{ inputs.username }}
         password: ${{ inputs.password }}
         repository: ${{ inputs.repository }}
-        readme-filepath: ${{ inputs.readme_filepath }}
+        # Always point at the rendered file (which is a verbatim copy
+        # of the original in the passthrough case). Keeps peter-evans
+        # blind to whether trimming happened.
+        readme-filepath: ${{ steps.render.outputs.readme }}
         short-description: ${{ inputs.short_description }}
         enable-url-completion: ${{ inputs.enable_url_completion }}

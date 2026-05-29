@@ -465,6 +465,12 @@ jobs:
     timeout-minutes: 60
     outputs:
       release_id: ${{ steps.deploy.outputs.release_id }}
+      # Mirrors the composite's `cache_hit` so callers (e.g. the
+      # launchpad summary aggregator) can tell whether this run
+      # actually built + pushed a new release or short-circuited on
+      # an existing one tagged with the same commit SHA. Useful for
+      # alerting on unexpected rebuilds in cache-by-SHA flows.
+      cache_hit:  ${{ steps.deploy.outputs.cache_hit }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -524,21 +530,87 @@ jobs:
           debug:        ${{ inputs.debug }}
           finalize:     ${{ inputs.draft && 'false' || 'true' }}
 
+      # Archive the exact `balena.yml` that was pushed to balenaCloud
+      # so operators can inspect / diff the resolved manifest after the
+      # fact without having to re-render locally. Covers BOTH modes:
+      #   - generated mode: the file `render-balena-yml` wrote at
+      #     `inputs.balena_yml_path` inside the checked-out workspace
+      #   - checked-in mode: the same path, but the content is whatever
+      #     was committed to the repo at the resolved `ref:`
+      # `if: always() && hashFiles(...) != ''` makes the step a no-op
+      # when the file is genuinely absent (e.g. wrong path, sync-only
+      # run) instead of failing the job — operators still see the
+      # publish + summary output in that case. Retained for 30 days
+      # (artifact storage is per-org-quota; logs/SARIF live longer in
+      # their own surfaces).
+      - name: Upload balena.yml artifact
+        if: always() && hashFiles(inputs.balena_yml_path) != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: balena-yml-${{ inputs.block_name }}-${{ needs.setup.outputs.version }}
+          path: ${{ inputs.balena_yml_path }}
+          if-no-files-found: warn
+          retention-days: 30
+
+      # Comprehensive Job summary — surfaces every input + output the
+      # operator needs to confirm what was published, without having to
+      # cross-reference the workflow file or scroll through balena-cli
+      # output. `if: always()` so the table appears even when the
+      # `deploy` step failed (status row reflects job-level state).
       - name: Job summary
         if: always()
+        shell: bash
         env:
+          BLOCK_NAME: ${{ inputs.block_name }}
           FLEET: ${{ needs.setup.outputs.fleet }}
           VERSION: ${{ needs.setup.outputs.version }}
           BUILD_DATE: ${{ needs.setup.outputs.build_date }}
+          COMMIT_SHA: ${{ github.sha }}
+          SOURCE: ${{ inputs.source }}
+          # Composite normalises to lowercase 'true'/'false' on stdout.
+          CACHE_HIT: ${{ steps.deploy.outputs.cache_hit }}
           RELEASE_ID: ${{ steps.deploy.outputs.release_id }}
+          MODE: ${{ inputs.draft && 'draft' || 'final' }}
+          GENERATED_YML: ${{ inputs.generate_balena_yml && 'rendered in-runner' || 'checked-in' }}
+          JOB_STATUS: ${{ job.status }}
+          # Mirror the artifact-name expression in the upload step
+          # above so the summary row shows the exact name the
+          # operator will see in the "Artifacts" panel.
+          ARTIFACT_NAME: balena-yml-${{ inputs.block_name }}-${{ needs.setup.outputs.version }}
+          BALENA_YML_PATH: ${{ inputs.balena_yml_path }}
         run: |
+          # Dashboard fleet URL uses the slug shape `<namespace>/<fleet>`,
+          # which balenaCloud's dashboard redirects to the numeric fleet
+          # id. The release page requires the numeric fleet id (slug
+          # form doesn't redirect on the release subpath), so we link
+          # the fleet page only and show the release id as text.
+          fleet_url="https://dashboard.balena-cloud.com/fleets/${FLEET}"
+          cache_label='no (built and pushed)'
+          [ "${CACHE_HIT}" = 'true' ] && cache_label='yes (existing release reused)'
+          # `hashFiles()` isn't available in shell, so re-check on the
+          # runner filesystem. Matches the upload step's `if:` guard
+          # exactly so the summary doesn't claim an artifact exists
+          # when the upload step skipped.
+          artifact_label='not produced (balena.yml missing at expected path)'
+          if [ -f "${BALENA_YML_PATH}" ]; then
+            artifact_label="\`${ARTIFACT_NAME}\` (30-day retention)"
+          fi
           {
             echo "## Balena Block Publish"
             echo ""
-            echo "| Field | Value |"
-            echo "|-------|-------|"
-            echo "| Fleet      | \`${FLEET}\` |"
-            echo "| Version    | \`${VERSION}\` |"
-            echo "| Build date | \`${BUILD_DATE}\` |"
-            echo "| Release ID | \`${RELEASE_ID:-n/a}\` |"
+            echo "| Field         | Value |"
+            echo "|---------------|-------|"
+            echo "| Block         | \`${BLOCK_NAME}\` |"
+            echo "| Fleet         | [\`${FLEET}\`](${fleet_url}) |"
+            echo "| Version       | \`${VERSION}\` |"
+            echo "| Build date    | \`${BUILD_DATE}\` |"
+            echo "| Commit SHA    | \`${COMMIT_SHA}\` |"
+            echo "| Source path   | \`${SOURCE}\` |"
+            echo "| balena.yml    | ${GENERATED_YML} |"
+            echo "| Manifest path | \`${BALENA_YML_PATH}\` |"
+            echo "| Artifact      | ${artifact_label} |"
+            echo "| Mode          | \`${MODE}\` |"
+            echo "| Cache hit     | ${cache_label} |"
+            echo "| Release ID    | \`${RELEASE_ID:-n/a}\` |"
+            echo "| Job status    | \`${JOB_STATUS}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
