@@ -536,7 +536,21 @@ jobs:
         # For deterministic-mode callers the resolver echoes the input
         # back unchanged, so behaviour is identical to the pre-autodetect
         # version.
-        language: ${{ fromJSON(needs.resolve-codeql-languages.outputs.languages) }}
+        #
+        # The `|| '[]'` fallback is critical for the `inputs.codeql_languages
+        # == ''` case (caller opting out of advanced CodeQL — typically
+        # because they're using GitHub's first-party Default Setup). In
+        # that case `resolve-codeql-languages` is skipped, and a skipped
+        # job's outputs are the empty string — `fromJSON('')` is invalid
+        # JSON. Without the fallback, GitHub Actions doesn't drop the
+        # job; it falls back to instantiating a single placeholder
+        # matrix entry with no expanded values and surfaces the literal
+        # job-name template (`Analyze (${{ matrix.language }})`) in the
+        # Checks UI. With `|| '[]'` the matrix legitimately resolves to
+        # zero entries and the job is omitted entirely. The job-level
+        # `if:` above is the deterministic skip guard; this fallback
+        # exists purely to make the empty-matrix UX clean.
+        language: ${{ fromJSON(needs.resolve-codeql-languages.outputs.languages || '[]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
