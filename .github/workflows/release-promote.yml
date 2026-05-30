@@ -6,10 +6,15 @@
 # https://docs.github.com/en/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace).
 #
 # Pipeline (two stages):
-#   1. promote   — `bos-marketplace-kit/.github/actions/promote@v0.1.1`
+#   1. promote   — `bos-marketplace-kit/.github/actions/promote@v0.1.4`
 #                  copies an allowlisted set of paths from
 #                  `source_branch` to `target_branch`, tags
-#                  `target_branch`.
+#                  `target_branch`. v0.1.3+ also tags the existing
+#                  `target_branch` HEAD when the allowlisted source
+#                  tree already matches (so an operator-driven
+#                  release dispatched after CI-only or workflow-only
+#                  changes still produces a tag and a GitHub Release
+#                  instead of silently no-op'ing).
 #   2. release   — calls `github-release.yml@main` against the new tag
 #                  to render notes and create the GitHub Release.
 #
@@ -496,7 +501,7 @@ jobs:
         # step above (operator-supplied verbatim OR auto-bumped
         # next-patch) — never `inputs.tag_name` directly, because
         # that can be empty.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@8cb53a2c81712c47b61af1031a1db69058bc5be3 # v0.1.2
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@84f66acf43b5f2a6a59faaf5df4d109fad511fa4 # v0.1.4
         with:
           source_branch:         ${{ inputs.source_branch }}
           target_branch:         ${{ inputs.target_branch }}
