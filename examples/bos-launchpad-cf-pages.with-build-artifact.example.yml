@@ -257,7 +257,18 @@ jobs:
     name: Release (Cloudflare Pages via launchpad)
     needs: build
     permissions:
-      contents: read
+      # GHA validates nested reusable-workflow permissions STATICALLY
+      # at workflow-call time — the caller must grant the SUPERSET
+      # declared by every leaf job inside the called workflow, even
+      # for stages gated off at runtime via `if:`. Skimping here
+      # surfaces as:
+      #   "The nested job '<x>' is requesting '<perm>: <level>',
+      #    but is only allowed '<perm>: none'."
+      # Mirror the hub-managed `bos-launchpad-cf-pages.yml` kicker.
+      contents:        write   # monitor tracking-file commit + GitHub Release publish
+      actions:         write   # nested monitor (`gh workflow run`)
+      pull-requests:   write   # nested Docker Scout PR annotations
+      security-events: write   # nested Docker Scout SARIF upload
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       cloudflare_pages: true
