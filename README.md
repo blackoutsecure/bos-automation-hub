@@ -3226,10 +3226,11 @@ tokens, injection-safe shell, strict input validation, no
 
 ## Contributing
 
-1. Fork and create a feature branch.
+1. Fork and create a feature branch off `dev` (NOT `main` — see
+   [Branching & release model](#branching--release-model) below).
 2. Edit workflows/actions under `.github/`.
-3. Open a PR — [lint.yml](.github/workflows/lint.yml) runs `actionlint`
-   and `shellcheck` automatically.
+3. Open a PR **against `dev`** — [lint.yml](.github/workflows/lint.yml) runs `actionlint`
+   and `shellcheck` automatically as part of [hub-gate.yml](.github/workflows/hub-gate.yml).
 4. Test end-to-end by calling the reusable workflow from a downstream
    repo with `@<your-branch>`.
 
@@ -3246,6 +3247,43 @@ the version in a trailing comment, e.g.:
 bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
 ./actionlint -color
 ```
+
+### Branching & release model
+
+The hub follows the same **dev-default convention** as the Marketplace
+Action repos (`bos-marketplace-kit`, `bos-code-scanning-kit`, …):
+
+| Branch | Role | Consumers ref it? |
+|--------|------|-------------------|
+| `dev`  | Working branch. All PRs target `dev`. Day-to-day development happens here. | No. |
+| `main` | Promoted / stable branch. Updated only by [release-hub.yml](.github/workflows/release-hub.yml). | **Yes** — `@main` and `@vX.Y.Z` / `@vX` SemVer pins resolve here. |
+
+**Promotion is a strict fast-forward mirror** of `dev` HEAD to `main`
+— no allowlist. The hub's published `release-promote.yml` cannot be
+used on the hub itself because it hard-blocks `.github/workflows/**`
+(a Marketplace Action constraint), and the hub's consumer surface IS
+those reusable workflows. Hub-internal files (`hub-gate.yml`,
+`sync-self.yml`, `actionlint`, `scripts/`, `linux/`, `macos/`) ride
+along on `main`; they are inert there because their triggers either
+only fire inside this repo (PR / merge_group) or are path-gated to a
+subset of contributor-facing files.
+
+To cut a release: dispatch
+[release-hub.yml](.github/workflows/release-hub.yml) (from the `dev`
+ref). It will:
+
+1. Resolve the next tag (explicit `tag_name` OR `bump` mode, default
+   `patch`).
+2. FF-push `dev` → `main`.
+3. Tag the new `main` HEAD with `vX.Y.Z` (and move the floating
+   `vX` major tag).
+4. Chain into [github-release.yml](.github/workflows/github-release.yml)
+   to publish the GitHub Release.
+
+`secrets.RELEASE_PAT` is consulted first for the FF push + tag; falls
+back to `GITHUB_TOKEN` when absent. If `main`'s branch protection
+disallows GitHub Actions pushes, wire a PAT with `Contents: Write`
+that can bypass protection.
 
 ---
 

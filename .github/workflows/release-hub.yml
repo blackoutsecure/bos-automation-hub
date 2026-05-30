@@ -1,0 +1,359 @@
+# Hub-internal release: promote `dev` -> `main` (fast-forward MIRROR)
+# + tag + publish GitHub Release.
+#
+# This is the hub's OWN release workflow. It is NOT the same shape as
+# the Marketplace Action repos' release.yml because the hub is not a
+# Marketplace Action — its consumer surface IS reusable workflows
+# under `.github/workflows/`, which the hub's published
+# `release-promote.yml` composite hard-blocks from any allowlist.
+#
+# Model:
+#   * `dev` is the working branch (default).
+#   * `main` is the promoted / stable branch consumers ref via
+#     `blackoutsecure/bos-automation-hub/.github/{workflows,actions}/X@main`
+#     (and via `@vX.Y.Z` / `@vX` SemVer pins).
+#   * Promotion is a STRICT fast-forward of `main` to current `dev`
+#     HEAD. The whole tree mirrors. Hub-internal files (`hub-gate.yml`,
+#     `sync-self.yml`, `actionlint`, `scripts/`, `linux/`, `macos/`)
+#     ride along on `main`; they are inert on `main` because their
+#     own triggers either only fire here (PR / merge_group) or are
+#     path-gated to a subset of contributor-facing files.
+#
+# Pipeline:
+#   1. preflight-runner-config — validate `vars.DEFAULT_RUNNER` once
+#                                so downstream `runs-on:` expressions
+#                                don't queue against a missing label.
+#   2. compute-tag             — resolve `tag_name` from explicit
+#                                input OR `bump` mode (default
+#                                `patch`). Refuse if both are given
+#                                or the tag already exists.
+#   3. promote                 — fast-forward push `dev` -> `main`,
+#                                tag the new `main` HEAD with the
+#                                resolved tag, optionally move the
+#                                floating major tag (`vX`). Refuses
+#                                if the push is not a true
+#                                fast-forward (someone landed on
+#                                `main` outside this workflow).
+#   4. release                 — chain to `github-release.yml` to
+#                                publish the GitHub Release.
+#
+# Trigger: `workflow_dispatch` ONLY. Lives on `dev` (and once
+# promoted, on `main` too) so operators can pick the dispatch ref.
+# Recommended: always dispatch against `dev`.
+#
+# Token model: prefers `secrets.RELEASE_PAT` for the FF push + tag
+# (admin role / bypass for protected `main`). Falls back to
+# `GITHUB_TOKEN` when no PAT is wired — in which case `main`'s
+# branch protection must allow GitHub Actions to push.
+name: Release · promote dev → main (mirror) + tag + publish
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: >-
+          Explicit tag to create on `main` (SemVer, e.g. `v0.2.0`).
+          Leave empty to auto-compute via `bump`.
+        required: false
+        type: string
+        default: ''
+      bump:
+        description: >-
+          Auto-compute the next tag from the latest `vX.Y.Z`. Ignored
+          when `tag_name` is non-empty. Default `patch` so dispatch
+          with no inputs ships the next patch release.
+        required: false
+        type: choice
+        default: 'patch'
+        options:
+          - patch
+          - minor
+          - major
+          - none
+      update_major_tag:
+        description: >-
+          Move (force-push) the floating major tag (e.g. `v0`) to
+          the new release. Standard convention for `@vX` pins.
+        required: false
+        type: boolean
+        default: true
+      dry_run:
+        description: >-
+          Validate inputs + show the FF target SHA but do NOT push
+          to `main`, create the tag, or publish the release.
+        required: false
+        type: boolean
+        default: false
+      release_draft:
+        description: 'Create the GitHub Release as draft.'
+        required: false
+        type: boolean
+        default: false
+      previous_tag:
+        description: >-
+          Previous release tag for the changelog seed (e.g. `v0.1.2`).
+          Forwarded to `github-release.yml`. Empty disables changelog.
+        required: false
+        type: string
+        default: ''
+      ai_changelog:
+        description: >-
+          `'true'` to summarize the commit log via GitHub Models.
+          Falls back to deterministic grouping on any AI failure.
+        required: false
+        type: string
+        default: 'false'
+
+permissions:
+  contents: read
+
+# One release at a time, globally. `tag_name` can be empty when
+# `bump` is used, so group on the workflow name instead.
+concurrency:
+  group: release-hub-${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate `vars.DEFAULT_RUNNER` once before any downstream
+  # job evaluates its `runs-on:` expression. See `github-release.yml` for
+  # the full rationale; this mirrors the org-wide convention.
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # Local-path `uses: ./...` requires the calling workflow to
+      # have checked out the repo first. The shared composite is
+      # tiny and pure-bash, so no extra setup is needed.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/shared/preflight-runner-config
+        with:
+          default_runner: ${{ vars.DEFAULT_RUNNER }}
+
+  compute-tag:
+    name: Compute release tag
+    needs: preflight-runner-config
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      tag_name: ${{ steps.compute.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Need full tag history to find the latest vX.Y.Z.
+          ref: dev
+          fetch-depth: 0
+          persist-credentials: false
+      - id: compute
+        env:
+          INPUT_TAG_NAME: ${{ inputs.tag_name }}
+          INPUT_BUMP:     ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+
+          TAG="$(printf '%s' "${INPUT_TAG_NAME}" | tr -d '[:space:]')"
+          BUMP="${INPUT_BUMP:-none}"
+
+          if [ -n "${TAG}" ] && [ "${BUMP}" != "none" ]; then
+            echo "::error::Provide EITHER tag_name OR bump, not both (got tag_name='${TAG}' bump='${BUMP}')."
+            exit 1
+          fi
+          if [ -z "${TAG}" ] && [ "${BUMP}" = "none" ]; then
+            echo "::error::Either tag_name or bump (patch/minor/major) must be provided."
+            exit 1
+          fi
+
+          if [ -n "${TAG}" ]; then
+            echo "Using explicit tag_name: ${TAG}"
+          else
+            git fetch --tags --quiet || true
+            LATEST="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sort -V \
+              | tail -n1 || true)"
+            if [ -z "${LATEST}" ]; then
+              LATEST="v0.0.0"
+              echo "No prior tags; seeding from v0.0.0."
+            else
+              echo "Latest tag: ${LATEST}"
+            fi
+            VERSION="${LATEST#v}"
+            MAJOR="${VERSION%%.*}"
+            REST="${VERSION#*.}"
+            MINOR="${REST%%.*}"
+            PATCH="${REST#*.}"
+            case "${BUMP}" in
+              patch) PATCH=$((PATCH + 1)) ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              *)     echo "::error::Unknown bump mode '${BUMP}'."; exit 1 ;;
+            esac
+            TAG="v${MAJOR}.${MINOR}.${PATCH}"
+            echo "Computed tag (bump=${BUMP}): ${TAG}"
+          fi
+
+          # SemVer hard-validate (matches the kit's promote composite).
+          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::Tag '${TAG}' is not SemVer (vX.Y.Z[-suffix])."
+            exit 1
+          fi
+          if git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::Tag ${TAG} already exists. Pick a fresh tag."
+            exit 1
+          fi
+
+          echo "tag_name=${TAG}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "## Tag resolution"
+            echo ""
+            echo "| Field    | Value |"
+            echo "|----------|-------|"
+            echo "| tag_name | \`${TAG}\` |"
+            echo "| bump     | \`${BUMP}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  promote:
+    name: Promote dev → main (FF mirror)
+    needs: [preflight-runner-config, compute-tag]
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
+    timeout-minutes: 5
+    permissions:
+      # Required for the FF push to `main` + tag push when falling
+      # back to GITHUB_TOKEN (no RELEASE_PAT wired).
+      contents: write
+    outputs:
+      source_sha: ${{ steps.promote.outputs.source_sha }}
+      target_sha: ${{ steps.promote.outputs.target_sha }}
+      promoted:   ${{ steps.promote.outputs.promoted }}
+    steps:
+      - id: token
+        env:
+          HAS_RELEASE_PAT: ${{ secrets.RELEASE_PAT != '' && 'true' || 'false' }}
+        run: |
+          if [ "${HAS_RELEASE_PAT}" = "true" ]; then
+            echo "kind=pat" >> "${GITHUB_OUTPUT}"
+            echo "Using secrets.RELEASE_PAT for FF push + tag."
+          else
+            echo "kind=github_token" >> "${GITHUB_OUTPUT}"
+            echo "Using GITHUB_TOKEN for FF push + tag. Ensure main's branch protection allows GitHub Actions to push."
+          fi
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history needed to compare main↔dev and to push tag.
+          fetch-depth: 0
+          token: ${{ steps.token.outputs.kind == 'pat' && secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          # Persist creds so subsequent `git push` reuses the resolved token.
+          persist-credentials: true
+      - id: promote
+        env:
+          TAG_NAME:         ${{ needs.compute-tag.outputs.tag_name }}
+          UPDATE_MAJOR_TAG: ${{ inputs.update_major_tag }}
+          DRY_RUN:          ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin dev main --tags --quiet
+
+          DEV_SHA="$(git rev-parse origin/dev)"
+          MAIN_SHA="$(git rev-parse origin/main 2>/dev/null || echo 'NEW')"
+
+          echo "source (dev):  ${DEV_SHA}"
+          echo "target (main): ${MAIN_SHA}"
+          echo "tag:           ${TAG_NAME}"
+
+          echo "source_sha=${DEV_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "target_sha=${MAIN_SHA}" >> "${GITHUB_OUTPUT}"
+
+          # FF check: dev must contain main HEAD.
+          if [ "${MAIN_SHA}" != "NEW" ]; then
+            if ! git merge-base --is-ancestor "${MAIN_SHA}" "${DEV_SHA}"; then
+              echo "::error::main (${MAIN_SHA}) is NOT an ancestor of dev (${DEV_SHA}). Refusing non-fast-forward promotion. Reconcile by rebasing dev onto main (or by adding the unmerged main commits back to dev) and dispatch again."
+              exit 1
+            fi
+            if [ "${MAIN_SHA}" = "${DEV_SHA}" ]; then
+              echo "::notice::main is already at dev HEAD; nothing to promote (tagging only)."
+              echo "promoted=false" >> "${GITHUB_OUTPUT}"
+            else
+              echo "promoted=true" >> "${GITHUB_OUTPUT}"
+            fi
+          else
+            echo "promoted=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+          MAJOR_TAG=""
+          if [ "${UPDATE_MAJOR_TAG}" = "true" ]; then
+            # Derive `vX` from `vX.Y.Z[-suffix]`.
+            MAJOR_TAG="$(printf '%s' "${TAG_NAME}" | sed -E 's/^(v[0-9]+)\..*/\1/')"
+            echo "floating major tag: ${MAJOR_TAG}"
+          fi
+
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "::notice::dry_run=true — skipping FF push, tag, and release."
+            {
+              echo "## Promote (dry run)"
+              echo ""
+              echo "| Field      | Value |"
+              echo "|------------|-------|"
+              echo "| source_sha | \`${DEV_SHA}\` |"
+              echo "| target_sha | \`${MAIN_SHA}\` |"
+              echo "| tag        | \`${TAG_NAME}\` |"
+              echo "| major_tag  | \`${MAJOR_TAG:-(none)}\` |"
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          # Configure committer for the (empty, but git insists) operation.
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # Fast-forward push dev -> main. Refspec form is the canonical
+          # "promote one branch onto another" idiom; it does NOT need a
+          # local main checkout. The remote refuses non-FF by default.
+          echo "Pushing origin dev (${DEV_SHA}) -> main..."
+          git push origin "refs/remotes/origin/dev:refs/heads/main"
+
+          # Annotated tag on the new main HEAD (== dev HEAD post-FF).
+          echo "Creating tag ${TAG_NAME} at ${DEV_SHA}..."
+          git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME}" "${DEV_SHA}"
+          git push origin "refs/tags/${TAG_NAME}"
+
+          # Floating major tag (force; this is the documented contract).
+          if [ -n "${MAJOR_TAG}" ]; then
+            echo "Moving floating major tag ${MAJOR_TAG} to ${DEV_SHA}..."
+            git tag -f "${MAJOR_TAG}" "${DEV_SHA}"
+            git push origin "refs/tags/${MAJOR_TAG}" --force
+          fi
+
+          {
+            echo "## Promote"
+            echo ""
+            echo "| Field      | Value |"
+            echo "|------------|-------|"
+            echo "| source_sha | \`${DEV_SHA}\` |"
+            echo "| target_sha | \`${MAIN_SHA}\` |"
+            echo "| tag        | \`${TAG_NAME}\` |"
+            echo "| major_tag  | \`${MAJOR_TAG:-(none)}\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  release:
+    name: Publish GitHub Release
+    needs: [compute-tag, promote]
+    # Skip the release publish when the operator chose dry_run.
+    if: inputs.dry_run != true
+    uses: ./.github/workflows/github-release.yml
+    permissions:
+      contents: write
+      models: read
+    with:
+      tag_name:       ${{ needs.compute-tag.outputs.tag_name }}
+      draft:          ${{ inputs.release_draft }}
+      previous_tag:   ${{ inputs.previous_tag }}
+      source_branch:  dev
+      ai_changelog:   ${{ inputs.ai_changelog }}
+      target_commitish: main
