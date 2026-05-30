@@ -102,6 +102,7 @@ jobs:
       actions:         write
       pull-requests:   write
       security-events: write
+      models:          read    # nested release.yml -> github-release.yml AI changelog
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # ----- Cloudflare Pages stage -----

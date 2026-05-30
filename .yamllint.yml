@@ -1,0 +1,67 @@
+# yamllint configuration for blackoutsecure/bos-automation-hub.
+#
+# Optimised for GitHub Actions YAML which uses:
+#   * Long inline expressions (${{ ... }}) — line-length relaxed.
+#   * The `on:` key which yamllint reads as a truthy alias — relaxed.
+#   * Both flow- and block-style mappings — relaxed.
+#   * Column-aligned `with:` / `env:` blocks (deliberate readability
+#     convention across this repo) — `colons` relaxed.
+#
+# Mirrors the org-default in blackoutsecure/.github and the kit
+# template at src/marketplace_kit/data/policies/yamllint.yml in
+# bos-marketplace-kit. Keep in sync when the kit template evolves.
+# Read by the `extra-lint` job in `.github/workflows/lint.yml` via
+# the marketplace-kit lint composite (which picks up `.yamllint.yml`
+# automatically when present at the repo root).
+
+extends: default
+
+ignore: |
+  .git/
+  .venv/
+  node_modules/
+  dist/
+
+rules:
+  # GitHub Actions expressions and shell commands routinely exceed 120
+  # cols (e.g. `${{ fromJson(needs.x.outputs.y).foo.bar || 'default' }}`
+  # paired with column-aligned `with:` blocks).
+  line-length:
+    max: 200
+    level: warning
+
+  # GitHub workflows legitimately use the key `on:` which yamllint
+  # interprets as a truthy alias. Relax to warning so it doesn't fail.
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off', 'yes', 'no']
+    check-keys: false
+
+  # Permit either flow- or block-style mapping; both appear in workflows.
+  braces:
+    level: warning
+
+  # Comments don't need to start with a space (some tooling emits `#--`)
+  # and need only 1 space between code and trailing comment (the repo's
+  # `with:`-block trailing comments use a single space).
+  comments:
+    require-starting-space: false
+    min-spaces-from-content: 1
+
+  # Indentation: 2 spaces; sequences may be flush with parent or indented.
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+    check-multi-line-strings: false
+
+  # Allow visually-aligned `with:` / `env:` blocks (column-aligned RHS
+  # values), which is a deliberate readability convention across this
+  # repo's workflows and composite actions. `max-spaces-before` is left
+  # at the default 0 so accidental whitespace-before-colon is still
+  # caught.
+  colons:
+    max-spaces-after: -1
+
+  # Document-start markers (`---`) are noisy in workflow / action files
+  # and inconsistently applied across the repo. Disabled to match the
+  # org-default policy.
+  document-start: disable

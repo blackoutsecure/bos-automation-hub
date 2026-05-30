@@ -1,5 +1,9 @@
 name: Stage deploy directory
-description: 'Stage a static-site deploy directory by copying caller-listed files (with glob expansion) and directories (with optional `SRC:DEST` rewrite) from a source directory, with path-traversal rejection and an optional clean-first step.'
+description: >-
+  Stage a static-site deploy directory by copying caller-listed files
+  (with glob expansion) and directories (with optional `SRC:DEST`
+  rewrite) from a source directory, with path-traversal rejection and
+  an optional clean-first step.
 
 inputs:
   public_dir:

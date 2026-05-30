@@ -82,6 +82,12 @@ MARKER_NOTE = (
 # Block content MUST end with a newline so the open/close markers each
 # sit on their own line.  Block content is the body BETWEEN markers; the
 # markers themselves are added by `make_block`.
+#
+# NOTE — future home: the larger `_*_YML` / `_LICENSE_*` / `_*_TEMPLATE`
+# constants below are the migration target for `managed-files/` at the
+# repo root (see `managed-files/README.md`). When extracting any of
+# these into on-disk files, keep `{{KEY}}` placeholder syntax verbatim
+# and add a drift guard until all constants are migrated.
 
 _GITIGNORE_COMMON = """\
 # OS noise
@@ -1010,6 +1016,7 @@ jobs:
       actions:         write   # nested monitor (`gh workflow run`)
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
+      models:          read    # nested release.yml -> github-release.yml AI changelog
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # ----- Monitor stage -----
@@ -1186,6 +1193,7 @@ jobs:
       actions:         write
       pull-requests:   write
       security-events: write
+      models:          read    # nested release.yml -> github-release.yml AI changelog
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # ----- Cloudflare Pages stage -----

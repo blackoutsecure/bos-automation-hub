@@ -268,6 +268,7 @@ jobs:
       actions:         write   # nested monitor declares this; cascade requires it
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
+      models:          read    # nested release.yml -> github-release.yml AI changelog
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # Every launchpad stage defaults to `false`. Opt in explicitly so
@@ -324,6 +325,7 @@ jobs:
       actions:         write
       pull-requests:   write
       security-events: write
+      models:          read    # nested release.yml -> github-release.yml AI changelog
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       docker:            true                # opt in explicitly (default `false`)
@@ -483,6 +485,7 @@ jobs:
       actions:         write   # nested monitor (`gh workflow run`)
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
+      models:          read    # nested release.yml -> github-release.yml AI changelog
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       cloudflare_pages: true
@@ -1834,6 +1837,7 @@ jobs:
       actions:         write
       pull-requests:   write
       security-events: write
+      models:          read    # nested release.yml -> github-release.yml AI changelog
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
       # Explicit opt-in to the stages this caller wants (all default `false`).
