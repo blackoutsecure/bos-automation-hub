@@ -1,4 +1,4 @@
-# Hub-internal release: promote `dev` -> `main` (fast-forward MIRROR)
+# Hub-internal release: promote `dev` -> `main` (CURATED via denylist)
 # + tag + publish GitHub Release.
 #
 # This is the hub's OWN release workflow. It is NOT the same shape as
@@ -12,12 +12,13 @@
 #   * `main` is the promoted / stable branch consumers ref via
 #     `blackoutsecure/bos-automation-hub/.github/{workflows,actions}/X@main`
 #     (and via `@vX.Y.Z` / `@vX` SemVer pins).
-#   * Promotion is a STRICT fast-forward of `main` to current `dev`
-#     HEAD. The whole tree mirrors. Hub-internal files (`hub-gate.yml`,
-#     `sync-self.yml`, `actionlint`, `scripts/`, `linux/`, `macos/`)
-#     ride along on `main`; they are inert on `main` because their
-#     own triggers either only fire here (PR / merge_group) or are
-#     path-gated to a subset of contributor-facing files.
+#   * Promotion replaces `main`'s tree with `dev`'s tree MINUS the
+#     hub-internal denylist (see promote step). main carries ONLY the
+#     consumer-touch-surface; hub-internal files (the gate caller,
+#     self-sync, this release workflow, maintainer tooling, linters)
+#     do NOT ship to main. The promote commit's parent is the
+#     previous `main` HEAD, so `main`'s history stays linear and
+#     downstream consumers see a normal fast-forward push.
 #
 # Pipeline:
 #   1. preflight-runner-config — validate `vars.DEFAULT_RUNNER` once
@@ -27,25 +28,25 @@
 #                                input OR `bump` mode (default
 #                                `patch`). Refuse if both are given
 #                                or the tag already exists.
-#   3. promote                 — fast-forward push `dev` -> `main`,
-#                                tag the new `main` HEAD with the
-#                                resolved tag, optionally move the
-#                                floating major tag (`vX`). Refuses
-#                                if the push is not a true
-#                                fast-forward (someone landed on
-#                                `main` outside this workflow).
+#   3. promote                 — materialize `main`'s next tree in a
+#                                worktree (dev's tree minus denylist),
+#                                commit on top of current `main`,
+#                                atomic-push the new commit + tag,
+#                                optionally move the floating major
+#                                tag (`vX`). No-op when the curated
+#                                tree already matches `main` (tag-only).
 #   4. release                 — chain to `github-release.yml` to
 #                                publish the GitHub Release.
 #
-# Trigger: `workflow_dispatch` ONLY. Lives on `dev` (and once
-# promoted, on `main` too) so operators can pick the dispatch ref.
-# Recommended: always dispatch against `dev`.
+# Trigger: `workflow_dispatch` ONLY. This workflow file is itself in
+# the denylist, so it lives ONLY on `dev`. Operators dispatch against
+# the `dev` ref.
 #
-# Token model: prefers `secrets.RELEASE_PAT` for the FF push + tag
+# Token model: prefers `secrets.RELEASE_PAT` for the push + tag
 # (admin role / bypass for protected `main`). Falls back to
 # `GITHUB_TOKEN` when no PAT is wired — in which case `main`'s
 # branch protection must allow GitHub Actions to push.
-name: Release · promote dev → main (mirror) + tag + publish
+name: Release · promote dev → main (curated) + tag + publish
 
 "on":
   workflow_dispatch:
@@ -219,13 +220,13 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   promote:
-    name: Promote dev → main (FF mirror)
+    name: Promote dev → main (curated; denylist)
     needs: [preflight-runner-config, compute-tag]
     runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 5
     permissions:
-      # Required for the FF push to `main` + tag push when falling
-      # back to GITHUB_TOKEN (no RELEASE_PAT wired).
+      # `contents: write` for the push to `main` + tag push (used
+      # when falling back to GITHUB_TOKEN with no RELEASE_PAT wired).
       contents: write
     outputs:
       source_sha: ${{ steps.promote.outputs.source_sha }}
@@ -238,14 +239,15 @@ jobs:
         run: |
           if [ "${HAS_RELEASE_PAT}" = "true" ]; then
             echo "kind=pat" >> "${GITHUB_OUTPUT}"
-            echo "Using secrets.RELEASE_PAT for FF push + tag."
+            echo "Using secrets.RELEASE_PAT for push + tag."
           else
             echo "kind=github_token" >> "${GITHUB_OUTPUT}"
-            echo "Using GITHUB_TOKEN for FF push + tag. Ensure main's branch protection allows GitHub Actions to push."
+            echo "Using GITHUB_TOKEN for push + tag. Ensure main's branch protection allows GitHub Actions to push."
           fi
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # Full history needed to compare main↔dev and to push tag.
+          # Check out dev (the source). Worktree below materializes main.
+          ref: dev
           fetch-depth: 0
           token: ${{ steps.token.outputs.kind == 'pat' && secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           # Persist creds so subsequent `git push` reuses the resolved token.
@@ -258,33 +260,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          git fetch origin dev main --tags --quiet
+          git fetch origin dev main --tags --quiet || \
+            git fetch origin dev --tags --quiet
 
-          DEV_SHA="$(git rev-parse origin/dev)"
-          MAIN_SHA="$(git rev-parse origin/main 2>/dev/null || echo 'NEW')"
-
-          echo "source (dev):  ${DEV_SHA}"
-          echo "target (main): ${MAIN_SHA}"
-          echo "tag:           ${TAG_NAME}"
-
-          echo "source_sha=${DEV_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "target_sha=${MAIN_SHA}" >> "${GITHUB_OUTPUT}"
-
-          # FF check: dev must contain main HEAD.
-          if [ "${MAIN_SHA}" != "NEW" ]; then
-            if ! git merge-base --is-ancestor "${MAIN_SHA}" "${DEV_SHA}"; then
-              echo "::error::main (${MAIN_SHA}) is NOT an ancestor of dev (${DEV_SHA}). Refusing non-fast-forward promotion. Reconcile by rebasing dev onto main (or by adding the unmerged main commits back to dev) and dispatch again."
-              exit 1
-            fi
-            if [ "${MAIN_SHA}" = "${DEV_SHA}" ]; then
-              echo "::notice::main is already at dev HEAD; nothing to promote (tagging only)."
-              echo "promoted=false" >> "${GITHUB_OUTPUT}"
-            else
-              echo "promoted=true" >> "${GITHUB_OUTPUT}"
-            fi
+          SOURCE_SHA="$(git rev-parse origin/dev)"
+          if git rev-parse --verify --quiet origin/main >/dev/null; then
+            TARGET_EXISTS=true
+            TARGET_PARENT="$(git rev-parse origin/main)"
           else
-            echo "promoted=true" >> "${GITHUB_OUTPUT}"
+            TARGET_EXISTS=false
+            TARGET_PARENT=""
           fi
+
+          echo "source (dev):  ${SOURCE_SHA}"
+          echo "target parent: ${TARGET_PARENT:-(none; main does not exist)}"
+          echo "tag:           ${TAG_NAME}"
+          echo "source_sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "target_sha=${TARGET_PARENT}" >> "${GITHUB_OUTPUT}"
 
           MAJOR_TAG=""
           if [ "${UPDATE_MAJOR_TAG}" = "true" ]; then
@@ -293,52 +285,156 @@ jobs:
             echo "floating major tag: ${MAJOR_TAG}"
           fi
 
-          if [ "${DRY_RUN}" = "true" ]; then
-            echo "::notice::dry_run=true — skipping FF push, tag, and release."
+          # --- Materialize the curated `main` tree in a worktree --------
+          # Same general shape as bos-marketplace-kit's promote composite
+          # (worktree at target -> wipe -> bring source -> commit + atomic
+          # push), inverted from allowlist to denylist semantics: most
+          # files are consumer-facing and ride to main; we strip ONLY the
+          # hub-internal set listed below.
+          WORKTREE_DIR="$(mktemp -d -t hub-promote-XXXXXXXX)"
+          # shellcheck disable=SC2064
+          trap "git worktree remove --force '${WORKTREE_DIR}' 2>/dev/null || true; rm -rf '${WORKTREE_DIR}'" EXIT
+
+          if [ "${TARGET_EXISTS}" = "true" ]; then
+            git worktree add --force -B main "${WORKTREE_DIR}" refs/remotes/origin/main
+          else
+            git worktree add --force -B main "${WORKTREE_DIR}" "${SOURCE_SHA}"
+          fi
+
+          (
+            cd "${WORKTREE_DIR}"
+            # Wipe the staged target tree (handles renames + removed files
+            # on dev that would otherwise persist on main).
+            if [ -n "$(git ls-files)" ]; then
+              git ls-files -z | xargs -0 git rm -f -q --
+            fi
+            # Bring across dev's full tree...
+            git checkout "${SOURCE_SHA}" -- .
+            # ...then strip the hub-internal denylist. Update this list
+            # when adding new hub-only files that must NOT ship to main.
+            # `--ignore-unmatch` tolerates entries not present on dev
+            # (so removing a file from dev doesn't break the next
+            # promote).
+            git rm -rf --quiet --ignore-unmatch -- \
+              .github/workflows/hub-gate.yml \
+              .github/workflows/sync-self.yml \
+              .github/workflows/release-hub.yml \
+              .editorconfig \
+              .yamllint.yml \
+              actionlint \
+              linux \
+              macos \
+              scripts \
+              || true
+            git add -A
+          )
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # Keep the commit subject single-line + scannable. Provenance
+          # is in the subject (tag + source SHA); the full denylist
+          # rationale lives in `.github/workflows/release-hub.yml` on
+          # dev so we don't re-explain it on every release.
+          COMMIT_MSG="release ${TAG_NAME}: promote dev (${SOURCE_SHA}) → main (curated)"
+
+          # --- No-op detection (curated tree already matches main) ------
+          # Even when there's nothing to commit, an operator-dispatched
+          # release is an explicit intent — tag the existing main HEAD
+          # so the GitHub Release still publishes.
+          if ( cd "${WORKTREE_DIR}" && git diff --cached --quiet ); then
+            TARGET_SHA="$( cd "${WORKTREE_DIR}" && git rev-parse HEAD )"
+            echo "::notice::Curated tree already matches main (${TARGET_SHA}); tag-only promote."
+            echo "promoted=false" >> "${GITHUB_OUTPUT}"
+
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "::notice::dry_run=true — would tag ${TAG_NAME} at ${TARGET_SHA} (no push)."
+              {
+                echo "## Promote (dry run, tag-only)"
+                echo ""
+                echo "| Field        | Value |"
+                echo "|--------------|-------|"
+                echo "| source (dev) | \`${SOURCE_SHA}\` |"
+                echo "| target_sha   | \`${TARGET_SHA}\` |"
+                echo "| tag          | \`${TAG_NAME}\` |"
+              } >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+
+            (
+              cd "${WORKTREE_DIR}"
+              git tag -a "${TAG_NAME}" -m "${COMMIT_MSG}" "${TARGET_SHA}"
+              git push origin "refs/tags/${TAG_NAME}"
+              if [ -n "${MAJOR_TAG}" ]; then
+                git tag -f "${MAJOR_TAG}" "${TARGET_SHA}"
+                git push --force origin "refs/tags/${MAJOR_TAG}"
+              fi
+            )
             {
-              echo "## Promote (dry run)"
+              echo "## Promote (tag-only)"
               echo ""
-              echo "| Field      | Value |"
-              echo "|------------|-------|"
-              echo "| source_sha | \`${DEV_SHA}\` |"
-              echo "| target_sha | \`${MAIN_SHA}\` |"
-              echo "| tag        | \`${TAG_NAME}\` |"
-              echo "| major_tag  | \`${MAJOR_TAG:-(none)}\` |"
+              echo "| Field        | Value |"
+              echo "|--------------|-------|"
+              echo "| source (dev) | \`${SOURCE_SHA}\` |"
+              echo "| target_sha   | \`${TARGET_SHA}\` |"
+              echo "| tag          | \`${TAG_NAME}\` |"
+              echo "| major_tag    | \`${MAJOR_TAG:-(none)}\` |"
             } >> "${GITHUB_STEP_SUMMARY}"
             exit 0
           fi
 
-          # Configure committer for the (empty, but git insists) operation.
-          git config user.name  'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "::notice::dry_run=true — staged diff (not committing):"
+            ( cd "${WORKTREE_DIR}" && git diff --cached --stat )
+            echo "promoted=false" >> "${GITHUB_OUTPUT}"
+            {
+              echo "## Promote (dry run)"
+              echo ""
+              echo "| Field        | Value |"
+              echo "|--------------|-------|"
+              echo "| source (dev) | \`${SOURCE_SHA}\` |"
+              echo "| main parent  | \`${TARGET_PARENT:-(new)}\` |"
+              echo "| tag          | \`${TAG_NAME}\` |"
+              echo ""
+              echo '### Staged diff'
+              echo ''
+              echo '```'
+              ( cd "${WORKTREE_DIR}" && git diff --cached --stat )
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
 
-          # Fast-forward push dev -> main. Refspec form is the canonical
-          # "promote one branch onto another" idiom; it does NOT need a
-          # local main checkout. The remote refuses non-FF by default.
-          echo "Pushing origin dev (${DEV_SHA}) -> main..."
-          git push origin "refs/remotes/origin/dev:refs/heads/main"
+          # --- Commit + atomic push of (HEAD, tag) ----------------------
+          (
+            cd "${WORKTREE_DIR}"
+            git commit -m "${COMMIT_MSG}"
+            git tag -a "${TAG_NAME}" -m "${COMMIT_MSG}"
+            git push --atomic origin \
+              "HEAD:refs/heads/main" \
+              "refs/tags/${TAG_NAME}"
+          )
+          TARGET_SHA="$( cd "${WORKTREE_DIR}" && git rev-parse HEAD )"
+          echo "promoted=true" >> "${GITHUB_OUTPUT}"
 
-          # Annotated tag on the new main HEAD (== dev HEAD post-FF).
-          echo "Creating tag ${TAG_NAME} at ${DEV_SHA}..."
-          git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME}" "${DEV_SHA}"
-          git push origin "refs/tags/${TAG_NAME}"
-
-          # Floating major tag (force; this is the documented contract).
           if [ -n "${MAJOR_TAG}" ]; then
-            echo "Moving floating major tag ${MAJOR_TAG} to ${DEV_SHA}..."
-            git tag -f "${MAJOR_TAG}" "${DEV_SHA}"
-            git push origin "refs/tags/${MAJOR_TAG}" --force
+            (
+              cd "${WORKTREE_DIR}"
+              git tag -f "${MAJOR_TAG}" "${TARGET_SHA}"
+              git push --force origin "refs/tags/${MAJOR_TAG}"
+            )
           fi
 
           {
             echo "## Promote"
             echo ""
-            echo "| Field      | Value |"
-            echo "|------------|-------|"
-            echo "| source_sha | \`${DEV_SHA}\` |"
-            echo "| target_sha | \`${MAIN_SHA}\` |"
-            echo "| tag        | \`${TAG_NAME}\` |"
-            echo "| major_tag  | \`${MAJOR_TAG:-(none)}\` |"
+            echo "| Field        | Value |"
+            echo "|--------------|-------|"
+            echo "| source (dev) | \`${SOURCE_SHA}\` |"
+            echo "| main parent  | \`${TARGET_PARENT:-(new)}\` |"
+            echo "| main HEAD    | \`${TARGET_SHA}\` |"
+            echo "| tag          | \`${TAG_NAME}\` |"
+            echo "| major_tag    | \`${MAJOR_TAG:-(none)}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
   release:
