@@ -630,17 +630,38 @@ name: Blackout Secure Marketplace Launchpad (reusable meta-workflow)
           ignored. Only consulted when
           `inputs.event_name == 'workflow_dispatch'` AND
           `inputs.dispatched_mode == 'release'` AND
-          `inputs.dry_run != true` (dry runs always bypass the gate so
-          maintainers can preview the release pipeline against a red
-          branch). The preflight job reads workflow run status via the
-          `GITHUB_TOKEN` and `actions:read` permission — no extra
-          secret required. A workflow with no run at the HEAD SHA (e.g.
-          never triggered, or triggered but not yet finished) counts
-          as a gate failure with a precise annotation pointing to the
-          missing workflow.
+          `inputs.dry_run != true` AND
+          `inputs.bypass_release_gate != true` (dry runs and explicit
+          bypass requests always skip the gate so maintainers can
+          preview the release pipeline against a red branch or push a
+          hot-fix when re-running CI is impractical). The preflight
+          job reads workflow run status via the `GITHUB_TOKEN` and
+          `actions:read` permission — no extra secret required. A
+          workflow with no run at the HEAD SHA (e.g. never triggered,
+          or triggered but not yet finished) counts as a gate failure
+          with a precise annotation pointing to the missing workflow.
         required: false
         type: string
         default: ''
+      bypass_release_gate:
+        description: >-
+          When `true`, skips the `verify-required-checks` preflight
+          regardless of `require_workflow_success`. Intended target:
+          caller-side `force_release` dispatch toggles that need to
+          unconditionally proceed (e.g. hot-fix, infra flake,
+          self-referencing gate where the same workflow is both
+          gater and gatee). Kept as a SEPARATE boolean input rather
+          than a sentinel value of `require_workflow_success` because
+          GitHub Actions expressions cannot produce an empty string
+          conditionally — the canonical `(cond && '') || 'X'` idiom
+          ALWAYS evaluates to `'X'` (truthy left + empty right collapses
+          to empty, which `||` then replaces with the fallback), so a
+          caller cannot reliably clear the gate by mutating
+          `require_workflow_success` in a single expression. This bool
+          is the supported escape hatch.
+        required: false
+        type: boolean
+        default: false
 
     secrets:
       scanning_pat:
@@ -820,6 +841,7 @@ jobs:
       inputs.event_name == 'workflow_dispatch'
       && inputs.dispatched_mode == 'release'
       && inputs.dry_run != true
+      && inputs.bypass_release_gate != true
       && inputs.require_workflow_success != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
