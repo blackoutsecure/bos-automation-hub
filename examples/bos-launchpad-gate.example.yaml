@@ -1,0 +1,81 @@
+# .bos-launchpad.yaml — gate flavor example
+#
+# Copy to `.bos-launchpad.yaml` at your repo root and customize — or
+# omit entirely; every key on the `gate:` block has a default and the
+# kicker still works if `.bos-launchpad.yaml` is missing.
+#
+# The `gate:` block is what the hub-managed `bos-launchpad-gate.yml`
+# kicker reads. The kicker fires on PRs targeting `main` or `dev`,
+# on merge-queue commits, and on `workflow_dispatch`; it delegates to
+# the `bos-gate.yml` reusable workflow in
+# blackoutsecure/bos-automation-hub.
+#
+# Required setup:
+#   1. Enable the `bos_launchpad_gate` service in your sync-managed-files
+#      caller (either via the `bos_launchpad_sync_files` kicker or a
+#      hand-authored `sync-managed-files.yml` caller). The hub then
+#      writes `.github/workflows/bos-launchpad-gate.yml` on the next
+#      sync.
+#   2. After the first green run, pin `gate / Gate summary` as the
+#      single required status check on your protected branch:
+#         Settings → Branches → main → Require status checks to pass.
+#      Do NOT pin the individual leaf jobs — the `Gate summary`
+#      aggregator stays green-stable when the underlying gate set
+#      changes.
+#
+# Optional secret:
+#   SCANNING_PAT — PAT with `Administration: read` (for branch-
+#     protection drift checks) and the wider posture-audit reach.
+#     Absent → the kicker falls back to GITHUB_TOKEN, which only
+#     satisfies PS001 of the code-scanning kit.
+#
+# Schema reference (full): see the "`.bos-launchpad.yaml` schema"
+# section in the hub README.
+# https://github.com/blackoutsecure/bos-automation-hub
+#
+# Note: this block can coexist with `release:` / `cloudflare:` /
+# `sync_files:` blocks in the same `.bos-launchpad.yaml`. The gate
+# kicker is NOT mutex with the other launchpad kickers — they fire
+# on different events (release/cron, push, PR/merge_group).
+
+# ----- Pre-merge gating -----
+gate:
+  # ----- Reusable-workflow version pins -----
+  #
+  # Tag or SHA of bos-marketplace-kit for the lint, baseline check,
+  # and (off-by-default) branch-protection composites. Pin to a SHA
+  # in production; the floating tag below tracks the latest minor.
+  kit_version: 'v0.1.2'
+
+  # Tag or SHA of bos-code-scanning-kit for the umbrella scan +
+  # posture audit. Pin to a SHA in production.
+  code_scanning_kit_version: 'v1'
+
+  # ----- Per-gate toggles -----
+  #
+  # All six default-on gates listed below default to true even when
+  # omitted. The kicker uses `!= false` semantics so a missing key
+  # behaves identically to `true`. Set explicitly to `false` to turn
+  # an individual gate off (e.g. on a docs-only repo where dependency
+  # review and pinned-actions enforcement add no value).
+  enable_lint: true
+  enable_baseline: true
+  enable_dependency_review: true
+  enable_code_scan: true
+  enable_pinned_actions_check: true
+  enable_pr_title_check: true
+
+  # Branch-protection drift checking lives inside the code-scan gate
+  # (bos-code-scanning-kit posture rules PS020-PS025). It runs when
+  # `secrets.SCANNING_PAT` is wired through to this kicker; without an
+  # admin-reach PAT the kit emits PS020-PS025 at severity `skip`
+  # rather than failing. No separate flag is exposed here.
+
+  # ----- PR title format -----
+  #
+  # Comma-separated conventional-commits types accepted in the PR
+  # title. Default below matches Angular convention. Add `revert` /
+  # `wip` / custom types here if your release-notes pipeline expects
+  # them; remove `chore` if you want it filtered out of release notes
+  # entirely.
+  pr_title_types: 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert'

@@ -16,6 +16,7 @@
 #   * release flavor    → `examples/bos-launchpad-release.example.yaml`
 #   * cf-pages flavor   → `examples/bos-launchpad-cf-pages.example.yaml`
 #   * sync-files flavor → `examples/bos-launchpad-sync-files.example.yaml`
+#   * gate flavor       → `examples/bos-launchpad-gate.example.yaml`
 #
 # To refresh this snapshot after editing the constant in sync.py:
 #   python3 scripts/sync-kicker-examples-from-sync.py

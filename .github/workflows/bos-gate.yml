@@ -1,0 +1,333 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# bos-gate.yml — reusable PR / merge-group gating workflow
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Purpose
+# -------
+# One orchestrated gate that any blackoutsecure repo can adopt as a
+# REQUIRED status check on protected branches. Combines every layer of
+# pre-merge enforcement into a single `workflow_call`-callable surface:
+#
+#   1. Lint            — bos-marketplace-kit lint composite (markdownlint,
+#                        yamllint, shellcheck, actionlint) with packaged
+#                        defaults + per-repo override.
+#   2. Baseline check  — bos-marketplace-kit check composite (MP/OP/SC
+#                        Marketplace pre-publish rules).
+#   3. Dep review      — actions/dependency-review-action; blocks PRs
+#                        introducing CVE-flagged or disallowed-licensed
+#                        deps (PR scope only; the comparison needs the
+#                        merge-base, which doesn't exist on push events).
+#   4. Code scanning   — bos-code-scanning-kit: secret scan (gitleaks),
+#                        shell hardening (shellcheck), workflow auth
+#                        (actionlint), posture audit (GHAS toggles,
+#                        branch protection, CODEOWNERS), unified SARIF.
+#   5. Pinned actions  — fails if any modified workflow/action references
+#                        a third-party `uses:` by tag instead of by 40-char
+#                        SHA (gate #8 in the design doc).
+#   6. PR title        — conventional-commits-style title enforcement so
+#                        release-notes generation keeps working.
+#   7. Gate summary    — aggregates all of the above into one job whose
+#                        green status is the single required check on the
+#                        protected branch. Lets you change the underlying
+#                        set of gates without re-pinning required checks
+#                        in repo branch-protection.
+#
+# Note: branch-protection drift checking lives in `bos-code-scanning-kit`
+# (rules PS020-PS025) and runs as part of gate #4. It was previously a
+# separate gate here; consolidating into the posture audit removed the
+# duplicate REST calls and the second admin-token surface.
+#
+# Explicitly NOT in scope here
+# ----------------------------
+# - Branch protection enforcement (mutating GitHub settings). The kit's
+#   `enforce` mode requires `Administration: write` which the default
+#   GITHUB_TOKEN does not have; that surface lives in a separate workflow
+#   triggered manually with a PAT.
+# - "Copilot must approve" as an approval-count gate. As of writing
+#   GitHub treats Copilot's PR review as reviewer-bot output, NOT a
+#   maintainer approval that counts toward branch-protection's
+#   required-approval threshold. The procedural workaround (auto-request
+#   Copilot, require human approval) lives in branch-protection settings
+#   + an org-level reviewer policy, not in this workflow.
+# - Merge queue enablement. This workflow includes a `merge_group` trigger
+#   so it works correctly when a caller enables the queue, but it does
+#   NOT turn the queue on — that's a Settings → Branches change.
+#
+# How to call from another repo
+# -----------------------------
+#   name: gate
+#   on:
+#     pull_request:
+#       # Both branches covered — works for static repos (default `main`)
+#       # and Marketplace Action repos using the dev-default convention.
+#       branches: [main, dev]
+#     merge_group:
+#   permissions: {}     # caller declares minimal; this workflow grants per-job
+#   jobs:
+#     gate:
+#       uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@main
+#       with:
+#         kit_version: v0.1.2
+#         code_scanning_kit_version: v1
+#       secrets:
+#         scanning_pat: ${{ secrets.SCANNING_PAT }}      # optional
+#
+# Pin discipline
+# --------------
+# The kit and third-party action references in this file are intentionally
+# left at floating tags (`@v0.1.2`, `@v4`, `@v5`) so Dependabot can pin
+# them to SHAs via PR. Once Dependabot lands the first pin PR, gate #5
+# (pinned-actions) will START passing on this file itself.
+#
+# Reference
+# ---------
+# - bos-marketplace-kit (lint/check/branch-protection composites):
+#   https://github.com/blackoutsecure/bos-marketplace-kit
+# - bos-code-scanning-kit (umbrella scanner + posture audit):
+#   https://github.com/blackoutsecure/bos-code-scanning-kit
+
+name: bos-gate
+
+on:
+  workflow_call:
+    inputs:
+      kit_version:
+        description: >-
+          Tag or SHA of bos-marketplace-kit to use for the lint, check,
+          and branch-protection composites. Pin to a SHA in production.
+        type: string
+        required: false
+        default: v0.1.2
+      code_scanning_kit_version:
+        description: >-
+          Tag or SHA of bos-code-scanning-kit. Pin to a SHA in production.
+        type: string
+        required: false
+        default: v1
+      enable_lint:
+        type: boolean
+        required: false
+        default: true
+      enable_baseline:
+        type: boolean
+        required: false
+        default: true
+      enable_dependency_review:
+        type: boolean
+        required: false
+        default: true
+      enable_code_scan:
+        type: boolean
+        required: false
+        default: true
+      enable_pinned_actions_check:
+        type: boolean
+        required: false
+        default: true
+      enable_pr_title_check:
+        type: boolean
+        required: false
+        default: true
+      pr_title_types:
+        description: >-
+          Comma-separated list of allowed conventional-commit types for
+          the PR title check. Default matches angular convention.
+        type: string
+        required: false
+        default: feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert
+    secrets:
+      scanning_pat:
+        description: >-
+          Optional PAT with admin reach for the code-scanning kit's
+          posture audit (PS002 secret scanning, PS003 Dependabot alerts,
+          PS020-PS025 branch protection). Falls back to GITHUB_TOKEN when
+          absent — sufficient for PS001 only.
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: bos-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -----------------------------------------------------------------
+  # 1. Lint — markdownlint / yamllint / shellcheck / actionlint via the
+  # kit composite (already inherits packaged defaults; per-repo overrides
+  # via standard config filenames at the repo root).
+  # -----------------------------------------------------------------
+  lint:
+    if: ${{ inputs.enable_lint }}
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run kit lint composite
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@v0.1.2  # TODO: pin to SHA via Dependabot
+        with:
+          fail_on_warning: 'false'
+
+  # -----------------------------------------------------------------
+  # 2. Baseline — Marketplace pre-publish rules (MP/OP/SC).
+  # -----------------------------------------------------------------
+  baseline:
+    if: ${{ inputs.enable_baseline }}
+    name: Baseline (Marketplace check)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run kit baseline check
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@v0.1.2  # TODO: pin to SHA via Dependabot
+        with:
+          fail_on_warning: 'false'
+
+  # -----------------------------------------------------------------
+  # 3. Dependency review — GitHub's first-party supply-chain gate.
+  # Compares the PR's dep graph against the base ref and blocks adds
+  # with known CVEs or out-of-policy licenses. PR-scope only — the
+  # action requires a base/head pair, so it is skipped on merge_group
+  # (the merge-queue commit already passed this on the original PR).
+  # -----------------------------------------------------------------
+  dependency-review:
+    if: ${{ inputs.enable_dependency_review && github.event_name == 'pull_request' }}
+    name: Dependency review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4  # TODO: pin to SHA via Dependabot
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
+  # -----------------------------------------------------------------
+  # 4. Code scanning — umbrella scan + posture audit. Uploads merged
+  # SARIF to GitHub Advanced Security. `security-events: write` is
+  # required for the SARIF upload step inside the kit.
+  # -----------------------------------------------------------------
+  code-scan:
+    if: ${{ inputs.enable_code_scan }}
+    name: Code scanning
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run bos-code-scanning-kit
+        uses: blackoutsecure/bos-code-scanning-kit@v1  # TODO: pin to SHA via Dependabot
+        with:
+          github_token: ${{ secrets.scanning_pat || secrets.GITHUB_TOKEN }}
+          fail_on: fail
+          enable_posture: 'true'
+          enable_scanners: 'true'
+          enable_upload: 'true'
+
+  # -----------------------------------------------------------------
+  # 5. Pinned actions — ensures every third-party `uses:` reference in
+  # modified workflow / action files is pinned to a 40-char SHA.
+  # Local (`./...`) and docker (`docker://...`) refs are exempt.
+  # Implementation lives in this repo as a composite so other repos
+  # adopt the same enforcement by virtue of calling this workflow.
+  #
+  # MIGRATION: this gate duplicates `bos-code-scanning-kit` rule PS012.
+  # Once `code_scanning_kit_version` is bumped to a kit release that
+  # ships PS012, remove this job AND the `enable_pinned_actions_check`
+  # input — the kit's posture audit (gate #4) will own the check.
+  # -----------------------------------------------------------------
+  pinned-actions:
+    if: ${{ inputs.enable_pinned_actions_check }}
+    name: Pinned actions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history so the composite can diff against base.
+          fetch-depth: 0
+      - name: Check `uses:` pinning
+        uses: blackoutsecure/bos-automation-hub/.github/actions/check-pinned-actions@main  # TODO: pin to SHA after first tag
+
+  # -----------------------------------------------------------------
+  # 6. PR title — conventional-commits format so release-notes
+  # generation parses cleanly. PR-scope only.
+  # -----------------------------------------------------------------
+  pr-title:
+    if: ${{ inputs.enable_pr_title_check && github.event_name == 'pull_request' }}
+    name: PR title format
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5  # TODO: pin to SHA via Dependabot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: ${{ inputs.pr_title_types }}
+          requireScope: false
+          subjectPattern: ^.{3,}$
+          subjectPatternError: |
+            PR title subject must be at least 3 characters after the
+            `<type>:` prefix. Examples:
+              feat(sync): add target_repo_role to bos-managed-files.yaml
+              fix(lint): allow `truthy: on/off` in yamllint default
+
+  # -----------------------------------------------------------------
+  # 7. Gate summary — single aggregated job that depends on every
+  # other gate. Use THIS job (`bos-gate / Gate summary`) as the
+  # required status check in branch protection. That way the set of
+  # underlying gates can change without re-pinning required checks
+  # in repo settings.
+  #
+  # `if: always()` so this runs even when an upstream job is skipped
+  # (e.g. dependency-review skipped on merge_group). The `result`
+  # comparison below treats `skipped` as acceptable; only `failure`
+  # and `cancelled` propagate.
+  # -----------------------------------------------------------------
+  summary:
+    name: Gate summary
+    if: ${{ always() }}
+    needs:
+      - lint
+      - baseline
+      - dependency-review
+      - code-scan
+      - pinned-actions
+      - pr-title
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Evaluate gate results
+        env:
+          R_LINT: ${{ needs.lint.result }}
+          R_BASELINE: ${{ needs.baseline.result }}
+          R_DEPREVIEW: ${{ needs.dependency-review.result }}
+          R_CODESCAN: ${{ needs.code-scan.result }}
+          R_PINNED: ${{ needs.pinned-actions.result }}
+          R_PRTITLE: ${{ needs.pr-title.result }}
+        run: |
+          set -euo pipefail
+          fail=0
+          for name in LINT BASELINE DEPREVIEW CODESCAN PINNED PRTITLE; do
+            var="R_${name}"
+            res="${!var}"
+            case "$res" in
+              success|skipped) printf '✓ %-12s %s\n' "$name" "$res" ;;
+              *)               printf '✗ %-12s %s\n' "$name" "$res"; fail=1 ;;
+            esac
+          done
+          if [ "$fail" -eq 1 ]; then
+            echo ""
+            echo "One or more required gates failed or were cancelled."
+            exit 1
+          fi
+          echo ""
+          echo "All gates green or intentionally skipped."

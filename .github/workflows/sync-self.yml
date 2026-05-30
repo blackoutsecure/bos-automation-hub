@@ -15,7 +15,10 @@ on:
     - cron: '11 14 * * 1'   # Monday 14:11 UTC — stagger off :00
   workflow_dispatch:
   push:
-    branches: [main]
+    # Hub uses dev-default convention — keep self-sync alive on both
+    # the working (`dev`) and promoted (`main`) branches so dotfile
+    # drift gets corrected wherever the change lands.
+    branches: [dev, main]
     paths:
       - '.github/workflows/sync-self.yml'
       # When the canonical blocks themselves change, re-sync immediately

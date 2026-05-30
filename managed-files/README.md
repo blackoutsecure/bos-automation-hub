@@ -67,11 +67,31 @@ will be written to in the **consumer** repo, with two exceptions:
    `{{KEY}}` syntax verbatim on disk. The placeholder substitution is
    `sync.py`'s job at sync time, not authoring time.
 
-Suggested layout (illustrative — nothing lives here yet):
+Current + planned layout:
 
 ```text
 managed-files/
 ├── README.md                              ← you are here
+│
+│   # === LANDED (extracted, not yet wired into sync.py) ===
+│
+├── community-health/                      ← org-wide defaults (inherit-able from .github org repo)
+│   ├── CODE_OF_CONDUCT.md
+│   ├── CONTRIBUTING.md
+│   ├── SECURITY.md
+│   ├── SUPPORT.md
+│   └── FUNDING.yml
+├── github-meta/                           ← org-default `.github/` content
+│   ├── PULL_REQUEST_TEMPLATE.md
+│   └── ISSUE_TEMPLATE/
+│       ├── bug_report.md
+│       ├── feature_request.md
+│       └── config.yml
+├── org-profile/                           ← org public profile page
+│   └── README.md                          ← target: blackoutsecure/.github profile/README.md
+│
+│   # === PLANNED (still inline in sync.py as `_*` string constants) ===
+│
 ├── licenses/
 │   ├── apache-2.0.txt                     ← from _LICENSE_APACHE2
 │   ├── mit.txt                            ← from _LICENSE_MIT
@@ -85,12 +105,34 @@ managed-files/
     ├── bos-launchpad-release.yml          ← from _BOS_LAUNCHPAD_RELEASE_YML
     ├── bos-launchpad-cf-pages.yml         ← from _BOS_LAUNCHPAD_CF_PAGES_YML
     ├── bos-launchpad-sync-files.yml       ← from _BOS_LAUNCHPAD_SYNC_FILES_YML
+    ├── bos-launchpad-org-default.yml      ← (NEW) kicker for the `.github` org repo (TBD)
     ├── sync-managed-files.yml             ← from _GHA_SYNC_COMMIT_YML
     ├── sync-drift-check.yml               ← from _GHA_SYNC_DRIFT_CHECK_YML
     ├── lint.node.yml                      ← from _GHA_LINT_NODE_YML
     ├── lint.python.yml                    ← from _GHA_LINT_PYTHON_YML
     └── lint.shell.yml                     ← from _GHA_LINT_SHELL_YML
 ```
+
+## Per-consumer scope — `target_repo_role`
+
+Not every consumer receives every file. The `.github` **org repo** needs
+files no other consumer should ever get (its own `profile/README.md`,
+its own top-level `CODE_OF_CONDUCT.md`/`CONTRIBUTING.md`/`SECURITY.md`).
+Normal consumers must NOT receive `profile/README.md` — that would put
+an org-landing-page profile inside every project repo.
+
+**Proposed (not yet implemented):** add a `target_repo_role:` key to
+`bos-managed-files.yaml` with values:
+
+| Value              | Meaning                                                 | Receives                                                       |
+| ------------------ | ------------------------------------------------------- | -------------------------------------------------------------- |
+| `consumer` (default) | A normal project repo                                  | Today's services only — none of the org-default-only content   |
+| `org-default-repo` | The `blackoutsecure/.github` org repo itself           | `community-health/*`, `github-meta/*`, `org-profile/README.md` |
+
+The role gates which services in `SERVICE_FILES` / `SERVICE_INIT_FILES`
+fire. Wiring lives in `sync.py` and is deliberately deferred until the
+content-extraction migration above is also designed — they share
+plumbing.
 
 ## Migration roadmap (proposed, not started)
 
@@ -110,6 +152,9 @@ Recommended migration order (simplest first; lowest blast radius):
 
 | Order | File(s)                       | Why first                                                |
 | ----- | ----------------------------- | -------------------------------------------------------- |
+| 0     | `community-health/*`,         | Already extracted — pure static markdown, no placeholders, |
+|       | `github-meta/*`,              | single consumer (`.github` org repo) via `target_repo_role`. |
+|       | `org-profile/README.md`       | Lowest blast radius of all — only one consumer.          |
 | 1     | `licenses/*.txt`              | Static text, no placeholders for Apache-2.0; one-to-one  |
 |       |                               | registry mapping; lowest reviewer ambiguity              |
 | 2     | `notice.apache2.txt`,         | Static-ish templates with `{{KEY}}` placeholders only —  |
@@ -123,6 +168,20 @@ Recommended migration order (simplest first; lowest blast radius):
 |       | `workflows/lint.*`            | semantics make accidental regressions easier to spot     |
 
 Each step is its own PR with its own drift-check survival. Do not batch.
+
+### Status of step 0 (community-health / github-meta / org-profile)
+
+The content is **on disk** (the new `community-health/`, `github-meta/`,
+`org-profile/` directories you see today). What is NOT done:
+
+- `sync.py` has no `target_repo_role` plumbing yet.
+- No service registry entries point at these files.
+- No kicker workflow exists to push them to `blackoutsecure/.github`.
+
+This is intentional. The content moved first so it could be reviewed
+in isolation. Wiring is the next PR — and lands together with the
+first `_*` constant extraction so both share the same `_load_template()`
+helper + drift-check.
 
 ## What does NOT belong here
 

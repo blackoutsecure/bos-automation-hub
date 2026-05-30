@@ -1395,6 +1395,123 @@ jobs:
 """
 
 
+# The hub does NOT enable `bos_launchpad_gate` on itself — `hub-gate.yml`
+# at `.github/workflows/hub-gate.yml` uses a local `./` ref to
+# `bos-gate.yml` so a broken gate definition can be fixed inside the
+# same PR without first publishing the kicker. Every OTHER repo opts
+# in via `bos_launchpad_gate` and gets this file pushed by the sync.
+_BOS_LAUNCHPAD_GATE_YML = """\
+# Blackout Secure Launchpad — gate kicker (hub-managed).
+#
+# Calls `bos-gate.yml` in blackoutsecure/bos-automation-hub. Reads
+# per-repo customization from `.bos-launchpad.yaml` at the repo root
+# (the optional `gate:` block — every key has a sensible default).
+#
+# CUSTOMIZE via `.bos-launchpad.yaml` — NOT this file. The hub
+# overwrites this workflow in place on every sync; hand-edits are
+# lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
+#
+# Branch targeting note: this kicker fires on PRs targeting `main` OR
+# `dev`. Static repos only have one; Marketplace Action repos (whose
+# default branch is `dev` and main lands via `release-promote.yml`)
+# have both. The unused branch never matches, so the filter is
+# harmless when only one exists. Repos using a non-standard target
+# branch should retire this kicker and hand-author their own caller
+# of `bos-gate.yml` until a second flavor is added.
+#
+# Single REQUIRED status check to pin in branch protection (after the
+# first green run): `gate / Gate summary`. Do NOT pin the individual
+# leaf jobs — the `Gate summary` aggregator stays green-stable when
+# the underlying gate set changes.
+name: Blackout Secure Launchpad (gate)
+
+on:
+  pull_request:
+    branches: [main, dev]
+  # Merge-queue commits must replay the same gate or required-check
+  # enforcement fails open. `bos-gate.yml` handles the merge_group
+  # event (skips PR-scope-only jobs like dependency-review).
+  merge_group:
+  # Manual trigger for ad-hoc revalidation against an arbitrary ref.
+  workflow_dispatch:
+
+# No top-level `concurrency:` — the gate reusable owns serialization
+# per `${{ github.event.pull_request.number || github.ref }}`.
+permissions:
+  contents: read
+
+jobs:
+  parse-config:
+    name: Parse .bos-launchpad.yaml
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      cfg: ${{ steps.read.outputs.cfg }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Convert .bos-launchpad.yaml to JSON
+        id: read
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `.bos-launchpad.yaml` is OPTIONAL for the gate kicker — every
+          # gate input has a default in `bos-gate.yml`. When the file is
+          # absent we emit `{}` so the downstream `fromJson(...).gate.*
+          # || <default>` expressions flow through cleanly.
+          if [[ -f .bos-launchpad.yaml ]]; then
+            if ! cfg="$(yq -o=json -I=0 '.' .bos-launchpad.yaml)"; then
+              echo "::error file=.bos-launchpad.yaml::YAML parse error (see preceding yq output)."
+              exit 1
+            fi
+            if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
+              echo "::error file=.bos-launchpad.yaml::Resulting JSON did not parse — yq emitted invalid output."
+              exit 1
+            fi
+          else
+            cfg='{}'
+          fi
+          {
+            echo "cfg<<__BOS_EOF__"
+            echo "$cfg"
+            echo "__BOS_EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+  gate:
+    name: gate
+    needs: parse-config
+    permissions:
+      # Superset of every leaf job in `bos-gate.yml`. GHA validates
+      # nested reusable-workflow permissions statically at call time,
+      # so even gates that are toggled off must have their permission
+      # bits granted here.
+      contents:        read
+      security-events: write   # code-scanning kit SARIF upload
+      actions:         read    # code-scanning kit posture audit
+      pull-requests:   read    # dependency-review + pr-title leaves
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@main
+    with:
+      kit_version:               ${{ fromJson(needs.parse-config.outputs.cfg).gate.kit_version || 'v0.1.2' }}
+      code_scanning_kit_version: ${{ fromJson(needs.parse-config.outputs.cfg).gate.code_scanning_kit_version || 'v1' }}
+      # `!= false` semantics: missing key → null → null != false →
+      # true. Match the reusable's own defaults for these flags.
+      enable_lint:                    ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_lint != false }}
+      enable_baseline:                ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_baseline != false }}
+      enable_dependency_review:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_dependency_review != false }}
+      enable_code_scan:               ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_code_scan != false }}
+      enable_pinned_actions_check:    ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pinned_actions_check != false }}
+      enable_pr_title_check:          ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pr_title_check != false }}
+      pr_title_types:                 ${{ fromJson(needs.parse-config.outputs.cfg).gate.pr_title_types || 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert' }}
+    secrets:
+      # Optional. Absent → falls back to GITHUB_TOKEN inside the gate
+      # (sufficient for PS001 only; the wider posture audit needs an
+      # admin-reach PAT exposed via org/repo secrets as `SCANNING_PAT`).
+      scanning_pat: ${{ secrets.SCANNING_PAT }}
+"""
+
+
 # --------------------------------------------------------------------------- #
 # Templated whole-file canonical content (LICENSE / NOTICE / CODEOWNERS)      #
 # --------------------------------------------------------------------------- #
@@ -2215,6 +2332,9 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     },
     "bos_launchpad_sync_files": {
         ".github/workflows/bos-launchpad-sync-files.yml": _BOS_LAUNCHPAD_SYNC_FILES_YML,
+    },
+    "bos_launchpad_gate": {
+        ".github/workflows/bos-launchpad-gate.yml": _BOS_LAUNCHPAD_GATE_YML,
     },
 }
 

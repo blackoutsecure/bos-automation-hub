@@ -1,0 +1,64 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# hub-gate.yml — thin caller of bos-gate.yml for this repo
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# This is the LOCAL wiring of `bos-gate.yml` (the reusable workflow
+# defined alongside this file). It fires on every PR targeting `main`
+# and on every merge-queue commit, then delegates the actual gating
+# work to the reusable workflow.
+#
+# Keep this file deliberately small: any logic change belongs in
+# `bos-gate.yml` so other repos that adopt the gate inherit it for
+# free. This caller exists solely to declare WHEN the hub runs the
+# gate against ITSELF.
+#
+# ⚠️  HUB-ONLY caller. Other repos do NOT copy this file — they enable
+# the `bos_launchpad_gate` service in `sync-managed-files.yml`, and
+# the hub writes `.github/workflows/bos-launchpad-gate.yml` (the
+# hub-managed kicker) into them on every sync. See
+# `_BOS_LAUNCHPAD_GATE_YML` in
+# `.github/actions/sync-managed-files/sync.py` for the canonical
+# kicker body, and `examples/bos-launchpad-gate.kicker.example.yml`
+# for a read-only snapshot. The hub itself intentionally does NOT
+# enable `bos_launchpad_gate` on itself — this file uses a local `./`
+# ref to `bos-gate.yml` so a broken gate definition can be fixed
+# inside the same PR without first publishing the kicker.
+#
+# After the first green run, add this required check in repo settings:
+#
+#   Settings → Branches → main → Require status checks to pass:
+#     hub-gate / gate / Gate summary
+#
+# Use `Gate summary` (not the individual jobs) so the underlying gate
+# set can change without re-pinning required checks.
+
+name: hub-gate
+
+on:
+  pull_request:
+    # Hub uses dev-default convention (matching the Marketplace Action
+    # repos): `dev` is the working branch, `main` is the promoted /
+    # stable branch. PRs into either gate the same set of checks.
+    branches: [main, dev]
+  merge_group:
+  # Manual trigger for ad-hoc validation against an arbitrary ref.
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  gate:
+    name: gate
+    uses: ./.github/workflows/bos-gate.yml
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      pull-requests: read
+    with:
+      # Local SHAs / version pins flow through here; bump in one place
+      # when the kit ships a new release.
+      kit_version: v0.1.2
+      code_scanning_kit_version: v1
+    secrets:
+      scanning_pat: ${{ secrets.SCANNING_PAT }}

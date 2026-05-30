@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """Refresh / verify the launchpad kicker snapshot examples in ``examples/``.
 
-The three on-disk snapshots
+The on-disk snapshots
 
   * ``examples/bos-launchpad-release.kicker.example.yml``
   * ``examples/bos-launchpad-cf-pages.kicker.example.yml``
   * ``examples/bos-launchpad-sync-files.kicker.example.yml``
+  * ``examples/bos-launchpad-gate.kicker.example.yml``
 
 are read-only reference renders of the kicker workflows that the hub's
 ``sync-managed-files`` action writes into each consumer repo when the
-``bos_launchpad_release`` / ``bos_launchpad_cf_pages`` /
-``bos_launchpad_sync_files`` service is enabled. The canonical source of
-truth lives in ``.github/actions/sync-managed-files/sync.py`` as the
-Python string constants ``_BOS_LAUNCHPAD_RELEASE_YML``,
-``_BOS_LAUNCHPAD_CF_PAGES_YML``, and ``_BOS_LAUNCHPAD_SYNC_FILES_YML``.
+corresponding ``bos_launchpad_release`` / ``bos_launchpad_cf_pages`` /
+``bos_launchpad_sync_files`` / ``bos_launchpad_gate`` service is enabled.
+The canonical source of truth lives in
+``.github/actions/sync-managed-files/sync.py`` as the Python string
+constants ``_BOS_LAUNCHPAD_RELEASE_YML``, ``_BOS_LAUNCHPAD_CF_PAGES_YML``,
+``_BOS_LAUNCHPAD_SYNC_FILES_YML``, and ``_BOS_LAUNCHPAD_GATE_YML``.
 
 This script keeps the two in sync.
 
@@ -61,6 +63,7 @@ _DISCLAIMER_TEMPLATE = """\
 #   * release flavor    → `examples/bos-launchpad-release.example.yaml`
 #   * cf-pages flavor   → `examples/bos-launchpad-cf-pages.example.yaml`
 #   * sync-files flavor → `examples/bos-launchpad-sync-files.example.yaml`
+#   * gate flavor       → `examples/bos-launchpad-gate.example.yaml`
 #
 # To refresh this snapshot after editing the constant in sync.py:
 #   python3 scripts/sync-kicker-examples-from-sync.py
@@ -88,6 +91,12 @@ _CASES = [
         "bos_launchpad_sync_files",
         "bos-launchpad-sync-files.yml",
         EXAMPLES_DIR / "bos-launchpad-sync-files.kicker.example.yml",
+    ),
+    (
+        "_BOS_LAUNCHPAD_GATE_YML",
+        "bos_launchpad_gate",
+        "bos-launchpad-gate.yml",
+        EXAMPLES_DIR / "bos-launchpad-gate.kicker.example.yml",
     ),
 ]
 

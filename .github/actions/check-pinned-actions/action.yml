@@ -1,0 +1,131 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# check-pinned-actions — composite gate for `uses:` SHA pinning
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# What it does
+# ------------
+# Scans every YAML file under `.github/workflows/` and `.github/actions/`
+# (recursively) for `uses:` lines. Fails the job when any external action
+# reference is pinned to a tag or branch instead of a full 40-char commit
+# SHA. Exempts:
+#
+#   * Local references (`uses: ./...`)
+#   * Docker image references (`uses: docker://...`)
+#   * Reusable workflow refs whose path is in the SAME repo (`uses: ./...`
+#     and `uses: <owner>/<repo>/.github/workflows/x.yml@<sha>` are both
+#     subject to SHA enforcement when the owner/repo differs from the
+#     caller).
+#
+# Why a separate composite
+# ------------------------
+# Lives here (not inline in `bos-gate.yml`) so other repos that adopt
+# the gate inherit the exact same enforcement logic. Updating the rule
+# (e.g. tightening to include local actions in the SHA check) is a
+# one-line composite change, not 14 caller updates.
+#
+# Implementation notes
+# --------------------
+# - Pure POSIX sh + grep + awk — no setup, no toolchain.
+# - Reports every offender (not just the first), so the PR description
+#   in a multi-line `uses:` audit shows the full picture in one job run.
+# - Treats `uses: docker://` as an out-of-scope reference. SHA pinning
+#   for docker images is a different surface (image digest in the
+#   `docker://...@sha256:...` tail) and is enforced by the code-scan job.
+
+name: Check pinned actions
+description: >-
+  Fail when any `uses:` in this repo's workflows / composite actions
+  references a third-party action by tag instead of by 40-char SHA.
+
+runs:
+  using: composite
+  steps:
+    - name: Scan for unpinned `uses:` references
+      shell: bash
+      env:
+        # If a future repo legitimately needs a tag-pin exemption for a
+        # specific action (e.g. a trusted first-party GitHub action), add
+        # its `owner/repo` here, ONE PER LINE. Default: none.
+        ALLOW_TAG_PIN: |
+      run: |
+        set -euo pipefail
+
+        # Build the allow-list as a sorted, de-duplicated newline-separated
+        # set for fast membership lookup with grep -Fx.
+        allow_file="$(mktemp)"
+        printf '%s\n' "${ALLOW_TAG_PIN}" | awk 'NF' | sort -u > "$allow_file"
+
+        offenders_file="$(mktemp)"
+        : > "$offenders_file"
+
+        # The two roots that contain action references. If either is
+        # missing in a given repo, find returns nothing — fine.
+        roots=()
+        [ -d .github/workflows ] && roots+=(.github/workflows)
+        [ -d .github/actions ] && roots+=(.github/actions)
+        if [ "${#roots[@]}" -eq 0 ]; then
+          echo "::notice::no .github/workflows or .github/actions present — skipping"
+          exit 0
+        fi
+
+        # Match any line whose first non-whitespace token is `uses:`.
+        # Strip the prefix and any trailing comment; what remains is the
+        # action reference (possibly empty for malformed YAML, in which
+        # case the SHA regex below correctly flags it).
+        while IFS= read -r -d '' file; do
+          # awk pulls the line number AND the `uses:` value so the offender
+          # report can cite a clickable github.com line.
+          awk '
+            /^[[:space:]]*uses:[[:space:]]*/ {
+              # Strip key, leading ws, trailing comment + ws.
+              sub(/^[[:space:]]*uses:[[:space:]]*/, "")
+              sub(/[[:space:]]*#.*$/, "")
+              sub(/[[:space:]]+$/, "")
+              # Drop surrounding quotes if present.
+              gsub(/^["'\'']|["'\'']$/, "")
+              print FILENAME ":" NR ":" $0
+            }
+          ' "$file"
+        done < <(find "${roots[@]}" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0) \
+        | while IFS=: read -r path lineno ref; do
+            # Skip blank references (defensive — shouldn't normally happen).
+            [ -z "$ref" ] && continue
+            # Local action — relative path, no SHA needed.
+            case "$ref" in
+              ./*|../*) continue ;;
+              docker://*) continue ;;  # out of scope here; image-digest enforced by code-scan
+            esac
+            # Reference must contain exactly one `@` separating ref-target from version.
+            base="${ref%@*}"
+            ver="${ref#*@}"
+            if [ "$base" = "$ref" ]; then
+              # No `@` at all — illegal anywhere except local refs which we already handled.
+              printf '%s:%s: %s — missing `@<sha>` suffix\n' "$path" "$lineno" "$ref" >> "$offenders_file"
+              continue
+            fi
+            # owner/repo[/path] is everything before the first slash after the @
+            # (we already split). Use the FIRST two segments for the allow-list key.
+            owner_repo="$(printf '%s\n' "$base" | awk -F/ 'NF>=2 {print $1"/"$2}')"
+            if grep -Fxq -- "$owner_repo" "$allow_file" 2>/dev/null; then
+              # Allow-listed — tag pin permitted.
+              continue
+            fi
+            # Enforce: version must be a 40-char hex SHA.
+            if printf '%s' "$ver" | grep -Eq '^[0-9a-f]{40}$'; then
+              continue
+            fi
+            printf '%s:%s: %s — version `%s` is not a 40-char SHA\n' \
+              "$path" "$lineno" "$ref" "$ver" >> "$offenders_file"
+          done
+
+        if [ -s "$offenders_file" ]; then
+          echo "::error::Unpinned action references found. Pin every third-party action by SHA (Dependabot will update for you)."
+          echo ""
+          echo "Offenders:"
+          sed 's/^/  /' "$offenders_file"
+          echo ""
+          echo "Allow specific actions to use tag pins by appending to ALLOW_TAG_PIN in this composite."
+          exit 1
+        fi
+
+        echo "All `uses:` references are SHA-pinned (or local / docker / allow-listed)."
