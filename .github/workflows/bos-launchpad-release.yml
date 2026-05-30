@@ -497,6 +497,21 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: string
         default: ''
+      cloudflare_deploy_artifact_name:
+        description: >-
+          When set, the Cloudflare Pages deploy job downloads the named
+          build artifact (uploaded by an earlier job in the SAME workflow
+          run via `actions/upload-artifact`) into `cloudflare_deploy_dir`
+          instead of staging from the caller's checked-out tree. Use this
+          for pipelines whose build step can't be expressed as a
+          `cloudflare_prebuild_command` string (needs `actions/cache`, sudo
+          apt installs, a different runner SKU, or a long timeout).
+          Mutually exclusive with `cloudflare_prebuild_command`,
+          `cloudflare_copy_files`, and `cloudflare_copy_dirs` — the
+          deploy reusable rejects callers that combine them.
+        required: false
+        type: string
+        default: ''
       cloudflare_deploy:
         description: "`'true'`/`'false'` to force the deploy step. Empty deploys only on default-branch pushes."
         required: false
@@ -1275,6 +1290,7 @@ jobs:
       commit_message:             ${{ inputs.cloudflare_commit_message }}
       wrangler_version:           ${{ inputs.cloudflare_wrangler_version }}
       extra_wrangler_args:        ${{ inputs.cloudflare_extra_wrangler_args }}
+      deploy_artifact_name:       ${{ inputs.cloudflare_deploy_artifact_name }}
       deploy:                     ${{ inputs.cloudflare_deploy }}
       runs_on:                    ${{ inputs.cloudflare_runs_on }}
       checkout_fetch_depth:       ${{ inputs.cloudflare_checkout_fetch_depth }}

@@ -104,6 +104,22 @@ name: Cloudflare Pages Deploy (reusable)
         required: false
         type: string
         default: ''
+      deploy_artifact_name:
+        description: >-
+          When set, the deploy job downloads the named build artifact
+          (uploaded by an earlier job in the SAME workflow run via
+          `actions/upload-artifact`) into `deploy_dir` instead of staging
+          from the caller's checked-out tree. Use this for pipelines whose
+          build step can't be expressed as a `prebuild_command` string
+          (needs `actions/cache`, sudo apt installs, a different runner
+          SKU, or a long timeout). The generators (`generate_headers`,
+          `generate_sitemap`, etc.) still run AFTER the download, so
+          `_headers`/`sitemap.xml` overlay the artifact contents. Mutually
+          exclusive with `prebuild_command`, `copy_files`, and `copy_dirs`
+          — those are validated as empty when this input is set.
+        required: false
+        type: string
+        default: ''
       deploy:
         description: >-
           `'true'`/`'false'` to force the deploy step. Empty (default) deploys
@@ -558,6 +574,10 @@ jobs:
           HEADERS_HSTS_MAX_AGE: ${{ inputs.headers_hsts_max_age }}
           HEADERS_CACHE_ASSETS_PATTERN: ${{ inputs.headers_cache_assets_pattern }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DEPLOY_ARTIFACT_NAME: ${{ inputs.deploy_artifact_name }}
+          PREBUILD_COMMAND: ${{ inputs.prebuild_command }}
+          COPY_FILES: ${{ inputs.copy_files }}
+          COPY_DIRS: ${{ inputs.copy_dirs }}
         run: |
           set -euo pipefail
           ERR=0
@@ -688,6 +708,25 @@ jobs:
             fi
           fi
 
+          # ── deploy_artifact_name: shape + mutually-exclusive checks ──
+          if [ -n "${DEPLOY_ARTIFACT_NAME}" ]; then
+            # GitHub artifact names: 1-256 chars, conservative subset of
+            # `[A-Za-z0-9._ -]` (no path separators or shell metacharacters)
+            # — matches upload-artifact v4+ validation and is safe to pass
+            # to download-artifact's `name:` input verbatim.
+            if ! printf '%s' "${DEPLOY_ARTIFACT_NAME}" \
+              | grep -Eq '^[A-Za-z0-9._-][A-Za-z0-9._ -]{0,255}$'; then
+              fail "input 'deploy_artifact_name' is not a valid artifact name: '${DEPLOY_ARTIFACT_NAME}'"
+            fi
+            # Mutual exclusion: the artifact replaces these staging paths.
+            [ -z "${PREBUILD_COMMAND}" ] \
+              || fail "input 'deploy_artifact_name' is mutually exclusive with 'prebuild_command'"
+            [ -z "${COPY_FILES}" ] \
+              || fail "input 'deploy_artifact_name' is mutually exclusive with 'copy_files'"
+            [ -z "${COPY_DIRS}" ] \
+              || fail "input 'deploy_artifact_name' is mutually exclusive with 'copy_dirs'"
+          fi
+
           if [ "${GENERATE_HEADERS}" = "true" ]; then
             # Tokenize headers_presets and reject unknown / malformed values
             # at the workflow boundary, so callers get a fast actionable
@@ -747,7 +786,7 @@ jobs:
           echo "deploy=${DECISION}"
 
       - name: Run prebuild command
-        if: inputs.prebuild_command != ''
+        if: inputs.prebuild_command != '' && inputs.deploy_artifact_name == ''
         env:
           PREBUILD_COMMAND: ${{ inputs.prebuild_command }}
           # WORKING_DIRECTORY inherited from job-level env.
@@ -765,6 +804,7 @@ jobs:
           bash -eo pipefail -c "${PREBUILD_COMMAND}"
 
       - name: Stage deploy directory
+        if: inputs.deploy_artifact_name == ''
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/stage-deploy-dir@main
         with:
           public_dir: ${{ inputs.public_dir }}
@@ -772,6 +812,39 @@ jobs:
           clean: ${{ inputs.clean_deploy_dir }}
           copy_files: ${{ inputs.copy_files }}
           copy_dirs: ${{ inputs.copy_dirs }}
+
+      # ─── Artifact mode (mutually exclusive with stage-deploy-dir) ───
+      # Used when an upstream build job in the SAME workflow run produces
+      # the static site (e.g. an OpenWrt SDK build with `actions/cache`
+      # and sudo apt deps that don't fit a `prebuild_command` string).
+      # We honour `clean_deploy_dir` ourselves so the download step sees
+      # a freshly-created directory; the artifact name shape is validated
+      # in the preflight step above.
+      - name: Prepare deploy directory (artifact mode)
+        if: inputs.deploy_artifact_name != ''
+        env:
+          # DEPLOY_DIR inherited from job-level env.
+          CLEAN: ${{ inputs.clean_deploy_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${DEPLOY_DIR}" in
+            ''|/*|*..*|*$'\n'*|*$'\r'*)
+              echo "ERROR: deploy_dir must be a non-empty, repo-relative path without '..' or newlines (got '${DEPLOY_DIR}')" >&2
+              exit 1 ;;
+          esac
+          if [ "${CLEAN}" = "true" ] && [ -d "${DEPLOY_DIR}" ]; then
+            echo "Cleaning ${DEPLOY_DIR}"
+            rm -rf -- "${DEPLOY_DIR}"
+          fi
+          mkdir -p -- "${DEPLOY_DIR}"
+
+      - name: Download deploy artifact
+        if: inputs.deploy_artifact_name != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.deploy_artifact_name }}
+          path: ${{ inputs.deploy_dir }}
 
       # ──────────────────────────────────────────────────────────────
       # Generators (each opt-in). Pinned by SHA — Dependabot bumps

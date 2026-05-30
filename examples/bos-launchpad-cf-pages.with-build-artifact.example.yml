@@ -1,0 +1,312 @@
+# Blackout Secure Launchpad — Cloudflare Pages with a bespoke build job
+#
+# Hand-authored consumer workflow for static sites whose build step
+# CAN'T be expressed as the launchpad's `cloudflare_prebuild_command`
+# input. The build step runs in a separate job with its own runner,
+# timeout, caches, and tooling; it uploads the staged site as a
+# GitHub Actions artifact; a downstream `release` job hands off to
+# the hub's `bos-launchpad-release.yml` reusable, which downloads
+# the artifact into `cloudflare_deploy_dir`, layers on headers /
+# sitemap / robots / manifest / security.txt as requested, deploys
+# via `wrangler-action`, and purges the edge cache.
+#
+# ────────────────────────────────────────────────────────────────
+# WHEN to use this pattern (vs. the simpler kicker patterns):
+# ────────────────────────────────────────────────────────────────
+#
+#   * The simplest path is the hub-managed `bos_launchpad_cf_pages`
+#     kicker driven by `.bos-launchpad.yaml`. See
+#     `examples/bos-launchpad-cf-pages.example.yaml`. Use that when
+#     your build is `npm ci && npm run build` (or empty, for
+#     pure-static sites).
+#
+#   * The next step up is `cloudflare_prebuild_command:` on the
+#     launchpad — a single shell string the deploy job runs before
+#     staging. Good for builds that fit one shell line and the
+#     ubuntu-latest tool versions.
+#
+#   * Reach for THIS pattern (a separate `build` job that uploads
+#     an artifact) when ANY of these apply:
+#       - The build needs `actions/cache` (the launchpad's deploy
+#         job doesn't expose a cache, by design — it has to stay
+#         fast and reproducible for the deploy half).
+#       - The build needs sudo apt-get / apk add / brew install of
+#         non-default tooling.
+#       - The build needs a non-default runner SKU (a specific
+#         self-hosted label, a larger GitHub-hosted runner, an x64
+#         pin, etc.).
+#       - The build needs >30 minutes (the launchpad's deploy job
+#         is hard-pinned to 30 min).
+#       - The build needs secrets the deploy job doesn't carry, or
+#         conversely shouldn't see Cloudflare credentials.
+#
+#   * `cloudflare_deploy_artifact_name` is MUTUALLY EXCLUSIVE with
+#     `cloudflare_prebuild_command`, `cloudflare_copy_files`, and
+#     `cloudflare_copy_dirs`. The launchpad rejects callers that
+#     combine them. The artifact IS the deploy tree — copy/stage
+#     anything you need into it during the build job.
+#
+# ────────────────────────────────────────────────────────────────
+# WHERE the artifact handoff happens:
+# ────────────────────────────────────────────────────────────────
+#
+# A reusable workflow runs IN THE SAME WORKFLOW RUN as its caller,
+# so `actions/download-artifact` inside the launchpad finds
+# `actions/upload-artifact` outputs from the `build` job by name
+# alone — no cross-workflow token plumbing, no extra `gh` calls.
+#
+# ────────────────────────────────────────────────────────────────
+# Required secrets (all inherited by the `release` job via
+# `secrets: inherit`):
+#   CLOUDFLARE_API_TOKEN   — Account → Cloudflare Pages → Edit; add
+#                            Zone → Cache Purge + Zone → Read when
+#                            `cloudflare_purge_cache: true` (default).
+#   CLOUDFLARE_ACCOUNT_ID  — optional; launchpad auto-resolves via
+#                            `GET /accounts` when blank.
+#   CLOUDFLARE_ZONE_ID     — optional; launchpad auto-resolves from
+#                            `cloudflare_site_url` when blank.
+# Prefer `vars.CLOUDFLARE_ACCOUNT_ID` / `vars.CLOUDFLARE_ZONE_ID`
+# over `secrets.*`: the runner doesn't auto-mask `vars`, so the
+# resolved value can flow through `GITHUB_OUTPUT` to downstream
+# steps. The launchpad falls back to `secrets.*` for back-compat.
+#
+# Real-world example of this pattern:
+#   blackoutsecure/blackoutsecure-openwrt
+#   .github/workflows/bos-launchpad-openwrt-deploy.yml
+#
+name: Build & Deploy (Cloudflare Pages via launchpad)
+
+on:
+  # Manual runs — exposed inputs are entirely up to you; the
+  # launchpad's `release` job doesn't see them, so wire them into
+  # the `build` job's env if you want them to influence the build.
+  workflow_dispatch:
+  push:
+    branches: [main]
+    # Tune these paths to the actual sources of YOUR build. The push
+    # trigger fires whenever any matching path changes; the launchpad
+    # has its own gating layered on top (`cloudflare_pages` toggle,
+    # security-scan gate, etc.) so an unwanted run is still a cheap
+    # short-circuit.
+    paths:
+      - '.github/workflows/bos-launchpad-cf-pages.with-build-artifact.yml'
+      - 'src/**'
+      - 'content/**'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+# Workflow-level serialization. `cancel-in-progress: false` because
+# most heavy builds aren't safe to cancel mid-flight (e.g. caches
+# get half-populated, downstream make targets break). Drop the
+# workflow-level group entirely if your build IS safe to cancel —
+# the launchpad's own Cloudflare Pages job has its OWN concurrency
+# group (`cloudflare-pages-<project>-<branch>`) which prevents
+# simultaneous deploys to the same Pages project.
+concurrency:
+  group: build-and-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build & stage site
+    # Runner pinning: drop in `ubuntu-latest` for hosted, or your
+    # `vars.RUNNER_*` for a self-hosted SKU. The `fromJSON` +
+    # `startsWith` dance below supports BOTH bare labels and JSON
+    # array shapes for the var, so you can switch shapes without
+    # touching this expression. If you only ever use bare labels,
+    # collapse to `runs-on: ${{ vars.RUNNER_X64 }}`.
+    runs-on: ${{ fromJSON(startsWith(vars.RUNNER_X64 || 'ubuntu-latest', '[') && (vars.RUNNER_X64 || 'ubuntu-latest') || format('"{0}"', vars.RUNNER_X64 || 'ubuntu-latest')) }}
+    # Tune to the slowest realistic cold-cache run for YOUR build.
+    # The launchpad's deploy job is 30 min, capped — this job is
+    # the place to give yourself headroom.
+    timeout-minutes: 60
+    env:
+      # Put build-only vars here. Cloudflare credentials live in the
+      # downstream `release` job (the launchpad reads them from
+      # inherited secrets / vars). Keep the surface small.
+      OUTPUT_DIR: site
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Set to `true` if your build embeds the commit SHA / tag.
+          persist-credentials: false
+          fetch-depth: 0
+
+      # ── (Optional) host build tooling ─────────────────────────────
+      # Portable across runner shapes:
+      #   GitHub-hosted ubuntu-* (non-root + NOPASSWD sudo) → sudo
+      #   Self-hosted as root                               → direct
+      #   Self-hosted as non-root with sudo installed       → sudo
+      # Hard-fails when neither root nor sudo is available so the
+      # diagnostic is "fix your runner image" instead of the obscure
+      # `sudo: command not found` (exit 127). Delete this whole step
+      # if you build on plain `ubuntu-latest` with no extra apt deps.
+      - name: Install host build dependencies
+        run: |
+          set -euo pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            SUDO=""
+          elif command -v sudo >/dev/null 2>&1; then
+            SUDO=sudo
+          else
+            echo "::error title=Host deps install::Neither root nor sudo available on this runner."
+            exit 1
+          fi
+          $SUDO apt-get update
+          $SUDO apt-get install -y --no-install-recommends \
+            ca-certificates curl git rsync
+            # ADD YOUR BUILD-TIME PACKAGES HERE.
+
+      # ── (Optional) language runtime ───────────────────────────────
+      # Replace / delete to match your build. Examples:
+      #   actions/setup-node@…
+      #   actions/setup-python@…
+      #   actions/setup-go@…
+      #   actions/setup-java@…
+      #
+      # NOTE: the launchpad's deploy job runs its own `setup-node` for
+      # `wrangler` — you don't need to set up Node here unless YOUR
+      # build needs it.
+      #
+      # Example:
+      # - name: Set up Node.js
+      #   uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      #   with:
+      #     node-version: '22'
+      #     cache: npm
+
+      # ── Cache build state ────────────────────────────────────────
+      # Split into restore (here) + explicit save-after-build below —
+      # the actions/cache-team-recommended replacement for the
+      # deprecated `save-always: true`. Pattern: per-run-unique
+      # primary key (never hits) + restore-keys prefix to pick up
+      # the most recent compatible snapshot. Always saves a fresh
+      # snapshot post-build so the next run picks up new deps.
+      #
+      # Cache safety: this pattern is safe when your build tool is
+      # reentrant (a killed run leaves a recoverable partial state
+      # the next run can fix). If your build tool corrupts its
+      # cache when interrupted, gate the save step with
+      # `if: success()` instead of `if: always()`.
+      - name: Restore build cache
+        id: build-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          # REPLACE with the directories YOUR build hydrates.
+          path: |
+            .cache
+            node_modules
+          key: build-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ github.run_id }}
+          restore-keys: |
+            build-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            build-${{ runner.os }}-
+
+      # ── Build the site ───────────────────────────────────────────
+      # REPLACE THIS BLOCK with whatever produces your deploy tree.
+      # Whatever you write must produce a single directory at
+      # `${{ env.OUTPUT_DIR }}` (referenced below by `upload-artifact`
+      # and `cloudflare_deploy_dir`). Everything in that directory
+      # is what ships to Cloudflare Pages.
+      - name: Build site
+        run: |
+          set -euo pipefail
+          # EXAMPLE — replace with your real build:
+          #   npm ci
+          #   npm run build -- --output-path "${OUTPUT_DIR}"
+          mkdir -p "${OUTPUT_DIR}"
+          echo "<h1>hello, world</h1>" > "${OUTPUT_DIR}/index.html"
+
+      - name: Save build cache
+        if: always() && steps.build-cache.outputs.cache-primary-key != ''
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            .cache
+            node_modules
+          key: ${{ steps.build-cache.outputs.cache-primary-key }}
+
+      # ── Hand the staged site to the downstream `release` job ─────
+      # `if-no-files-found: error` catches a silent build regression
+      # at upload time instead of pushing an empty site to Cloudflare.
+      # `retention-days: 7` is enough for the downstream deploy job
+      # plus a small forensic window; tune as you like.
+      #
+      # The `name:` here MUST match `cloudflare_deploy_artifact_name`
+      # on the `release` job below.
+      - name: Upload site artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cf-pages-site
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────────
+  # Release — call the hub launchpad. The Cloudflare Pages stage
+  # downloads the `cf-pages-site` artifact into
+  # `cloudflare_deploy_dir`, generates headers / sitemap / robots /
+  # manifest / security.txt as requested, deploys via
+  # `wrangler-action`, and purges the edge cache. All Cloudflare
+  # credentials are read from inherited secrets / org vars.
+  # ───────────────────────────────────────────────────────────────
+  release:
+    name: Release (Cloudflare Pages via launchpad)
+    needs: build
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
+    with:
+      cloudflare_pages: true
+      # REPLACE with your Pages project name (or wire from `vars.*`
+      # via the workflow-level `env:` block — reusable-workflow
+      # `with:` inputs can't reference `secrets.*` but CAN reference
+      # `vars.*`).
+      cloudflare_project_name: ${{ vars.CLOUDFLARE_PROJECT_NAME || 'my-pages-project' }}
+
+      # MUST match the `name:` on the `upload-artifact` step above.
+      cloudflare_deploy_artifact_name: cf-pages-site
+
+      # The launchpad creates this directory, downloads the artifact
+      # into it, then runs generators + wrangler against it. Pick
+      # any repo-relative path; `./site` is conventional.
+      cloudflare_deploy_dir: ./site
+
+      # Drives `_headers` generation, sitemap canonical URL, robots
+      # base URL, security.txt, and edge-cache purge zone resolve.
+      cloudflare_site_url: https://www.example.com
+
+      # Blank = use the Pages project's default branch. Set to a
+      # non-default branch (e.g. `preview`) for preview deploys.
+      cloudflare_branch: main
+
+      # ── Generators (all default false — opt in per generator) ──
+      # The launchpad runs these AFTER the artifact downloads, so
+      # generated files OVERLAY the artifact contents. To suppress
+      # an overlay, ship the file in the artifact AND leave the
+      # corresponding generator off (the staging step doesn't
+      # overwrite existing files unless `replace_existing: true`).
+      cloudflare_generate_headers: true
+      cloudflare_headers_presets: 'security,cache'
+      cloudflare_headers_replace_existing: true
+      cloudflare_headers_csp: ''
+
+      # Sitemap / robots / security.txt / manifest — uncomment to
+      # enable. Each has its own `cloudflare_*` inputs documented
+      # in the hub README.
+      # cloudflare_generate_sitemap: true
+      # cloudflare_generate_robots: true
+      # cloudflare_generate_security_txt: true
+      # cloudflare_security_contact: 'security@example.com'
+      # cloudflare_generate_manifest: true
+      # cloudflare_manifest_name: 'My Site'
+      # cloudflare_manifest_short_name: 'MS'
+
+      # Edge cache purge — defaults to true; needs Zone:Read +
+      # Zone:Cache Purge on the API token. Set to false for preview
+      # deploys to avoid mass-busting production cache.
+      cloudflare_purge_cache: true
+    secrets: inherit

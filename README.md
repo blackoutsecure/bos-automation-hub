@@ -1758,6 +1758,16 @@ configs ship with the hub:
   `sync-managed-files.yml` caller pattern — wraps the same reusable
   that writes the kicker itself.
 
+A hand-authored consumer workflow for static sites whose build step
+can't live inside the launchpad's `cloudflare_prebuild_command`
+(needs `actions/cache`, sudo apt, a non-default runner SKU, or
+>30 min) is checked in as a separate copy-paste starter — uses a
+dedicated `build` job that uploads the staged site as an artifact,
+then a downstream `release` job that hands off to the launchpad
+via the `cloudflare_deploy_artifact_name` input:
+
+- [examples/bos-launchpad-cf-pages.with-build-artifact.example.yml](examples/bos-launchpad-cf-pages.with-build-artifact.example.yml)
+
 Read-only snapshots of the kicker workflows themselves (i.e. exactly
 what `sync-managed-files` writes into the consumer repo) are checked in
 alongside the operator-config examples, for reference / code-review use
