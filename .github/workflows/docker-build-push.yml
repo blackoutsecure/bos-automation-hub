@@ -135,8 +135,10 @@ name: Docker Build and Push (reusable)
         default: ./README.md
       short_description:
         description: >-
-          Docker Hub short description (max 100 chars). Empty leaves the
-          existing short description untouched.
+          Docker Hub short description (max 100 chars). Values longer than
+          100 chars are truncated to 99 chars + `…` with a `::warning::`
+          so the run is never blocked by an oversized description. Empty
+          leaves the existing short description untouched.
         required: false
         type: string
         default: ''

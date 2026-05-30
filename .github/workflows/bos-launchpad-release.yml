@@ -199,7 +199,11 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         type: string
         default: ''
       docker_short_description:
-        description: 'Docker Hub short description (<=100 chars). Empty leaves it untouched.'
+        description: >-
+          Docker Hub short description (<=100 chars). Values longer than
+          100 chars are truncated to 99 chars + `…` with a `::warning::`
+          so a too-long description never blocks the release. Empty
+          leaves it untouched.
         required: false
         type: string
         default: ''
@@ -239,7 +243,10 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         type: string
         default: ''
       companion_docker_short_description:
-        description: 'Docker Hub short description for the companion image (<=100 chars). Empty leaves it untouched.'
+        description: >-
+          Docker Hub short description for the companion image (<=100
+          chars). Values longer than 100 chars are truncated to 99 chars
+          + `…` with a `::warning::`. Empty leaves it untouched.
         required: false
         type: string
         default: ''

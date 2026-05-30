@@ -900,7 +900,7 @@ jobs:
 | `manifest_retry_delay` | number | `15` | Seconds between manifest retries. |
 | `update_description` | boolean | `true` | Sync the repo README + short description to Docker Hub after a successful manifest push. No-op when not pushing. |
 | `readme_filepath` | string | `./README.md` | Path to the README uploaded as the Docker Hub full description. |
-| `short_description` | string | `''` | Docker Hub short description (max 100 chars). Empty leaves the existing one untouched. |
+| `short_description` | string | `''` | Docker Hub short description (max 100 chars). Longer values are truncated to 99 chars + `…` with a `::warning::`. Empty leaves the existing one untouched. |
 | `enable_url_completion` | boolean | `true` | Convert relative URLs in the README to absolute GitHub URLs. |
 | `enable_scout` | boolean | `true` | Run Docker Scout against the image (PR comment on PRs, SARIF upload on pushes). See **Docker Scout** below. |
 | `scout_command` | string | `cves` | Scout command, or comma-separated list (`quickview`, `cves`, `compare`, `recommendations`, `sbom`, `environment`). |
@@ -1034,9 +1034,11 @@ for the full input list.
 Uploads a repository README and short description to Docker Hub. Wraps
 [`peter-evans/dockerhub-description`](https://github.com/peter-evans/dockerhub-description)
 with preflight validation (README exists, credentials/repository slug
-are non-empty and single-line, short description fits Docker Hub's
-100-char cap) so failures surface with a clear message instead of a
-401 from the registry API.
+are non-empty and single-line) so failures surface with a clear
+message instead of a 401 from the registry API. Short descriptions
+longer than Docker Hub's 100-char cap are truncated to 99 chars + `…`
+with a `::warning::` so an oversized value never blocks the run
+(Hub's API would otherwise reject it with a 400).
 
 It is invoked automatically by the `update-description` job in
 [`docker-build-push.yml`](.github/workflows/docker-build-push.yml) after

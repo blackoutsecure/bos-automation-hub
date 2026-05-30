@@ -22,8 +22,11 @@ inputs:
     default: ./README.md
   short_description:
     description: >-
-      Short description (max 100 chars). Empty leaves the existing short
-      description untouched.
+      Short description (max 100 chars). Values longer than 100 chars are
+      truncated to 99 chars + `…` with a `::warning::` so a too-long
+      description never blocks the run (Docker Hub's API would otherwise
+      reject it with a 400). Empty leaves the existing short description
+      untouched.
     required: false
     default: ''
   enable_url_completion:
@@ -35,6 +38,7 @@ runs:
   using: composite
   steps:
     - name: Preflight validation
+      id: preflight
       shell: bash
       env:
         REPOSITORY: ${{ inputs.repository }}
@@ -80,15 +84,37 @@ runs:
           *) fail "input 'enable_url_completion' must be 'true' or 'false' (got '${ENABLE_URL_COMPLETION}')" ;;
         esac
 
-        # Docker Hub caps short description at 100 chars.
+        # Docker Hub caps short description at 100 chars. Rather than
+        # failing the whole release (Hub's API would 400 if we passed an
+        # oversized value through), warn and truncate so the published
+        # description is always a sane subset of what the caller asked
+        # for. The 99-char cut + `…` keeps us at exactly 100 visible
+        # chars; `${var:0:99}` counts characters (not bytes) under the
+        # default UTF-8 locale on GitHub-hosted runners, matching the
+        # `${#var}` length measurement above.
+        SHORT_DESCRIPTION_OUT="${SHORT_DESCRIPTION}"
         if [ -n "${SHORT_DESCRIPTION}" ]; then
           len=${#SHORT_DESCRIPTION}
           if [ "${len}" -gt 100 ]; then
-            fail "input 'short_description' is ${len} chars (max 100)"
+            SHORT_DESCRIPTION_OUT="${SHORT_DESCRIPTION:0:99}…"
+            echo "::warning::short_description was ${len} chars (max 100); truncated to: ${SHORT_DESCRIPTION_OUT}"
           fi
         fi
 
         [ "${ERR}" -eq 0 ] || { echo "Preflight validation failed." >&2; exit 1; }
+
+        # Expose the (possibly truncated) short description for the
+        # peter-evans step. Always emit — even when unchanged — so the
+        # downstream step has a single, stable source of truth.
+        {
+          # `delimiter` form is required because the value may contain
+          # any character including `=` / spaces; the chosen sentinel is
+          # unlikely to appear in a one-line short description.
+          echo 'short_description<<__BOS_EOF__'
+          printf '%s\n' "${SHORT_DESCRIPTION_OUT}"
+          echo '__BOS_EOF__'
+        } >> "${GITHUB_OUTPUT}"
+
         echo "Preflight OK — syncing description for ${REPOSITORY}"
 
     # ---------------------------------------------------------------
@@ -233,5 +259,7 @@ runs:
         # of the original in the passthrough case). Keeps peter-evans
         # blind to whether trimming happened.
         readme-filepath: ${{ steps.render.outputs.readme }}
-        short-description: ${{ inputs.short_description }}
+        # Read from the preflight output, not the raw input — preflight
+        # may have truncated an oversized value to fit Hub's 100-char cap.
+        short-description: ${{ steps.preflight.outputs.short_description }}
         enable-url-completion: ${{ inputs.enable_url_completion }}
