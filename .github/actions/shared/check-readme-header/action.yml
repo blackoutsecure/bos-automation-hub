@@ -1,0 +1,272 @@
+name: 'Check: README header'
+description: >-
+  Validate that the repository's README.md starts with the canonical
+  BlackOut Secure header pattern. Fails the workflow with a clear
+  `::error::` annotation listing every missing or out-of-order element
+  so authors can fix the header in a single PR pass.
+
+  Two profiles are supported because the org publishes two distinct
+  artifact families:
+
+    * `marketplace` — `bos-*-kit` / `bos-*` Action repos published to
+      the GitHub Marketplace. Header looks like:
+
+        # Blackout Secure <Name>
+
+        **Copyright © <years> Blackout Secure | Apache License 2.0**
+
+        [![Marketplace](...marketplace badge...)](.../marketplace/actions/<slug>)
+        [![GitHub release](...release badge...)](.../<owner>/<repo>/releases)
+        [![License](...license badge...)](LICENSE)
+        [![Made by BlackoutSecure](...made-by badge...)](https://github.com/blackoutsecure)
+
+    * `docker` — `docker-*` Docker Hub-published service repos. Header
+      looks like:
+
+        <p align="center">
+          <img src="...logo.png" alt="<name> logo" width="200">
+        </p>
+
+        # blackoutsecure/<service>
+
+        [![GitHub Stars](...stars badge...)](.../stargazers)
+        [![Docker Pulls](...pulls badge...)](.../docker hub...)
+        [![GitHub Release](...release badge...)](.../releases)
+        [![Blackout Secure Launchpad](...launchpad badge...)](.../actions/workflows/bos-launchpad-release.yml)
+
+      (Balena Hub badge may substitute for Launchpad on balena-only repos.)
+
+  `auto` (default) detects the profile from `action.yml` presence at
+  the repo root + `Dockerfile`/`docker-compose.yml` presence:
+
+    * `action.yml` at root            -> `marketplace`
+    * `Dockerfile` or `docker-compose.yml` at root, no `action.yml`
+      -> `docker`
+    * neither                          -> `generic` (only the
+      `Made by BlackoutSecure` badge is required)
+
+  This is a pure validator. It does NOT rewrite the README — drift is
+  fixed by hand to keep the author in control of voice and tagline.
+
+inputs:
+  readme_path:
+    description: >-
+      Path to the README to validate, relative to the repo root.
+      Defaults to `README.md`.
+    required: false
+    default: 'README.md'
+  profile:
+    description: >-
+      One of `auto` | `marketplace` | `docker` | `generic`. `auto`
+      detects from `action.yml` / `Dockerfile` presence at the repo root.
+    required: false
+    default: 'auto'
+  org:
+    description: >-
+      Expected GitHub org/user slug used in badge URLs and repo links.
+      Defaults to `blackoutsecure`.
+    required: false
+    default: 'blackoutsecure'
+  fail_on_warning:
+    description: >-
+      `true` to fail the step on warnings (e.g. out-of-order badges).
+      `false` (default) to emit `::warning::` and pass.
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Validate README header
+      shell: bash
+      env:
+        README_PATH:     ${{ inputs.readme_path }}
+        PROFILE_INPUT:   ${{ inputs.profile }}
+        EXPECTED_ORG:    ${{ inputs.org }}
+        FAIL_ON_WARNING: ${{ inputs.fail_on_warning }}
+      run: |
+        set -euo pipefail
+
+        readme="${README_PATH:-README.md}"
+        if [[ ! -f "$readme" ]]; then
+          echo "::error title=README header check::README not found at '${readme}'."
+          exit 1
+        fi
+
+        # ----------------------------------------------------------
+        # Detect profile when caller asked for `auto`.
+        # ----------------------------------------------------------
+        profile="${PROFILE_INPUT:-auto}"
+        if [[ "$profile" == "auto" ]]; then
+          if [[ -f "action.yml" || -f "action.yaml" ]]; then
+            profile="marketplace"
+          elif [[ -f "Dockerfile" || -f "docker-compose.yml" || -f "docker-compose.yaml" ]]; then
+            profile="docker"
+          else
+            profile="generic"
+          fi
+        fi
+
+        case "$profile" in
+          marketplace|docker|generic) ;;
+          *)
+            echo "::error title=README header check::Unknown profile '${profile}'. Expected one of: auto, marketplace, docker, generic."
+            exit 1
+            ;;
+        esac
+
+        echo "Profile: ${profile}"
+        echo "README:  ${readme}"
+        echo "Org:     ${EXPECTED_ORG}"
+        echo ""
+
+        # Inspect the top of the file (first ~25 non-empty lines is
+        # plenty for any of our header patterns).
+        head_block="$(head -n 30 "$readme")"
+
+        errors=()
+        warnings=()
+
+        # ----------------------------------------------------------
+        # Shared check: the "Made by BlackoutSecure" badge.
+        # Required for every profile so the org footprint is
+        # visible on every README in the org.
+        # ----------------------------------------------------------
+        if ! grep -qE '\[!\[Made by BlackoutSecure\]\(https://img\.shields\.io/badge/made%20by-BlackoutSecure-[0-9a-fA-F]{6}' <<<"$head_block"; then
+          errors+=("missing required badge: \`[![Made by BlackoutSecure](https://img.shields.io/badge/made%20by-BlackoutSecure-1f1f1f)](https://github.com/${EXPECTED_ORG})\`")
+        fi
+
+        case "$profile" in
+          # ------------------------------------------------------
+          # Marketplace profile (bos-*-kit / Action repos).
+          # ------------------------------------------------------
+          marketplace)
+            # H1 must be "# Blackout Secure <Name>".
+            if ! grep -qE '^# Blackout Secure ' <<<"$head_block"; then
+              errors+=("first heading must be \`# Blackout Secure <Name>\` (Marketplace listing depends on the canonical org prefix)")
+            fi
+
+            # Copyright line.
+            if ! grep -qE '^\*\*Copyright © [0-9]{4}(-[0-9]{4})? Blackout Secure \| Apache License 2\.0\*\*$' <<<"$head_block"; then
+              errors+=("missing copyright line: \`**Copyright © <year[-year]> Blackout Secure | Apache License 2.0**\`")
+            fi
+
+            # Each badge in order.
+            if ! grep -qE '\[!\[Marketplace\]\(https://img\.shields\.io/badge/GitHub%20Marketplace-blue\?logo=github\)\]\(https://github\.com/marketplace/actions/' <<<"$head_block"; then
+              errors+=("missing Marketplace badge: \`[![Marketplace](https://img.shields.io/badge/GitHub%20Marketplace-blue?logo=github)](https://github.com/marketplace/actions/<slug>)\`")
+            fi
+            if ! grep -qE '\[!\[GitHub release\]\(https://img\.shields\.io/github/v/release/'"${EXPECTED_ORG}"'/' <<<"$head_block"; then
+              errors+=("missing GitHub release badge: \`[![GitHub release](https://img.shields.io/github/v/release/${EXPECTED_ORG}/<repo>?sort=semver)](https://github.com/${EXPECTED_ORG}/<repo>/releases)\`")
+            fi
+            if ! grep -qE '\[!\[License\]\(https://img\.shields\.io/badge/license-Apache%202\.0-blue\)\]\(LICENSE\)' <<<"$head_block"; then
+              errors+=("missing License badge: \`[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)\`")
+            fi
+
+            # Badge ORDER — find line numbers of each canonical badge
+            # marker and verify monotonic. Out-of-order is a warning,
+            # not an error, because order is cosmetic.
+            order_ok=1
+            mp_line="$(grep -nE '^\[!\[Marketplace\]' "$readme" | head -n1 | cut -d: -f1 || true)"
+            rel_line="$(grep -nE '^\[!\[GitHub release\]' "$readme" | head -n1 | cut -d: -f1 || true)"
+            lic_line="$(grep -nE '^\[!\[License\]\(' "$readme" | head -n1 | cut -d: -f1 || true)"
+            mby_line="$(grep -nE '^\[!\[Made by BlackoutSecure\]' "$readme" | head -n1 | cut -d: -f1 || true)"
+            for pair in "$mp_line $rel_line" "$rel_line $lic_line" "$lic_line $mby_line"; do
+              # shellcheck disable=SC2086
+              set -- $pair
+              a="${1:-0}"; b="${2:-0}"
+              if [[ "$a" -gt 0 && "$b" -gt 0 && "$a" -ge "$b" ]]; then
+                order_ok=0
+              fi
+            done
+            if [[ "$order_ok" -eq 0 ]]; then
+              warnings+=("badges out of canonical order: expected \`Marketplace -> GitHub release -> License -> Made by BlackoutSecure\`")
+            fi
+            ;;
+
+          # ------------------------------------------------------
+          # Docker profile (docker-* repos).
+          # ------------------------------------------------------
+          docker)
+            # Centered logo block.
+            if ! grep -qE '^<p align="center">' <<<"$head_block"; then
+              errors+=("missing centered logo block: \`<p align=\"center\"><img src=\".../logo.png\" alt=\"<name> logo\" width=\"200\"></p>\`")
+            fi
+            # H1 must be "# blackoutsecure/<slug>".
+            if ! grep -qE '^# '"${EXPECTED_ORG}"'/[a-z0-9][a-z0-9._-]*$' <<<"$head_block"; then
+              errors+=("first heading must be \`# ${EXPECTED_ORG}/<service>\` (matches the published Docker Hub image name)")
+            fi
+            # Brand color (E7931D) and style (flat-square) are
+            # enforced INSIDE each canonical-badge regex below — that
+            # way author-added non-canonical badges (e.g. a GPLv3
+            # license shield in blue, or vendor SVGs like the Balena
+            # deploy button) don't trip a global brand-color sweep.
+            if ! grep -qE '\[!\[GitHub Stars\]\(https://img\.shields\.io/github/stars/'"${EXPECTED_ORG}"'/[^)]*style=flat-square[^)]*color=E7931D' <<<"$head_block"; then
+              errors+=("missing GitHub Stars badge: \`[![GitHub Stars](https://img.shields.io/github/stars/${EXPECTED_ORG}/<repo>?style=flat-square&color=E7931D&logo=github)](.../stargazers)\`")
+            fi
+            if ! grep -qE '\[!\[Docker Pulls\]\(https://img\.shields\.io/docker/pulls/'"${EXPECTED_ORG}"'/[^)]*style=flat-square[^)]*color=E7931D' <<<"$head_block"; then
+              errors+=("missing Docker Pulls badge: \`[![Docker Pulls](https://img.shields.io/docker/pulls/${EXPECTED_ORG}/<image>?style=flat-square&color=E7931D&logo=docker&logoColor=FFFFFF)](https://hub.docker.com/r/${EXPECTED_ORG}/<image>)\`")
+            fi
+            if ! grep -qE '\[!\[GitHub Release\]\(https://img\.shields\.io/github/release/'"${EXPECTED_ORG}"'/[^)]*style=flat-square[^)]*color=E7931D' <<<"$head_block"; then
+              errors+=("missing GitHub Release badge: \`[![GitHub Release](https://img.shields.io/github/release/${EXPECTED_ORG}/<repo>.svg?style=flat-square&color=E7931D&logo=github&logoColor=FFFFFF)](.../releases)\`")
+            fi
+            # Launchpad OR Balena Hub badge is acceptable as the 4th.
+            # Both must carry the brand color when present.
+            if ! grep -qE '\[!\[Blackout Secure Launchpad\]\([^)]*color=E7931D|\[!\[Balena Hub\]\([^)]*-E7931D' <<<"$head_block"; then
+              errors+=("missing Launchpad-or-Balena badge: \`[![Blackout Secure Launchpad](.../bos-launchpad-release.yml?style=flat-square&label=blackout%20secure%20launchpad&color=E7931D)](.../bos-launchpad-release.yml)\` OR \`[![Balena Hub](https://img.shields.io/badge/balena%20hub-<name>-E7931D?style=flat-square&logo=balena&logoColor=FFFFFF)](https://hub.balena.io/blocks/<id>/<name>)\`")
+            fi
+            ;;
+
+          # ------------------------------------------------------
+          # Generic profile (sites, sub-repos, kits with no
+          # publishing surface).
+          # ------------------------------------------------------
+          generic)
+            if ! grep -qE '^# ' <<<"$head_block"; then
+              errors+=("first heading must be a level-1 \`# <Title>\`")
+            fi
+            ;;
+        esac
+
+        # ----------------------------------------------------------
+        # Emit findings to the workflow log + step summary.
+        # ----------------------------------------------------------
+        {
+          echo "## README header check"
+          echo ""
+          echo "**Profile:** \`${profile}\`  "
+          echo "**README:** \`${readme}\`"
+          echo ""
+          if [[ ${#errors[@]} -eq 0 && ${#warnings[@]} -eq 0 ]]; then
+            echo "All canonical header elements present."
+          fi
+          if [[ ${#errors[@]} -gt 0 ]]; then
+            echo "### Errors"
+            for e in "${errors[@]}"; do
+              echo "- ${e}"
+            done
+            echo ""
+          fi
+          if [[ ${#warnings[@]} -gt 0 ]]; then
+            echo "### Warnings"
+            for w in "${warnings[@]}"; do
+              echo "- ${w}"
+            done
+            echo ""
+          fi
+        } >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+        for e in "${errors[@]:-}"; do
+          [[ -z "$e" ]] && continue
+          echo "::error title=README header check,file=${readme}::${e}"
+        done
+        for w in "${warnings[@]:-}"; do
+          [[ -z "$w" ]] && continue
+          echo "::warning title=README header check,file=${readme}::${w}"
+        done
+
+        if [[ ${#errors[@]} -gt 0 ]]; then
+          exit 1
+        fi
+        if [[ "${FAIL_ON_WARNING}" == "true" && ${#warnings[@]} -gt 0 ]]; then
+          exit 1
+        fi
