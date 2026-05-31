@@ -198,6 +198,18 @@ name: Repo Security Scan (reusable)
         required: false
         type: boolean
         default: false
+      kit_http_timeout:
+        description: >-
+          Per-request HTTP timeout (seconds) for the kit's posture
+          probes. Forwarded as the kit composite's `http_timeout`
+          input. Default `20` matches the kit's own default. Bump
+          when callers see intermittent `PS*** error: HTTP 502 /
+          timeout` rows under GH API latency spikes, or on self-
+          hosted runners with slow egress to api.github.com. Bare
+          integer string; no unit.
+        required: false
+        type: string
+        default: '20'
     secrets:
       scanning_pat:
         description: >-
@@ -464,6 +476,7 @@ jobs:
           enable_scanners: ${{ inputs.enable_scanners }}
           enable_upload:   ${{ inputs.enable_upload }}
           fail_on:         ${{ inputs.fail_on }}
+          http_timeout:    ${{ inputs.kit_http_timeout }}
 
   # ---------------------------------------------------------------------------
   # CodeQL matrix job — first-party `github/codeql-action` semantic analysis.

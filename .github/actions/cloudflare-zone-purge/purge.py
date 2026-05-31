@@ -109,13 +109,29 @@ def cf_request(
             return exc.code, {"_raw": raw.decode("utf-8", "replace")}
 
 
-def derive_apex(site_url: str) -> str:
+def candidate_zone_names(site_url: str) -> list[str]:
+    """Yield zone-name candidates from most specific to apex.
+
+    Cloudflare has no 'lookup zone for arbitrary hostname' API, and a
+    stdlib-only action can't ship a Public Suffix List, so we generate
+    every `<n-or-fewer-labels>` suffix of the host and let the caller
+    ask Cloudflare which one is actually an active zone on the
+    authenticating account. For `openwrt.blackoutsecure.dev` this
+    yields `['openwrt.blackoutsecure.dev', 'blackoutsecure.dev']` so
+    deployments on a subdomain still resolve to the parent zone.
+    Stops at 2 labels to avoid bare-TLD queries.
+    """
     host = site_url.split("://", 1)[-1].split("/", 1)[0].split(":", 1)[0].lower()
     if host.startswith("www."):
         host = host[len("www."):]
     if not HOST_RE.match(host):
         die(f"derived hostname {host!r} from site_url is not a valid domain")
-    return host
+    labels = host.split(".")
+    candidates: list[str] = []
+    while len(labels) >= 2:
+        candidates.append(".".join(labels))
+        labels = labels[1:]
+    return candidates
 
 
 def validate_id(value: str, kind: str) -> str:
@@ -126,24 +142,29 @@ def validate_id(value: str, kind: str) -> str:
 
 
 def resolve_zone_from_site(site_url: str, token: str) -> str:
-    apex = derive_apex(site_url)
-    log(f"Looking up Cloudflare zone for {apex}")
-    status, payload = cf_request(
-        "GET", "/zones", token=token, query={"name": apex, "status": "active"},
+    candidates = candidate_zone_names(site_url)
+    log(f"Looking up Cloudflare zone for {candidates[0]} (will walk up parent domains if needed)")
+    for candidate in candidates:
+        status, payload = cf_request(
+            "GET", "/zones", token=token, query={"name": candidate, "status": "active"},
+        )
+        if status != 200 or not payload.get("success"):
+            die(
+                f"Cloudflare /zones lookup for {candidate!r} returned HTTP {status}",
+                "Token needs Zone:Read in addition to Cache Purge for auto-resolve.",
+                f"Response: {json.dumps(payload)[:400]}",
+            )
+        result = payload.get("result") or []
+        if result:
+            zone_name = result[0].get("name", candidate)
+            zone_id = validate_id(result[0].get("id", ""), "zone")
+            log(f"Matched Cloudflare zone {zone_name!r} ({zone_id})")
+            return zone_id
+        log(f"No active zone for {candidate!r}; trying parent domain")
+    die(
+        f"no active Cloudflare zone matched any of: {', '.join(candidates)}",
+        "Confirm one of the domains above is attached to the account this token authenticates, or pass zone_id explicitly.",
     )
-    if status != 200 or not payload.get("success"):
-        die(
-            f"Cloudflare /zones lookup for {apex!r} returned HTTP {status}",
-            "Token needs Zone:Read in addition to Cache Purge for auto-resolve.",
-            f"Response: {json.dumps(payload)[:400]}",
-        )
-    result = payload.get("result") or []
-    if not result:
-        die(
-            f"no active Cloudflare zone matched name={apex!r}",
-            "Confirm the apex domain is attached to the account this token authenticates, or pass zone_id explicitly.",
-        )
-    return validate_id(result[0].get("id", ""), "zone")
 
 
 def purge_zone(zone_id: str, token: str) -> tuple[int, dict]:

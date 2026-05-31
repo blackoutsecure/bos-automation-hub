@@ -3001,7 +3001,7 @@ it can be audited independently and reused on its own:
 | `shared/cloudflare-resolve-id` | [.github/actions/shared/cloudflare-resolve-id/action.yml](.github/actions/shared/cloudflare-resolve-id/action.yml) | Shape validator for any Cloudflare 32-char hex ID. Strips whitespace and asserts `^[0-9a-f]{32}$`. Does NOT mask the value — Cloudflare account/zone IDs are public identifiers and masking blocks `GITHUB_OUTPUT` passthrough. |
 | `stage-deploy-dir` | [.github/actions/shared/stage-deploy-dir/action.yml](.github/actions/shared/stage-deploy-dir/action.yml) | Generic deploy-directory stager (`copy_files` + `copy_dirs` with `SRC:DEST` rewrite, glob expansion, and path-traversal rejection). Lives under `shared/` because it's not Cloudflare-specific — any static-site deploy can reuse it. |
 | `cloudflare-pages-compose-command` | [.github/actions/cloudflare-pages-compose-command/action.yml](.github/actions/cloudflare-pages-compose-command/action.yml) | Builds the `wrangler pages deploy` argv as a properly shell-quoted string for `cloudflare/wrangler-action`'s `command:` input. |
-| `cloudflare-zone-purge` | [.github/actions/cloudflare-zone-purge/action.yml](.github/actions/cloudflare-zone-purge/action.yml) | Post-deploy edge-cache purge. Accepts an explicit `zone_id`/`fallback_zone_id`, or auto-resolves from `site_url` via `GET /zones?name=<apex>` (token then needs `Zone:Read`). Implementation lives in [purge.py](.github/actions/cloudflare-zone-purge/purge.py) (stdlib `urllib` + `json`). |
+| `cloudflare-zone-purge` | [.github/actions/cloudflare-zone-purge/action.yml](.github/actions/cloudflare-zone-purge/action.yml) | Post-deploy edge-cache purge. Accepts an explicit `zone_id`/`fallback_zone_id`, or auto-resolves from `site_url` by walking host labels from most specific to apex against `GET /zones?name=<candidate>` (token then needs `Zone:Read`); a subdomain like `openwrt.example.com` resolves to the parent `example.com` zone when no zone is registered at the subdomain itself. Implementation lives in [purge.py](.github/actions/cloudflare-zone-purge/purge.py) (stdlib `urllib` + `json`). |
 
 Use them directly from any workflow when you don't need the full
 reusable workflow. Purge a zone's edge cache from any workflow —
@@ -3226,10 +3226,11 @@ tokens, injection-safe shell, strict input validation, no
 
 ## Contributing
 
-1. Fork and create a feature branch.
+1. Fork and create a feature branch off `dev` (NOT `main` — see
+   [Branching & release model](#branching--release-model) below).
 2. Edit workflows/actions under `.github/`.
-3. Open a PR — [lint.yml](.github/workflows/lint.yml) runs `actionlint`
-   and `shellcheck` automatically.
+3. Open a PR **against `dev`** — [lint.yml](.github/workflows/lint.yml) runs `actionlint`
+   and `shellcheck` automatically as part of [hub-gate.yml](.github/workflows/hub-gate.yml).
 4. Test end-to-end by calling the reusable workflow from a downstream
    repo with `@<your-branch>`.
 
@@ -3246,6 +3247,70 @@ the version in a trailing comment, e.g.:
 bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
 ./actionlint -color
 ```
+
+### Branching & release model
+
+The hub follows the same **dev-default convention** as the Marketplace
+Action repos (`bos-marketplace-kit`, `bos-code-scanning-kit`, …):
+
+| Branch | Role | Consumers ref it? |
+|--------|------|-------------------|
+| `dev`  | Working branch. All PRs target `dev`. Day-to-day development happens here. | No. |
+| `main` | Promoted / stable branch. Updated only by [release-hub.yml](.github/workflows/release-hub.yml). | **Yes** — `@main` and `@vX.Y.Z` / `@vX` SemVer pins resolve here. |
+
+**Promotion is a curated `dev` → `main` push (denylist).** The hub's
+published `release-promote.yml` action cannot be used on the hub
+itself because it hard-blocks `.github/workflows/**` (a Marketplace
+Action constraint) and the hub's consumer surface IS those reusable
+workflows. Instead, [release-hub.yml](.github/workflows/release-hub.yml)
+materializes `main`'s next tree as `dev`'s tree **minus a small
+hub-internal denylist** — so `main` carries only consumer-facing
+files. The denylist is inline in the workflow and currently strips:
+
+| Path | Why stripped from `main` |
+|------|--------------------------|
+| `.github/workflows/hub-gate.yml` | Hub-only caller of `bos-gate.yml`; consumers don't run it. |
+| `.github/workflows/sync-self.yml` | Hub-only self-sync trigger. |
+| `.github/workflows/release-hub.yml` | The release workflow itself; only dispatched from `dev`. |
+| `.editorconfig`, `.yamllint.yml`, `actionlint` | Contributor lint config + pinned binary. |
+| `scripts/`, `linux/`, `macos/` | Maintainer tooling (kicker snapshot generator, runner bootstrap, etc.). |
+
+Everything else under `.github/workflows/`, `.github/actions/`,
+`.github/{CODEOWNERS,dependabot.yml}`, `examples/`, `managed-files/`,
+`README.md`, and `LICENSE` ships to `main`. The promote commit's
+parent is the previous `main` HEAD so `main`'s history stays linear
+and downstream `@main` consumers see a normal fast-forward.
+
+To cut a release: dispatch
+[release-hub.yml](.github/workflows/release-hub.yml) **from the `dev`
+ref** (the workflow file does not exist on `main`). It will:
+
+1. Resolve the next tag (explicit `tag_name` OR `bump` mode, default
+   `patch`).
+2. Materialize `main`'s next tree (dev minus denylist) and commit on
+   top of current `main`.
+3. Atomic-push (`HEAD:refs/heads/main`, `refs/tags/vX.Y.Z`) and
+   optionally move the floating `vX` major tag.
+4. Chain into [github-release.yml](.github/workflows/github-release.yml)
+   to publish the GitHub Release.
+
+A `dry_run` input stages the diff + prints the change summary
+without pushing. A `release_draft` input creates the GitHub Release
+as draft for manual review.
+
+**Token model.** `secrets.RELEASE_PAT` is consulted first for the
+push + tag; falls back to `GITHUB_TOKEN` when absent. If `main`'s
+branch protection disallows GitHub Actions pushes, wire a PAT with
+`Contents: Write` that can bypass protection.
+
+### Manually running the gate
+
+The hub gate ([hub-gate.yml](.github/workflows/hub-gate.yml)) fires
+automatically on every PR into `dev` or `main` and on every
+merge-queue commit. It also accepts `workflow_dispatch` — useful
+before cutting a release to re-validate the current `dev` HEAD
+without opening a no-op PR. Pick the branch (typically `dev`) in
+the GitHub UI's "Run workflow" dropdown.
 
 ---
 
