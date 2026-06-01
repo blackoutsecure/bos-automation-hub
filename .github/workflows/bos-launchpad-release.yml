@@ -871,6 +871,97 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         type: boolean
         default: false
 
+      # ----- Repo-metadata stage -------------------------------------------
+      # Opt-in About-box sync (description / homepage / topics / sidebar
+      # widget toggles). Wraps the hub-local `repo-metadata` composite so
+      # consumer repos no longer copy a ~50-line guarded job into their
+      # kicker — they flip `enable_repo_metadata: true` and pass the
+      # handful of policy values below. The composite PATCHes
+      # `/repos/{owner}/{repo}` + PUTs the topics endpoint, both of which
+      # need `Administration: write`; the default `GITHUB_TOKEN` is
+      # rejected, so a PAT must be forwarded as `secrets.REPO_ADMIN_PAT`
+      # (see that secret's docs). When the PAT is absent the stage
+      # SKIPS with a `::warning::` instead of hard-failing.
+      enable_repo_metadata:
+        description: >-
+          Run the repo About-box sync stage. Default `false` (opt-in,
+          per the stage-toggle policy). Requires `secrets.REPO_ADMIN_PAT`
+          to be forwarded; without it the stage self-skips with a warning.
+        required: false
+        type: boolean
+        default: false
+      repo_metadata_description:
+        description: >-
+          Explicit repo description. When non-empty it wins over AI /
+          README. Empty (default) defers to `repo_metadata_ai_enabled`.
+        required: false
+        type: string
+        default: ''
+      repo_metadata_homepage:
+        description: >-
+          Explicit Website URL for the About box. Empty (default) leaves
+          the existing homepage unchanged. Pass `__unset__` to clear it.
+        required: false
+        type: string
+        default: ''
+      repo_metadata_topics:
+        description: >-
+          Explicit topics, space- or comma-separated. When non-empty it
+          wins over AI. Sanitised + clamped to 20 by the composite.
+        required: false
+        type: string
+        default: ''
+      repo_metadata_generate_topics:
+        description: >-
+          Ask GitHub Models to derive topics from the README when
+          `repo_metadata_topics` is empty. Default `false`.
+        required: false
+        type: boolean
+        default: false
+      repo_metadata_topics_fallback:
+        description: >-
+          Topics applied when `repo_metadata_generate_topics: true` but the
+          AI request fails. Empty (default) means "do nothing on failure".
+        required: false
+        type: string
+        default: ''
+      repo_metadata_ai_enabled:
+        description: >-
+          Call GitHub Models for description / topic generation. Default
+          `true` (matches the composite). Set `false` to skip AI and use
+          the deterministic README / fallback path — recommended when
+          every field is supplied explicitly.
+        required: false
+        type: boolean
+        default: true
+      repo_metadata_ai_model:
+        description: 'GitHub Models model id. Only used when `repo_metadata_ai_enabled: true`.'
+        required: false
+        type: string
+        default: 'openai/gpt-4o-mini'
+      repo_metadata_show_releases:
+        description: 'Include the Releases sidebar widget on the repo home page. Default `true`.'
+        required: false
+        type: boolean
+        default: true
+      repo_metadata_show_deployments:
+        description: 'Include the Deployments sidebar widget on the repo home page. Default `false`.'
+        required: false
+        type: boolean
+        default: false
+      repo_metadata_show_packages:
+        description: 'Include the Packages sidebar widget on the repo home page. Default `false`.'
+        required: false
+        type: boolean
+        default: false
+      repo_metadata_dry_run:
+        description: >-
+          Validate + log the proposed About-box payload to the job summary
+          without calling the GitHub API. Default `false`.
+        required: false
+        type: boolean
+        default: false
+
       # ----- Shared / advanced ---------------------------------------------
       platforms:
         description: 'Platform list reported in release notes.'
@@ -947,6 +1038,23 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           Classic PAT equivalent: `repo` + `admin:org` scopes (the latter
           granted by an org owner), authorized for any SAML SSO orgs the
           PAT will scan against.
+        required: false
+      REPO_ADMIN_PAT:
+        description: >-
+          PAT used by the repo-metadata stage to PATCH the repository
+          About box (description / homepage / topics / sidebar widget
+          toggles). Required when `enable_repo_metadata: true` — the
+          default `GITHUB_TOKEN` cannot write repo metadata even with
+          `permissions: { contents: write }` (the `/repos` PATCH and
+          `/topics` PUT endpoints require `Administration: write`, which
+          is not in `GITHUB_TOKEN`'s grantable scope set). When this
+          secret is empty the stage SKIPS with a `::warning::` rather
+          than hard-failing. Forward a single resolved value from the
+          caller, e.g. `REPO_ADMIN_PAT:` set to
+          `secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT`.
+          Fine-grained PAT minimum permissions on the target repo:
+          `Administration: Write` + `Metadata: Read`. Classic PAT
+          equivalent: the `repo` scope.
         required: false
 
     outputs:
@@ -1324,3 +1432,92 @@ jobs:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
+
+  # ---------------------------------------------------------------------------
+  # Stage 4 — Repo About-box sync (opt-in, independent of the deploy path).
+  #
+  # Centralises the metadata sync that consumer kickers used to copy in
+  # by hand. Wraps the hub-local `repo-metadata` composite. Runs in
+  # PARALLEL with every other stage (no `needs:`) — the repo's public
+  # About box is independent of whether the deploy/release succeeded —
+  # and is gated solely by `enable_repo_metadata`.
+  #
+  # Referenced via the FULL repo-qualified path
+  # (`blackoutsecure/bos-automation-hub/.github/actions/repo-metadata@main`)
+  # rather than `./.github/actions/...`: this job checks out the CALLER
+  # repo into the workspace (so the composite can read the caller's
+  # README as a fallback source), which would shadow a `./` local-action
+  # lookup. The repo-qualified form always resolves the composite from
+  # THIS repo, matching how `deploy-cloudflare-pages.yml` references its
+  # own composites.
+  #
+  # Token: the composite needs `Administration: write`, which the default
+  # `GITHUB_TOKEN` lacks. The caller forwards a PAT as
+  # `secrets.REPO_ADMIN_PAT`; the `token-check` step soft-skips the sync
+  # (with a `::warning::`) when that secret is empty, because the
+  # composite itself hard-fails on an empty `github_token`.
+  # ---------------------------------------------------------------------------
+  repo-metadata:
+    name: Sync About box
+    if: inputs.enable_repo_metadata
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Granted unconditionally; only consumed when the caller leaves
+      # `repo_metadata_ai_enabled: true`. Harmless otherwise.
+      models: read
+    # Serialise repeated syncs of the same repo so two near-simultaneous
+    # triggers can't race the repo PATCH. Never cancel — a metadata write
+    # is cheap and idempotent, but a cancelled one could leave the last
+    # writer's intent unapplied.
+    concurrency:
+      group: repo-metadata-${{ github.repository }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout (caller repo — README used as AI / fallback source)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      # The composite PATCHes /repos/{owner}/{repo} + PUTs the topics
+      # endpoint (both require Administration:write) and HARD-FAILS when
+      # its `github_token` input is empty ("required input GH_TOKEN is
+      # empty"). Resolve the PAT first and SKIP — rather than fail — when
+      # none is forwarded. Mirrors the canonical guard in
+      # `bos-marketplace-kit/.github/workflows/release.yml`.
+      - id: token-check
+        name: Resolve metadata sync token
+        env:
+          HAS_PAT: ${{ secrets.REPO_ADMIN_PAT != '' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ "${HAS_PAT}" != "true" ]; then
+            {
+              echo "## Repo metadata sync"
+              echo ""
+              echo "Skipped — \`secrets.REPO_ADMIN_PAT\` was not forwarded to the launchpad."
+              echo ""
+              echo "The public \`About\` box was not refreshed. Forward a PAT with \`Administration: write\` on the target repo as \`REPO_ADMIN_PAT\` (e.g. resolved from \`secrets.REPO_ADMIN_PAT\` with an org-level \`secrets.RELEASE_PAT\` fallback)."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            echo "::warning title=Repo metadata sync skipped::No REPO_ADMIN_PAT forwarded; the public About box was not refreshed."
+          else
+            echo "::notice title=Repo metadata sync::Using the forwarded REPO_ADMIN_PAT for repo-metadata PATCH/PUT calls."
+          fi
+          echo "has_pat=${HAS_PAT}" >> "${GITHUB_OUTPUT}"
+
+      - if: steps.token-check.outputs.has_pat == 'true'
+        name: Sync repository metadata
+        uses: blackoutsecure/bos-automation-hub/.github/actions/repo-metadata@main
+        with:
+          description:      ${{ inputs.repo_metadata_description }}
+          homepage:         ${{ inputs.repo_metadata_homepage }}
+          topics:           ${{ inputs.repo_metadata_topics }}
+          generate_topics:  ${{ inputs.repo_metadata_generate_topics }}
+          topics_fallback:  ${{ inputs.repo_metadata_topics_fallback }}
+          ai_enabled:       ${{ inputs.repo_metadata_ai_enabled }}
+          ai_model:         ${{ inputs.repo_metadata_ai_model }}
+          show_releases:    ${{ inputs.repo_metadata_show_releases }}
+          show_deployments: ${{ inputs.repo_metadata_show_deployments }}
+          show_packages:    ${{ inputs.repo_metadata_show_packages }}
+          github_token:     ${{ secrets.REPO_ADMIN_PAT }}
+          dry_run:          ${{ inputs.repo_metadata_dry_run }}

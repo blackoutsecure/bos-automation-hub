@@ -135,6 +135,22 @@ on:
         type: string
         required: false
         default: feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert
+      enable_readme_header_check:
+        description: >-
+          `true` to verify the repo's README starts with the canonical
+          BlackOut Secure header (org H1, copyright line, fixed badge
+          set). Profile is auto-detected from `action.yml` /
+          `Dockerfile` presence at the repo root.
+        type: boolean
+        required: false
+        default: true
+      readme_header_profile:
+        description: >-
+          Override the README-header profile: `auto` (default), or one
+          of `marketplace`, `docker`, `generic`.
+        type: string
+        required: false
+        default: auto
     secrets:
       scanning_pat:
         description: >-
@@ -257,6 +273,25 @@ jobs:
         uses: blackoutsecure/bos-automation-hub/.github/actions/check-pinned-actions@main  # TODO: pin to SHA after first tag
 
   # -----------------------------------------------------------------
+  # 6a. README header — verify the README starts with the canonical
+  # BlackOut Secure org header pattern (H1, copyright line, fixed badge
+  # set). Profile is auto-detected from repo contents. Cheap, fast, and
+  # keeps every public repo on-brand without manual review.
+  # -----------------------------------------------------------------
+  readme-header:
+    if: ${{ inputs.enable_readme_header_check }}
+    name: README header
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate README header
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/check-readme-header@main  # TODO: pin to SHA after next hub release
+        with:
+          profile: ${{ inputs.readme_header_profile }}
+
+  # -----------------------------------------------------------------
   # 6. PR title — conventional-commits format so release-notes
   # generation parses cleanly. PR-scope only.
   # -----------------------------------------------------------------
@@ -301,6 +336,7 @@ jobs:
       - dependency-review
       - code-scan
       - pinned-actions
+      - readme-header
       - pr-title
     runs-on: ubuntu-latest
     permissions: {}
@@ -312,11 +348,12 @@ jobs:
           R_DEPREVIEW: ${{ needs.dependency-review.result }}
           R_CODESCAN: ${{ needs.code-scan.result }}
           R_PINNED: ${{ needs.pinned-actions.result }}
+          R_README: ${{ needs.readme-header.result }}
           R_PRTITLE: ${{ needs.pr-title.result }}
         run: |
           set -euo pipefail
           fail=0
-          for name in LINT BASELINE DEPREVIEW CODESCAN PINNED PRTITLE; do
+          for name in LINT BASELINE DEPREVIEW CODESCAN PINNED README PRTITLE; do
             var="R_${name}"
             res="${!var}"
             case "$res" in
