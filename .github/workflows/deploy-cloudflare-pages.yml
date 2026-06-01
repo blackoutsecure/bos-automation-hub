@@ -853,7 +853,7 @@ jobs:
 
       - name: Generate sitemap
         if: inputs.generate_sitemap
-        uses: blackoutsecure/bos-sitemap-generator@5ec7fbce9a419a47c2e7d58bcb0ae28c02c84cda # v1.0.1
+        uses: blackoutsecure/bos-sitemap-generator@fee1be2a6770cd2ee4b6424ccb67ab1ff6bf554a # v1.0.2
         with:
           site_url: ${{ inputs.site_url }}
           public_dir: ${{ inputs.deploy_dir }}
