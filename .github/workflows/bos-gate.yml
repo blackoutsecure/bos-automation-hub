@@ -181,7 +181,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run kit lint composite
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@v0.1.2  # TODO: pin to SHA via Dependabot
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@v0.1.9  # TODO: pin to SHA via Dependabot
         with:
           fail_on_warning: 'false'
 
@@ -197,7 +197,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run kit baseline check
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@v0.1.2  # TODO: pin to SHA via Dependabot
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@v0.1.9  # TODO: pin to SHA via Dependabot
         with:
           fail_on_warning: 'false'
 

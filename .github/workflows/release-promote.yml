@@ -501,7 +501,7 @@ jobs:
         # step above (operator-supplied verbatim OR auto-bumped
         # next-patch) — never `inputs.tag_name` directly, because
         # that can be empty.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@84f66acf43b5f2a6a59faaf5df4d109fad511fa4 # v0.1.4
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.4
         with:
           source_branch:         ${{ inputs.source_branch }}
           target_branch:         ${{ inputs.target_branch }}
