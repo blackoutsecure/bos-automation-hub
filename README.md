@@ -2179,6 +2179,7 @@ cloudflare:
   commit_message: ''
   wrangler_version: ''
   extra_wrangler_args: ''
+  ai_bindings: []          # e.g. ['AI'] — reconciled on the project pre-deploy
   runs_on: ''
   checkout_fetch_depth: 0
   purge_cache: true        # default true
@@ -2893,6 +2894,7 @@ applies here:
 |--------------|----------------------------|----------|
 | **Variable** | `CLOUDFLARE_PROJECT_NAME`  | Pages project name. Pass through `inputs.cloudflare_project_name`. |
 | **Secret**   | `CLOUDFLARE_API_TOKEN`     | Cloudflare API token. Requires `Account → Cloudflare Pages → Edit` for the deploy step; add `Zone → Cache Purge → Purge` and `Zone → Zone → Read` for the purge step (the Zone:Read scope lets the purge step auto-resolve the zone from `site_url`, removing the need to provision `CLOUDFLARE_ZONE_ID` at all). The same token can carry all three scopes. |
+| **Secret**   | `CLOUDFLARE_PAGES_ADMIN_TOKEN` | **Optional.** Dedicated token used only by the `ai_bindings` reconcile step. When unset, the reconcile falls back to `CLOUDFLARE_API_TOKEN` (which already has `Account → Cloudflare Pages → Edit`, the scope the reconcile needs). Provide it to run the binding reconcile on a separate, least-privilege token from the deploy. |
 | **Variable** | `CLOUDFLARE_ACCOUNT_ID`    | 32-char hex account ID. **Optional, prefer `vars` over `secrets`** — it's a public Cloudflare identifier (visible in dashboard URLs), and storing it as a secret makes the runner auto-mask it, which prevents the resolved value from flowing through `needs.<job>.outputs.account_id` to downstream jobs. When neither the var nor the secret is set, the workflow auto-resolves it via `GET /accounts` using `CLOUDFLARE_API_TOKEN`. Provide it explicitly only when the token can access multiple accounts (the lookup needs a deterministic choice in that case) or to skip the round trip on every run. `secrets.CLOUDFLARE_ACCOUNT_ID` is still honoured for back-compat. |
 | **Variable** | `CLOUDFLARE_ZONE_ID`       | 32-char hex zone ID for the production domain. **Optional, prefer `vars` over `secrets`** for the same reason as the account ID. When neither the var nor the secret is set, the purge step auto-resolves it from `site_url` via the Cloudflare API. Provide it explicitly only when the API token cannot be widened to include `Zone:Read`, or to skip the auto-resolve round trip on every run. `secrets.CLOUDFLARE_ZONE_ID` is still honoured for back-compat. |
 
@@ -2922,6 +2924,7 @@ the auto-resolve round trip on every run.
 | `commit_message` | string | `''` | Override the Pages deploy commit message. |
 | `wrangler_version` | string | `''` | Pin wrangler (e.g. `4`, `^4.0.0`, `latest`). |
 | `extra_wrangler_args` | string | `''` | Extra args appended to `wrangler pages deploy` (newlines = spaces). |
+| `ai_bindings` | string | `'[]'` | JSON array of Workers AI binding names (e.g. `'["AI"]'`). When non-empty and the deploy gate is open, the project's `ai_bindings` are reconciled (idempotent + additive) on the environment matching the deployed branch **before** the wrangler deploy, so the deployment inherits the binding. First-ever deploy (project not yet created → API 404) is skipped with a `::notice::` and applies on the next push. Uses `secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN` when provided, otherwise falls back to `secrets.CLOUDFLARE_API_TOKEN`. |
 | `deploy` | string | `''` | `'true'`/`'false'` to force; empty deploys only on default-branch pushes. |
 | `runs_on` | string | `''` | Optional runner override for the deploy job. Empty resolves from `vars.DEFAULT_RUNNER`. Pass a literal label or JSON-array string (e.g. `["self-hosted","Linux","ARM64"]`) to override. No silent fallback — `vars.DEFAULT_RUNNER` is validated by `preflight-runner-config`. See [Runner resolution](#runner-resolution). |
 | `checkout_fetch_depth` | number | `0` | `fetch-depth` for `actions/checkout`. |
@@ -2963,6 +2966,7 @@ the auto-resolve round trip on every run.
 | `environment` | `production` or `preview`. |
 | `account_id` | Resolved Cloudflare account ID. Sourced from `vars.CLOUDFLARE_ACCOUNT_ID` when set; otherwise `secrets.CLOUDFLARE_ACCOUNT_ID` for back-compat; otherwise auto-resolved via `GET /accounts` using `CLOUDFLARE_API_TOKEN`. When sourced from a secret the runner auto-masks the value and this output arrives **empty** in downstream jobs reading `needs.<job>.outputs.account_id` — migrate to `vars.CLOUDFLARE_ACCOUNT_ID` to fix. |
 | `purged` | `true` when the post-deploy zone cache purge ran successfully; `false` when it was skipped (opt-out, no zone ID, deploy skipped) or failed. |
+| `ai_bindings` | JSON array of Workers AI binding names reconciled on the project this run (e.g. `["AI"]`). Empty `[]` when the reconcile was skipped (no `ai_bindings` input, deploy gate closed, or first-ever deploy 404). |
 
 ### Production gating with GitHub Environments
 
@@ -2999,6 +3003,7 @@ it can be audited independently and reused on its own:
 | Action | Path | Purpose |
 |--------|------|---------|
 | `shared/cloudflare-resolve-id` | [.github/actions/shared/cloudflare-resolve-id/action.yml](.github/actions/shared/cloudflare-resolve-id/action.yml) | Shape validator for any Cloudflare 32-char hex ID. Strips whitespace and asserts `^[0-9a-f]{32}$`. Does NOT mask the value — Cloudflare account/zone IDs are public identifiers and masking blocks `GITHUB_OUTPUT` passthrough. |
+| `shared/cloudflare-project-exists` | [.github/actions/shared/cloudflare-project-exists/action.yml](.github/actions/shared/cloudflare-project-exists/action.yml) | Pre-deploy fail-fast guard. `GET .../pages/projects/<name>` and fails the job on `404` with an actionable message (create the project first) instead of letting wrangler emit a confusing error or create an unintended project. Distinguishes `401/403` (token missing `Pages:Read`) from other failures. Emits `production_branch` on success. Runs only when the deploy gate is open. |
 | `stage-deploy-dir` | [.github/actions/shared/stage-deploy-dir/action.yml](.github/actions/shared/stage-deploy-dir/action.yml) | Generic deploy-directory stager (`copy_files` + `copy_dirs` with `SRC:DEST` rewrite, glob expansion, and path-traversal rejection). Lives under `shared/` because it's not Cloudflare-specific — any static-site deploy can reuse it. |
 | `cloudflare-pages-compose-command` | [.github/actions/cloudflare-pages-compose-command/action.yml](.github/actions/cloudflare-pages-compose-command/action.yml) | Builds the `wrangler pages deploy` argv as a properly shell-quoted string for `cloudflare/wrangler-action`'s `command:` input. |
 | `cloudflare-zone-purge` | [.github/actions/cloudflare-zone-purge/action.yml](.github/actions/cloudflare-zone-purge/action.yml) | Post-deploy edge-cache purge. Accepts an explicit `zone_id`/`fallback_zone_id`, or auto-resolves from `site_url` by walking host labels from most specific to apex against `GET /zones?name=<candidate>` (token then needs `Zone:Read`); a subdomain like `openwrt.example.com` resolves to the parent `example.com` zone when no zone is registered at the subdomain itself. Implementation lives in [purge.py](.github/actions/cloudflare-zone-purge/purge.py) (stdlib `urllib` + `json`). |

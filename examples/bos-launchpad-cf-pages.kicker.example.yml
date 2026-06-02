@@ -38,6 +38,8 @@
 #     lets the purge step auto-resolve the zone ID from the site URL.
 #   CLOUDFLARE_ACCOUNT_ID — optional; auto-resolved via `GET /accounts`
 #   CLOUDFLARE_ZONE_ID    — optional; auto-resolved from site URL
+#   CLOUDFLARE_PAGES_ADMIN_TOKEN — optional; only used when
+#     `cloudflare.ai_bindings` is set. Falls back to CLOUDFLARE_API_TOKEN.
 name: Blackout Secure Launchpad
 
 on:
@@ -127,6 +129,10 @@ jobs:
       cloudflare_commit_message:            ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.commit_message || '' }}
       cloudflare_wrangler_version:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.wrangler_version || '' }}
       cloudflare_extra_wrangler_args:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.extra_wrangler_args || '' }}
+      # Workers AI bindings: JSON array of binding names (e.g. `["AI"]`).
+      # Reconciled on the project right before deploy so the deployment
+      # inherits the binding. Empty `[]` skips AI handling entirely.
+      cloudflare_ai_bindings:               ${{ toJson(fromJson(needs.parse-config.outputs.cfg).cloudflare.ai_bindings || fromJson('[]')) }}
       # Force gating: manual dispatch + `force_run` checkbox forces a
       # deploy past the hub's "only on default-branch pushes" default.
       cloudflare_deploy:                    ${{ github.event_name == 'workflow_dispatch' && inputs.force_run && 'true' || '' }}
@@ -165,5 +171,6 @@ jobs:
       cloudflare_headers_replace_existing:  ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.replace_existing == true }}
     secrets:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_PAGES_ADMIN_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
