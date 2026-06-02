@@ -497,6 +497,20 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: string
         default: ''
+      cloudflare_ai_bindings:
+        description: >-
+          JSON array of Workers AI binding names to ensure on the Pages
+          project, e.g. `["AI"]`. Empty (default `[]`) skips AI handling.
+          When non-empty and the deploy gate is open, the deploy stage
+          reconciles the binding on the project (via the Cloudflare API)
+          immediately before the wrangler deploy, so the deployment pushed
+          in this run inherits it. Idempotent + additive; targets the
+          environment matching the deployed branch. Reuses
+          `CLOUDFLARE_API_TOKEN` (Pages:Edit) unless the optional
+          `CLOUDFLARE_PAGES_ADMIN_TOKEN` secret is provided.
+        required: false
+        type: string
+        default: '[]'
       cloudflare_deploy_artifact_name:
         description: >-
           When set, the Cloudflare Pages deploy job downloads the named
@@ -989,6 +1003,14 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           `CLOUDFLARE_ZONE_ID` entirely). One token can carry all three
           scopes.
         required: false
+      CLOUDFLARE_PAGES_ADMIN_TOKEN:
+        description: >-
+          Optional dedicated token for the Workers AI binding reconcile
+          (`cloudflare_ai_bindings`). Needs `Account → Cloudflare Pages →
+          Edit`. When omitted, the reconcile reuses `CLOUDFLARE_API_TOKEN`.
+          Provide this only to run the binding reconcile under a separate,
+          independently-rotatable token from the deploy.
+        required: false
       CLOUDFLARE_ACCOUNT_ID:
         description: >-
           Cloudflare account ID (32-char hex). Optional — when
@@ -1100,6 +1122,9 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       cloudflare_purged:
         description: '`true` when the post-deploy zone cache purge ran successfully.'
         value: ${{ jobs.cloudflare-pages.outputs.purged }}
+      cloudflare_ai_bindings:
+        description: 'JSON array of Workers AI binding names present on the project after the deploy stage (empty `[]` when none requested).'
+        value: ${{ jobs.cloudflare-pages.outputs.ai_bindings }}
 
 permissions:
   contents: read
@@ -1398,6 +1423,7 @@ jobs:
       commit_message:             ${{ inputs.cloudflare_commit_message }}
       wrangler_version:           ${{ inputs.cloudflare_wrangler_version }}
       extra_wrangler_args:        ${{ inputs.cloudflare_extra_wrangler_args }}
+      ai_bindings:                ${{ inputs.cloudflare_ai_bindings }}
       deploy_artifact_name:       ${{ inputs.cloudflare_deploy_artifact_name }}
       deploy:                     ${{ inputs.cloudflare_deploy }}
       runs_on:                    ${{ inputs.cloudflare_runs_on }}
@@ -1430,6 +1456,7 @@ jobs:
       headers_replace_existing:   ${{ inputs.cloudflare_headers_replace_existing }}
     secrets:
       CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_PAGES_ADMIN_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
 

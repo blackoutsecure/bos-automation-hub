@@ -104,6 +104,30 @@ name: Cloudflare Pages Deploy (reusable)
         required: false
         type: string
         default: ''
+      ai_bindings:
+        description: >-
+          JSON array of Workers AI binding names to ensure on the Pages
+          PROJECT, e.g. `["AI"]`. Empty (the default `[]`) skips AI
+          handling entirely. A Workers AI binding is account-level
+          project config (`deployment_configs.<env>.ai_bindings`), NOT
+          something `wrangler pages deploy` sets — so when this is
+          non-empty AND the deploy gate is open, the workflow reconciles
+          the binding via the Cloudflare API immediately BEFORE the
+          wrangler deploy, so the very deployment pushed in this run
+          inherits it. The reconcile is idempotent and additive
+          (requested names are ensured present; bindings already on the
+          project are left untouched), and targets the environment that
+          matches the branch being deployed (production when the branch
+          equals the project's production branch, else preview). On a
+          project's first-ever deploy (project does not exist yet) the
+          reconcile is skipped with a notice and takes effect on the next
+          push. Each name must match `[A-Za-z_][A-Za-z0-9_]*`. Requires
+          a token with `Account → Cloudflare Pages → Edit`: by default
+          reuses `CLOUDFLARE_API_TOKEN`; pass the optional
+          `CLOUDFLARE_PAGES_ADMIN_TOKEN` secret to use a separate token.
+        required: false
+        type: string
+        default: '[]'
       deploy_artifact_name:
         description: >-
           When set, the deploy job downloads the named build artifact
@@ -346,6 +370,15 @@ name: Cloudflare Pages Deploy (reusable)
           on the target zone when `purge_cache` is enabled. The same
           token can carry both scopes.
         required: true
+      CLOUDFLARE_PAGES_ADMIN_TOKEN:
+        description: >-
+          Optional dedicated token for the Workers AI binding reconcile
+          (`ai_bindings`). Requires `Account → Cloudflare Pages → Edit`.
+          When omitted, the reconcile reuses `CLOUDFLARE_API_TOKEN`
+          (which already carries Pages:Edit for the deploy). Provide this
+          only when you want the binding reconcile to run under a
+          separate, independently-rotatable token from the deploy.
+        required: false
       CLOUDFLARE_ACCOUNT_ID:
         description: >-
           **Back-compat input. Prefer `vars.CLOUDFLARE_ACCOUNT_ID`** —
@@ -401,6 +434,12 @@ name: Cloudflare Pages Deploy (reusable)
       purged:
         description: '`true` when the post-deploy zone cache purge ran successfully; `false` when skipped or failed.'
         value: ${{ jobs.deploy.outputs.purged }}
+      ai_bindings:
+        description: >-
+          JSON array of the Workers AI binding names present on the
+          target environment after the reconcile. Empty `[]` when no
+          `ai_bindings` were requested or the reconcile was skipped.
+        value: ${{ jobs.deploy.outputs.ai_bindings }}
 
 permissions:
   contents: read
@@ -468,6 +507,7 @@ jobs:
       environment: ${{ steps.deploy.outputs.pages-environment }}
       account_id: ${{ steps.account.outputs.value }}
       purged: ${{ steps.purge.outputs.purged || 'false' }}
+      ai_bindings: ${{ steps.ai_bindings.outputs.bindings || '[]' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -785,6 +825,20 @@ jobs:
           echo "deploy=${DECISION}" >> "${GITHUB_OUTPUT}"
           echo "deploy=${DECISION}"
 
+      # Fail fast when the target Pages project does not exist yet —
+      # BEFORE the (potentially expensive) prebuild/clone runs and
+      # before wrangler emits a confusing error or creates an
+      # unintended project. Only enforced on an actual deploy; gate-off
+      # runs (e.g. non-default-branch pushes) skip the API call.
+      - name: Verify Cloudflare Pages project exists
+        id: project
+        if: steps.gate.outputs.deploy == 'true'
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-project-exists@main
+        with:
+          account_id: ${{ steps.account.outputs.value }}
+          project_name: ${{ inputs.cloudflare_project_name }}
+          api_token: ${{ secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+
       - name: Run prebuild command
         if: inputs.prebuild_command != '' && inputs.deploy_artifact_name == ''
         env:
@@ -907,6 +961,156 @@ jobs:
           cache_assets_control: ${{ inputs.headers_cache_assets_control }}
           custom_rules: ${{ inputs.headers_custom_rules }}
           replace_existing: ${{ inputs.headers_replace_existing }}
+
+      # ──────────────────────────────────────────────────────────────
+      # Workers AI bindings (opt-in via `ai_bindings`). Reconciled on the
+      # Pages PROJECT via the Cloudflare API immediately BEFORE the
+      # wrangler deploy, so the deployment pushed in this run inherits the
+      # binding. Idempotent + additive; skips cleanly on a project's
+      # first-ever deploy (project not created yet). Uses the dedicated
+      # admin token when supplied, else the deploy token.
+      # ──────────────────────────────────────────────────────────────
+      - name: Reconcile Workers AI bindings
+        id: ai_bindings
+        if: steps.gate.outputs.deploy == 'true' && inputs.ai_bindings != '' && inputs.ai_bindings != '[]'
+        env:
+          API_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ steps.account.outputs.value }}
+          AI_BINDINGS: ${{ inputs.ai_bindings }}
+          # PROJECT_NAME, BRANCH inherited from job-level env.
+          REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, sys, urllib.error, urllib.request
+
+          token = (os.environ.get("API_TOKEN") or "").strip()
+          if not token:
+              sys.exit("ERROR: a Cloudflare API token is required for ai_bindings")
+          if any(c.isspace() for c in token):
+              sys.exit("ERROR: Cloudflare API token contains whitespace/newlines")
+
+          account_id = (os.environ.get("ACCOUNT_ID") or "").strip()
+          project = (os.environ.get("PROJECT_NAME") or "").strip()
+          # Branch wrangler will deploy: explicit `branch` input wins,
+          # else the push ref name (matches wrangler's default).
+          deploy_branch = (os.environ.get("BRANCH") or os.environ.get("REF_NAME") or "").strip()
+
+          try:
+              requested = json.loads(os.environ.get("AI_BINDINGS") or "")
+          except json.JSONDecodeError as exc:
+              sys.exit(f"ERROR: input 'ai_bindings' is not valid JSON: {exc}")
+          if not isinstance(requested, list) or not requested:
+              sys.exit("ERROR: input 'ai_bindings' must be a non-empty JSON array of binding names")
+          name_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+          names = []
+          for n in requested:
+              if not isinstance(n, str) or not name_re.match(n):
+                  sys.exit(f"ERROR: invalid Workers AI binding name: {n!r} (must match {name_re.pattern})")
+              if n not in names:
+                  names.append(n)
+
+          base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/pages/projects/{project}"
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/json",
+              "User-Agent": "bos-automation-hub/deploy-cloudflare-pages",
+          }
+
+          def call(method, url, body=None):
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(url, data=data, method=method, headers=dict(headers))
+              if data is not None:
+                  req.add_header("Content-Type", "application/json")
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      return resp.status, json.loads(resp.read() or b"{}")
+              except urllib.error.HTTPError as exc:
+                  ctype = exc.headers.get("Content-Type", "")
+                  raw = exc.read() or b""
+                  payload = json.loads(raw or b"{}") if ctype.startswith("application/json") else {"_raw": raw.decode("utf-8", "replace")}
+                  return exc.code, payload
+
+          def errmsg(payload):
+              errs = payload.get("errors") or []
+              return "; ".join(f"{e.get('code', '?')}: {e.get('message', '?')}" for e in errs) or json.dumps(payload)[:400]
+
+          def emit(changed, final_names):
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                  f.write(f"changed={changed}\n")
+                  f.write(f"bindings={json.dumps(final_names)}\n")
+
+          # ── Read current project state ──────────────────────────────
+          status, payload = call("GET", base)
+          if status == 404:
+              print(
+                  f"::notice::Pages project '{project}' does not exist yet; skipping Workers AI "
+                  "binding reconcile. The binding will be applied on the next deploy once the "
+                  "project has been created by this run."
+              )
+              emit("false", [])
+              sys.exit(0)
+          if status != 200 or not payload.get("success"):
+              print(f"ERROR: GET project returned HTTP {status}: {errmsg(payload)}", file=sys.stderr)
+              sys.exit(1)
+
+          result = payload.get("result") or {}
+          production_branch = (result.get("production_branch") or "").strip()
+          environment = "production" if (deploy_branch and deploy_branch == production_branch) else "preview"
+
+          deployment_configs = result.get("deployment_configs") or {}
+          env_config = deployment_configs.get(environment) or {}
+          current = env_config.get("ai_bindings") or {}
+          if not isinstance(current, dict):
+              current = {}
+
+          existing = sorted(current.keys())
+          to_add = [n for n in names if n not in current]
+
+          print(f"Project:            {project}")
+          print(f"Deploy branch:      {deploy_branch or '(unknown)'} (production branch: {production_branch or '(unknown)'})")
+          print(f"Target environment: {environment}")
+          print(f"Existing AI bindings: {existing or '(none)'}")
+          print(f"Requested:            {names}")
+          print(f"To add:               {to_add or '(none — already present)'}")
+
+          merged = dict(current)
+          for n in to_add:
+              merged[n] = {}
+          final_names = sorted(merged.keys())
+
+          changed = "false"
+          if not to_add:
+              print("No change required; requested bindings already present.")
+          else:
+              body = {"deployment_configs": {environment: {"ai_bindings": merged}}}
+              status, payload = call("PATCH", base, body)
+              if status != 200 or not payload.get("success"):
+                  print(f"ERROR: PATCH project returned HTTP {status}: {errmsg(payload)}", file=sys.stderr)
+                  sys.exit(1)
+              changed = "true"
+              applied = (
+                  ((payload.get("result") or {}).get("deployment_configs") or {})
+                  .get(environment, {})
+                  .get("ai_bindings")
+              )
+              if isinstance(applied, dict):
+                  final_names = sorted(applied.keys())
+              print(f"Patched project; AI bindings now: {final_names}")
+
+          emit(changed, final_names)
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as f:
+                  f.write("### Cloudflare Pages Workers AI bindings\n\n")
+                  f.write(f"- **Project:** `{project}`\n")
+                  f.write(f"- **Environment:** `{environment}`\n")
+                  f.write(f"- **Requested:** `{names}`\n")
+                  f.write(f"- **Added:** `{to_add or '(none)'}`\n")
+                  f.write(f"- **Result:** `{final_names}`\n")
+          PY
 
       - name: Compose wrangler command
         id: cmd
