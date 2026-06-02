@@ -1,0 +1,350 @@
+name: Configure Cloudflare Pages Workers AI bindings (reusable)
+
+# Reconcile Workers AI bindings on a Cloudflare Pages PROJECT.
+#
+# A Workers AI binding is an account-level resource attached to the Pages
+# project's deployment config, NOT something `wrangler pages deploy` sets
+# at publish time. So it is reconciled here, out-of-band, via the
+# Cloudflare API. The operation is idempotent and additive: it ensures
+# each requested binding is present on the target environment and never
+# removes bindings it didn't add. Run it once after the Pages project
+# first exists, and re-run anytime (e.g. after recreating the project).
+#
+# `dry_run: true` prints the change plan and exits without mutating the
+# project.
+
+"on":
+  workflow_call:
+    inputs:
+      cloudflare_project_name:
+        description: 'Cloudflare Pages project name (lowercase letters, digits, hyphens; 1–58 chars).'
+        required: true
+        type: string
+      ai_bindings:
+        description: >-
+          JSON array of Workers AI binding names to ensure on the target
+          environment, e.g. `["AI"]`. Each name must be a valid binding
+          identifier (`[A-Za-z_][A-Za-z0-9_]*`). The reconcile is
+          additive: requested names are ensured present; bindings already
+          on the project that are not listed here are left untouched.
+        required: true
+        type: string
+      environment:
+        description: >-
+          Cloudflare Pages deployment environment to attach the bindings
+          to: `production` or `preview`.
+        required: false
+        type: string
+        default: 'production'
+      dry_run:
+        description: 'Preview the change plan without modifying the Pages project.'
+        required: false
+        type: boolean
+        default: false
+      runs_on:
+        description: >-
+          Optional runner override for the reconcile job. When empty (the
+          default), resolves from the org-shared `vars.DEFAULT_RUNNER`.
+          Accepts either a bare label (e.g. `ubuntu-latest`) or a
+          JSON-array string of labels (e.g. `["self-hosted","Linux","ARM64"]`);
+          both shapes are parsed at runtime via `fromJSON`.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: >-
+          Cloudflare API token scoped `Account → Cloudflare Pages → Edit`
+          on the account owning the Pages project.
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: >-
+          **Back-compat input. Prefer `vars.CLOUDFLARE_ACCOUNT_ID`** —
+          account IDs are public Cloudflare identifiers, not secrets. When
+          neither this secret nor the var is set, the workflow
+          auto-resolves the account via `GET /accounts` against
+          `CLOUDFLARE_API_TOKEN` (an account-scoped Pages:Edit token
+          returns exactly one account, so the lookup is unambiguous).
+        required: false
+    outputs:
+      changed:
+        description: '`true` when the reconcile actually patched the project (always `false` on dry runs).'
+        value: ${{ jobs.ai-bindings.outputs.changed }}
+      bindings:
+        description: 'JSON array of the Workers AI binding names present on the target environment after the reconcile.'
+        value: ${{ jobs.ai-bindings.outputs.bindings }}
+
+permissions:
+  contents: read
+
+concurrency:
+  # Cloudflare serialises project mutations; never run two reconciles for
+  # the same project/environment concurrently.
+  group: cloudflare-pages-ai-${{ github.workflow }}-${{ inputs.cloudflare_project_name }}-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight — validate `vars.DEFAULT_RUNNER` once before the reconcile job
+  # evaluates its `runs-on:` expression (mirrors deploy-cloudflare-pages.yml).
+  # ---------------------------------------------------------------------------
+  preflight-runner-config:
+    name: Preflight (runner config)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+        with:
+          default_runner: ${{ vars.DEFAULT_RUNNER }}
+          runner_x64: ${{ vars.RUNNER_X64 }}
+          runner_arm64: ${{ vars.RUNNER_ARM64 }}
+
+  ai-bindings:
+    name: Reconcile Workers AI bindings
+    needs: preflight-runner-config
+    # Resolve runner: explicit `inputs.runs_on` override beats org-shared
+    # `vars.DEFAULT_RUNNER`. The `fromJSON` + `startsWith` dance supports
+    # both bare-label and JSON-array shapes.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER)) }}
+    timeout-minutes: 10
+    env:
+      PROJECT_NAME: ${{ inputs.cloudflare_project_name }}
+      AI_BINDINGS: ${{ inputs.ai_bindings }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      # Cloudflare account ID: prefer `vars.*` (public identifier, no
+      # runner masking), fall back to `secrets.*` for back-compat.
+      ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+    outputs:
+      changed: ${{ steps.reconcile.outputs.changed }}
+      bindings: ${{ steps.reconcile.outputs.bindings }}
+    steps:
+      # Account ID resolution: prefer the inherited `env.ACCOUNT_ID` (set
+      # from `vars.*` or back-compat `secrets.*`). When neither is set,
+      # look the account up via `GET /accounts`.
+      - name: Auto-resolve Cloudflare account ID
+        id: account_autoresolve
+        if: env.ACCOUNT_ID == ''
+        env:
+          API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, sys, urllib.error, urllib.request
+
+          token = (os.environ.get("API_TOKEN") or "").strip()
+          if not token:
+              sys.exit("ERROR: CLOUDFLARE_API_TOKEN is required for account auto-resolve")
+          if any(c.isspace() for c in token):
+              sys.exit("ERROR: CLOUDFLARE_API_TOKEN contains whitespace/newlines")
+
+          req = urllib.request.Request(
+              "https://api.cloudflare.com/client/v4/accounts",
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/json",
+                  "User-Agent": "bos-automation-hub/configure-cloudflare-pages-ai",
+              },
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  status, payload = resp.status, json.loads(resp.read() or b"{}")
+          except urllib.error.HTTPError as exc:
+              status = exc.code
+              payload = json.loads(exc.read() or b"{}") if exc.headers.get("Content-Type", "").startswith("application/json") else {"_raw": (exc.read() or b"").decode("utf-8", "replace")}
+
+          if status != 200 or not payload.get("success"):
+              print(f"ERROR: Cloudflare /accounts returned HTTP {status}", file=sys.stderr)
+              print("Hint: token must be valid and have at least one account-scoped permission.", file=sys.stderr)
+              print(json.dumps(payload)[:600], file=sys.stderr)
+              sys.exit(1)
+
+          result = payload.get("result") or []
+          if not result:
+              sys.exit("ERROR: token returned zero accounts (no account-scoped permissions).")
+          if len(result) > 1:
+              names = ", ".join(a.get("name", "?") for a in result)
+              sys.exit(
+                  f"ERROR: token can access {len(result)} accounts; set vars.CLOUDFLARE_ACCOUNT_ID "
+                  f"(or the back-compat secret) explicitly to pick one. Accounts: {names}"
+              )
+
+          acct_id = (result[0].get("id") or "").strip()
+          if not re.match(r"^[0-9a-f]{32}$", acct_id):
+              sys.exit(f"ERROR: parsed account ID is not 32-char hex: {acct_id!r}")
+
+          print(f"Auto-resolved Cloudflare account ID: {acct_id}", file=sys.stderr)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"value={acct_id}\n")
+          PY
+
+      - name: Resolve & validate Cloudflare account ID
+        id: account
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-resolve-id@main
+        with:
+          value: ${{ env.ACCOUNT_ID || steps.account_autoresolve.outputs.value }}
+          kind: account
+
+      - name: Preflight validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          ERR=0
+          fail() { echo "ERROR: $*" >&2; ERR=1; }
+
+          # Cloudflare Pages project names: lowercase a-z, 0-9 and '-',
+          # 1-58 chars, can't start or end with '-'.
+          if ! printf '%s' "${PROJECT_NAME}" \
+            | grep -Eq '^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$'; then
+            fail "input 'cloudflare_project_name' is not a valid Pages project name: '${PROJECT_NAME}'"
+          fi
+
+          case "${ENVIRONMENT}" in
+            production|preview) ;;
+            *) fail "input 'environment' must be 'production' or 'preview' (got '${ENVIRONMENT}')" ;;
+          esac
+
+          case "${DRY_RUN}" in
+            true|false) ;;
+            *) fail "input 'dry_run' must be 'true' or 'false' (got '${DRY_RUN}')" ;;
+          esac
+
+          [ -n "${AI_BINDINGS}" ] || fail "input 'ai_bindings' is required"
+
+          [ "${ERR}" -eq 0 ] || exit 1
+
+      - name: Reconcile Workers AI bindings
+        id: reconcile
+        env:
+          API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_ID: ${{ steps.account.outputs.value }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, sys, urllib.error, urllib.request
+
+          token = (os.environ.get("API_TOKEN") or "").strip()
+          if not token:
+              sys.exit("ERROR: CLOUDFLARE_API_TOKEN is required")
+          if any(c.isspace() for c in token):
+              sys.exit("ERROR: CLOUDFLARE_API_TOKEN contains whitespace/newlines")
+
+          account_id = (os.environ.get("ACCOUNT_ID") or "").strip()
+          project = (os.environ.get("PROJECT_NAME") or "").strip()
+          environment = (os.environ.get("ENVIRONMENT") or "production").strip()
+          dry_run = (os.environ.get("DRY_RUN") or "false").strip() == "true"
+
+          # Parse + validate the requested binding names.
+          try:
+              requested = json.loads(os.environ.get("AI_BINDINGS") or "")
+          except json.JSONDecodeError as exc:
+              sys.exit(f"ERROR: input 'ai_bindings' is not valid JSON: {exc}")
+          if not isinstance(requested, list) or not requested:
+              sys.exit("ERROR: input 'ai_bindings' must be a non-empty JSON array of binding names")
+          name_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+          names = []
+          for n in requested:
+              if not isinstance(n, str) or not name_re.match(n):
+                  sys.exit(f"ERROR: invalid Workers AI binding name: {n!r} (must match {name_re.pattern})")
+              if n not in names:
+                  names.append(n)
+
+          base = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/pages/projects/{project}"
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Accept": "application/json",
+              "User-Agent": "bos-automation-hub/configure-cloudflare-pages-ai",
+          }
+
+          def call(method, url, body=None):
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(url, data=data, method=method, headers=dict(headers))
+              if data is not None:
+                  req.add_header("Content-Type", "application/json")
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as resp:
+                      return resp.status, json.loads(resp.read() or b"{}")
+              except urllib.error.HTTPError as exc:
+                  ctype = exc.headers.get("Content-Type", "")
+                  raw = exc.read() or b""
+                  payload = json.loads(raw or b"{}") if ctype.startswith("application/json") else {"_raw": raw.decode("utf-8", "replace")}
+                  return exc.code, payload
+
+          def errmsg(payload):
+              errs = payload.get("errors") or []
+              return "; ".join(f"{e.get('code', '?')}: {e.get('message', '?')}" for e in errs) or json.dumps(payload)[:400]
+
+          # ── Read current project state ──────────────────────────────
+          status, payload = call("GET", base)
+          if status == 404:
+              sys.exit(
+                  f"ERROR: Pages project '{project}' was not found on this account. "
+                  "Create the project (or run a first deploy) before attaching AI bindings."
+              )
+          if status != 200 or not payload.get("success"):
+              print(f"ERROR: GET project returned HTTP {status}: {errmsg(payload)}", file=sys.stderr)
+              sys.exit(1)
+
+          deployment_configs = (payload.get("result") or {}).get("deployment_configs") or {}
+          env_config = deployment_configs.get(environment) or {}
+          current = env_config.get("ai_bindings") or {}
+          if not isinstance(current, dict):
+              current = {}
+
+          existing = sorted(current.keys())
+          to_add = [n for n in names if n not in current]
+
+          print(f"Project:      {project}")
+          print(f"Environment:  {environment}")
+          print(f"Existing AI bindings: {existing or '(none)'}")
+          print(f"Requested:            {names}")
+          print(f"To add:               {to_add or '(none — already present)'}")
+
+          # Desired state: additive — keep existing bindings, ensure the
+          # requested ones are present (each value is an empty object).
+          merged = dict(current)
+          for n in to_add:
+              merged[n] = {}
+          final_names = sorted(merged.keys())
+
+          changed = "false"
+          if not to_add:
+              print("No change required; requested bindings already present.")
+          elif dry_run:
+              print("DRY RUN: would PATCH the project with the following ai_bindings:")
+              print(json.dumps({environment: {"ai_bindings": merged}}, indent=2))
+          else:
+              body = {"deployment_configs": {environment: {"ai_bindings": merged}}}
+              status, payload = call("PATCH", base, body)
+              if status != 200 or not payload.get("success"):
+                  print(f"ERROR: PATCH project returned HTTP {status}: {errmsg(payload)}", file=sys.stderr)
+                  sys.exit(1)
+              changed = "true"
+              # Re-read the applied bindings from the response when present.
+              applied = (
+                  ((payload.get("result") or {}).get("deployment_configs") or {})
+                  .get(environment, {})
+                  .get("ai_bindings")
+              )
+              if isinstance(applied, dict):
+                  final_names = sorted(applied.keys())
+              print(f"Patched project; AI bindings now: {final_names}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"changed={changed}\n")
+              f.write(f"bindings={json.dumps(final_names)}\n")
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as f:
+                  f.write("### Cloudflare Pages Workers AI bindings\n\n")
+                  f.write(f"- **Project:** `{project}`\n")
+                  f.write(f"- **Environment:** `{environment}`\n")
+                  f.write(f"- **Requested:** `{names}`\n")
+                  f.write(f"- **Added:** `{to_add or '(none)'}`\n")
+                  f.write(f"- **Result:** `{final_names}`\n")
+                  if dry_run and to_add:
+                      f.write("- **Mode:** dry run (no changes applied)\n")
+          PY
