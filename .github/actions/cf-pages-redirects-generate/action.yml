@@ -1,0 +1,273 @@
+name: Generate Cloudflare Pages _redirects file
+description: >-
+  Dynamically generate a Cloudflare Pages `_redirects` file from
+  built-in default redirect rules plus raw custom rules. Validates
+  Cloudflare Pages line limits, supports comments and blank lines,
+  and writes to `<output_dir>/_redirects`.
+
+  Format reference:
+    https://developers.cloudflare.com/pages/configuration/redirects/
+
+  Pattern parity: composite action shape mirrors the sibling Cloudflare
+  Pages generators wired into `deploy-cloudflare-pages.yml` but lives
+  locally in the hub rather than as a separate repo.
+
+inputs:
+  site_url:
+    description: >-
+      Canonical site URL used by the built-in redirect presets.
+      When the canonical-host preset is enabled, the action derives
+      the alternate host from this URL and redirects it here.
+    required: false
+    default: ''
+  output_dir:
+    description: >-
+      Repo-relative directory where the `_redirects` file is written.
+      Almost always the same value the caller passes for `deploy_dir`
+      in `deploy-cloudflare-pages.yml`, since Cloudflare Pages reads
+      `_redirects` from the upload root. Must be a non-empty,
+      repo-relative path that already exists (the stage-deploy-dir
+      step creates it earlier in the same job). Refused: empty,
+      absolute paths, paths containing `..`, paths containing
+      whitespace/newlines.
+    required: true
+  custom_rules:
+    description: >-
+      Raw `_redirects` content appended verbatim. Each non-comment,
+      non-blank line must follow Cloudflare's per-line structure:
+      `[source] [destination] [code?]`. Comments start with `#` and
+      blank lines are ignored. Use this for site-specific redirects
+      the hub cannot sensibly model as presets.
+    required: false
+    default: ''
+  canonical_host_redirect:
+    description: >-
+      Generate a host canonicalization redirect from the alternate
+      host to `site_url`. Defaults to true so common apex/www
+      redirects do not need to be repeated in every site config.
+    required: false
+    default: 'true'
+  security_txt_redirect:
+    description: >-
+      Generate `/security.txt /.well-known/security.txt 301` as a
+      built-in default. Defaults to true for Cloudflare Pages sites
+      that publish a conventional security contact path.
+    required: false
+    default: 'true'
+  replace_existing:
+    description: >-
+      When `false` (default), the action fails if
+      `<output_dir>/_redirects` already exists. This is a safety
+      interlock against silently clobbering a hand-maintained file
+      that the caller forgot to delete after migrating to the
+      generator. Set `true` once the migration is intentional (or set
+      it to `true` permanently once the consumer is fully
+      generator-driven).
+    required: false
+    default: 'false'
+
+outputs:
+  redirects_path:
+    description: 'Absolute path to the written `_redirects` file.'
+    value: ${{ steps.write.outputs.path }}
+  redirect_count:
+    description: 'Number of redirect declarations written.'
+    value: ${{ steps.write.outputs.redirect_count }}
+  static_redirect_count:
+    description: 'Number of redirect declarations that are static (no splats/placeholders).'
+    value: ${{ steps.write.outputs.static_redirect_count }}
+  dynamic_redirect_count:
+    description: 'Number of redirect declarations that are dynamic (splats/placeholders).'
+    value: ${{ steps.write.outputs.dynamic_redirect_count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs & generate _redirects
+      id: write
+      shell: bash
+      env:
+        SITE_URL: ${{ inputs.site_url }}
+        OUTPUT_DIR: ${{ inputs.output_dir }}
+        CUSTOM_RULES: ${{ inputs.custom_rules }}
+        CANONICAL_HOST_REDIRECT: ${{ inputs.canonical_host_redirect }}
+        SECURITY_TXT_REDIRECT: ${{ inputs.security_txt_redirect }}
+        REPLACE_EXISTING: ${{ inputs.replace_existing }}
+      run: |
+        set -euo pipefail
+
+        fail() { echo "ERROR: $*" >&2; exit 1; }
+
+        case "${OUTPUT_DIR}" in
+          ''|/*|*..*|*$'\n'*|*$'\r'*|*$'\t'*|*' '*)
+            fail "output_dir must be a non-empty, repo-relative path without '..' or whitespace (got '${OUTPUT_DIR}')" ;;
+        esac
+        [ -d "${OUTPUT_DIR}" ] \
+          || fail "output_dir '${OUTPUT_DIR}' does not exist (run stage-deploy-dir first)"
+
+        case "${REPLACE_EXISTING}" in
+          true|false) ;;
+          *) fail "replace_existing must be 'true' or 'false' (got '${REPLACE_EXISTING}')" ;;
+        esac
+
+        case "${CANONICAL_HOST_REDIRECT}" in
+          true|false) ;;
+          *) fail "canonical_host_redirect must be 'true' or 'false' (got '${CANONICAL_HOST_REDIRECT}')" ;;
+        esac
+
+        case "${SECURITY_TXT_REDIRECT}" in
+          true|false) ;;
+          *) fail "security_txt_redirect must be 'true' or 'false' (got '${SECURITY_TXT_REDIRECT}')" ;;
+        esac
+
+        site_host=''
+        if [ -n "${SITE_URL}" ]; then
+          case "${SITE_URL}" in
+            http://*|https://*) ;;
+            *) fail "site_url must start with http:// or https:// when provided (got '${SITE_URL}')" ;;
+          esac
+
+          if [[ "${SITE_URL}" =~ ^https?://([^/]+) ]]; then
+            site_host=${BASH_REMATCH[1]}
+          else
+            fail "site_url must include a host (got '${SITE_URL}')"
+          fi
+        fi
+
+        generated_rule_count=0
+        if [ "${SECURITY_TXT_REDIRECT}" = "true" ]; then
+          generated_rule_count=$((generated_rule_count + 1))
+        fi
+        if [ "${CANONICAL_HOST_REDIRECT}" = "true" ]; then
+          [ -n "${site_host}" ] || fail "site_url is required when canonical_host_redirect is true"
+          generated_rule_count=$((generated_rule_count + 1))
+        fi
+
+        if [ -z "${CUSTOM_RULES//[[:space:]]/}" ] && [ "${generated_rule_count}" -eq 0 ]; then
+          fail "at least one redirect declaration is required"
+        fi
+
+        canonical_redirect=''
+        if [ "${CANONICAL_HOST_REDIRECT}" = "true" ]; then
+          site_base="${SITE_URL%/}"
+          if [[ "${site_host}" == www.* ]]; then
+            bare_host=${site_host#www.}
+            canonical_redirect="https://${bare_host}/* ${site_base}/:splat 301!"
+          else
+            canonical_redirect="https://www.${site_host}/* ${site_base}/:splat 301!"
+          fi
+        fi
+
+        target="${OUTPUT_DIR%/}/_redirects"
+        if [ -e "${target}" ] && [ "${REPLACE_EXISTING}" != "true" ]; then
+          fail "${target} already exists (set replace_existing: true to overwrite)"
+        fi
+
+        tmp="$(mktemp)"
+        trap 'rm -f "${tmp}"' EXIT
+
+        {
+          echo '# ============================================================================'
+          echo '# AUTO-GENERATED by .github/actions/cf-pages-redirects-generate in'
+          echo '# blackoutsecure/bos-automation-hub. DO NOT EDIT BY HAND — your changes'
+          echo '# will be overwritten on the next deploy. To change rules, update the'
+          echo '# `cloudflare_redirects_*` inputs (or the `cloudflare.redirects.*` block in'
+          echo '# `.bos-launchpad.yaml` when called through the launchpad).'
+          echo '# Built-in defaults: canonical host redirect and /security.txt redirect.'
+          echo '#'
+          echo '# Format reference:'
+          echo '#   https://developers.cloudflare.com/pages/configuration/redirects/'
+          echo '# Limits: 2,000 static redirects + 100 dynamic redirects; 1,000 chars per line.'
+          echo '# ============================================================================'
+          echo
+          if [ "${SECURITY_TXT_REDIRECT}" = "true" ]; then
+            echo '/security.txt /.well-known/security.txt 301'
+          fi
+          if [ -n "${canonical_redirect}" ]; then
+            echo "${canonical_redirect}"
+          fi
+          printf '%s\n' "${CUSTOM_RULES}"
+          echo
+        } > "${tmp}"
+
+        long_lines="$(awk 'length($0) > 1000 { print NR }' "${tmp}" || true)"
+        if [ -n "${long_lines}" ]; then
+          fail "generated _redirects has line(s) exceeding 1000 chars (lines: ${long_lines})"
+        fi
+
+        redirect_count=0
+        static_count=0
+        dynamic_count=0
+        previous_kind=''
+
+        while IFS= read -r line || [ -n "${line}" ]; do
+          trimmed="${line#"${line%%[![:space:]]*}"}"
+          trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+          case "${trimmed}" in
+            ''|\#*)
+              continue ;;
+          esac
+
+          IFS=$' \t' read -r -a parts <<< "${trimmed}"
+          if [ "${#parts[@]}" -lt 2 ] || [ "${#parts[@]}" -gt 3 ]; then
+            fail "each redirect declaration must have 2 or 3 whitespace-separated fields (got: '${trimmed}')"
+          fi
+
+          source=${parts[0]}
+          case "${source}" in
+            *[*:]* )
+              dynamic_count=$((dynamic_count + 1))
+              this_kind=dynamic ;;
+            *)
+              static_count=$((static_count + 1))
+              this_kind=static ;;
+          esac
+          redirect_count=$((redirect_count + 1))
+
+          if [ -n "${previous_kind}" ] && [ "${previous_kind}" = dynamic ] && [ "${this_kind}" = static ]; then
+            fail "static redirects must appear before dynamic redirects (line: '${trimmed}')"
+          fi
+          previous_kind=${this_kind}
+        done < "${tmp}"
+
+        if [ "${redirect_count}" -eq 0 ]; then
+          fail "generated _redirects contains zero redirect declarations"
+        fi
+
+        if [ "${static_count}" -gt 2000 ]; then
+          fail "generated _redirects has ${static_count} static redirects (Cloudflare limit is 2000)"
+        fi
+        if [ "${dynamic_count}" -gt 100 ]; then
+          fail "generated _redirects has ${dynamic_count} dynamic redirects (Cloudflare limit is 100)"
+        fi
+        if [ "${redirect_count}" -gt 2100 ]; then
+          fail "generated _redirects has ${redirect_count} redirects (Cloudflare limit is 2100)"
+        fi
+
+        install -m 0644 "${tmp}" "${target}"
+
+        abs_path="$(cd "${OUTPUT_DIR}" && pwd)/_redirects"
+        echo "path=${abs_path}" >> "${GITHUB_OUTPUT}"
+        echo "redirect_count=${redirect_count}" >> "${GITHUB_OUTPUT}"
+        echo "static_redirect_count=${static_count}" >> "${GITHUB_OUTPUT}"
+        echo "dynamic_redirect_count=${dynamic_count}" >> "${GITHUB_OUTPUT}"
+
+        {
+          echo "### Cloudflare Pages \`_redirects\` generated"
+          echo
+          echo "- **Output:** \`${target}\`"
+          echo "- **Redirects:** ${redirect_count} / 2100"
+          echo "- **Static:** ${static_count} / 2000"
+          echo "- **Dynamic:** ${dynamic_count} / 100"
+          [ -n "${CUSTOM_RULES//[[:space:]]/}" ] && echo "- **Custom rules:** appended"
+          echo
+          echo "<details><summary>Generated \`_redirects\` (first 40 lines)</summary>"
+          echo
+          echo '```'
+          head -n 40 "${target}"
+          echo '```'
+          echo
+          echo "</details>"
+        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+        echo "Wrote ${target} (${redirect_count} redirect declarations)"

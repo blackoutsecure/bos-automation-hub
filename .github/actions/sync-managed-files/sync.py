@@ -22,9 +22,9 @@ Three registries are supported:
   one or more files outright. The hub overwrites the file with the
   canonical content (prefixed by a single-line ``Managed by…`` header
   comment) on every run. Used for shared scripts where the entire file
-  body is authoritative (e.g. ``log-functions.sh``, ``.prettierrc.yaml``).
-  No markers; no merging — a file may only be claimed by exactly one
-  whole-file service.
+  body is authoritative (e.g. ``log-functions.sh``, ``.prettierrc.yaml``,
+  ``.wranglerignore``). No markers; no merging — a file may only be
+  claimed by exactly one whole-file service.
 
 * ``SERVICE_INIT_FILES`` (init-if-missing mode) — each enabled service
   may ship a starter template. The hub writes the file ONLY when it
@@ -497,6 +497,23 @@ endOfLine: lf
 """
 
 
+_WRANGLERIGNORE_CF_PAGES = """\
+# Version Control & Development
+.git
+.github
+.gitignore
+
+# IDE & Editor
+.vscode
+
+# Documentation
+README.md
+
+# Config Files
+_headers
+"""
+
+
 # --------------------------------------------------------------------------- #
 # Init-if-missing whole files — starter templates                             #
 # --------------------------------------------------------------------------- #
@@ -524,6 +541,7 @@ _GHA_SYNC_COMMIT_YML = """\
 #   node              Node.js .gitignore + .dockerignore sections
 #   python            Python .gitignore + .dockerignore sections
 #   lf_line_endings   .gitattributes LF normalization block
+#   wranglerignore    full .wranglerignore for Cloudflare Pages repo hygiene
 #   dependabot_actions  github-actions ecosystem in .github/dependabot.yml
 #   dependabot_npm      npm ecosystem in .github/dependabot.yml
 #   dependabot_pip      pip ecosystem in .github/dependabot.yml
@@ -567,6 +585,7 @@ jobs:
         # dependabot_pip
         # prettier
         # logger
+        # wranglerignore
 """
 
 _GHA_SYNC_DRIFT_CHECK_YML = """\
@@ -590,6 +609,7 @@ on:
       - '.editorconfig'
       - '.gitattributes'
       - '.github/dependabot.yml'
+      - '.wranglerignore'
       - '.prettierrc.yaml'
       - 'root/usr/local/bin/log-functions.sh'
       - '.github/workflows/sync-drift-check.yml'
@@ -2330,6 +2350,9 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     },
     "prettier": {
         ".prettierrc.yaml": _PRETTIERRC_YAML,
+    },
+    "wranglerignore": {
+      ".wranglerignore": _WRANGLERIGNORE_CF_PAGES,
     },
     "bos_launchpad_release": {
         ".github/workflows/bos-launchpad-release.yml": _BOS_LAUNCHPAD_RELEASE_YML,
