@@ -31,11 +31,11 @@ cloudflare:
   # values stay byte-stable through the forwarding chain.
   #
   # NOTE: omit `_headers` from `copy_files` when `headers.generate: true`
-  # below — the generator writes `_headers` directly into `deploy_dir`
-  # and (by default) refuses to overwrite an existing file.
+  # below, and omit `_redirects` when `redirects.generate: true` — the
+  # generators write their files directly into `deploy_dir` and (by
+  # default) refuse to overwrite existing files.
   copy_files: |-
     index.html
-    _redirects
     humans.txt
   copy_dirs: |-
     assets
@@ -66,6 +66,18 @@ cloudflare:
   manifest_dir: 'ltr'
   manifest_categories: 'utilities,productivity'
   manifest_icons_dir: 'assets/icons'
+
+  # ----- _redirects generator (hub-local composite action) -----
+  redirects:
+    generate: true
+
+    # Built-in defaults are enabled by default in the shared action:
+    # canonical host redirect + `/security.txt` redirect.
+    # Add site-specific redirect lines here only when needed.
+    custom_rules: ''
+
+    # Set true once migrated away from a hand-maintained `_redirects`.
+    replace_existing: true
 
   # ----- _headers generator (hub-local composite action) -----
   # Dynamically writes `<deploy_dir>/_headers` from composable presets

@@ -2,8 +2,10 @@ name: Generate Cloudflare Pages _headers file
 description: >-
   Dynamically generate a Cloudflare Pages `_headers` file from composable
   presets (security defaults, cache defaults, CORS for fonts, opkg-feed
-  rules) plus optional custom rules appended verbatim. Validates against
-  the Cloudflare 100-rule / 2000-char-per-line limits. Writes to
+  rules) plus built-in common content headers for generated files
+  (`/.well-known/security.txt`, `/robots.txt`, `/sitemap.xml`,
+  `/humans.txt`) and optional custom rules appended verbatim. Validates
+  against the Cloudflare 100-rule / 2000-char-per-line limits. Writes to
   `<output_dir>/_headers`.
 
   Format reference:
@@ -109,6 +111,40 @@ inputs:
       ONLY for fingerprinted assets — never apply to mutable paths.
     required: false
     default: 'public, max-age=31536000, immutable'
+  generate_common_content_headers:
+    description: >-
+      Automatically emit common content headers for staged files that
+      are present in `output_dir`: `/.well-known/security.txt`,
+      `/robots.txt`, `/sitemap.xml`, and `/humans.txt`. Each rule uses
+      the path-specific cache-control input below. Defaults to true so
+      most static sites do not need to repeat the same rules in every
+      repo.
+    required: false
+    default: 'true'
+  common_security_txt_cache_control:
+    description: >-
+      `Cache-Control` value for `/.well-known/security.txt` when the
+      common-content preset is enabled and the file exists.
+    required: false
+    default: 'public, max-age=86400'
+  common_robots_txt_cache_control:
+    description: >-
+      `Cache-Control` value for `/robots.txt` when the common-content
+      preset is enabled and the file exists.
+    required: false
+    default: 'public, max-age=86400'
+  common_sitemap_xml_cache_control:
+    description: >-
+      `Cache-Control` value for `/sitemap.xml` when the common-content
+      preset is enabled and the file exists.
+    required: false
+    default: 'public, max-age=86400'
+  common_humans_txt_cache_control:
+    description: >-
+      `Cache-Control` value for `/humans.txt` when the common-content
+      preset is enabled and the file exists.
+    required: false
+    default: 'public, max-age=86400'
   custom_rules:
     description: >-
       Raw `_headers` content appended verbatim AFTER all preset
@@ -156,6 +192,11 @@ runs:
         CACHE_HTML_CONTROL: ${{ inputs.cache_html_control }}
         CACHE_ASSETS_PATTERN: ${{ inputs.cache_assets_pattern }}
         CACHE_ASSETS_CONTROL: ${{ inputs.cache_assets_control }}
+        GENERATE_COMMON_CONTENT_HEADERS: ${{ inputs.generate_common_content_headers }}
+        COMMON_SECURITY_TXT_CACHE_CONTROL: ${{ inputs.common_security_txt_cache_control }}
+        COMMON_ROBOTS_TXT_CACHE_CONTROL: ${{ inputs.common_robots_txt_cache_control }}
+        COMMON_SITEMAP_XML_CACHE_CONTROL: ${{ inputs.common_sitemap_xml_cache_control }}
+        COMMON_HUMANS_TXT_CACHE_CONTROL: ${{ inputs.common_humans_txt_cache_control }}
         CUSTOM_RULES: ${{ inputs.custom_rules }}
         REPLACE_EXISTING: ${{ inputs.replace_existing }}
       run: |
@@ -182,12 +223,17 @@ runs:
 
         # Reject any preset-affecting value that contains a newline —
         # those would silently shred the generated block format.
-        for v_name in CSP PERMISSIONS_POLICY CACHE_HTML_CONTROL CACHE_ASSETS_PATTERN CACHE_ASSETS_CONTROL; do
+        for v_name in CSP PERMISSIONS_POLICY CACHE_HTML_CONTROL CACHE_ASSETS_PATTERN CACHE_ASSETS_CONTROL COMMON_SECURITY_TXT_CACHE_CONTROL COMMON_ROBOTS_TXT_CACHE_CONTROL COMMON_SITEMAP_XML_CACHE_CONTROL COMMON_HUMANS_TXT_CACHE_CONTROL; do
           eval "v_val=\${$v_name}"
           case "${v_val}" in
             *$'\n'*|*$'\r'*) fail "input '$(printf '%s' "${v_name}" | tr '[:upper:]' '[:lower:]')' must not contain newlines" ;;
           esac
         done
+
+        case "${GENERATE_COMMON_CONTENT_HEADERS}" in
+          true|false) ;;
+          *) fail "generate_common_content_headers must be 'true' or 'false' (got '${GENERATE_COMMON_CONTENT_HEADERS}')" ;;
+        esac
 
         # Path pattern shape check: starts with '/' or 'http' (absolute URL).
         case "${CACHE_ASSETS_PATTERN}" in
@@ -222,9 +268,6 @@ runs:
           esac
         done
 
-        if [ -z "${normalized}" ] && [ -z "${CUSTOM_RULES//[[:space:]]/}" ]; then
-          fail "no presets and no custom_rules — refusing to generate an empty _headers file"
-        fi
         case ",${normalized}," in
           *,none,*)
             if [ "${normalized}" != "none" ]; then
@@ -335,6 +378,28 @@ runs:
           } >> "${tmp}"
         }
 
+        gen_common_content_headers() {
+          [ "${GENERATE_COMMON_CONTENT_HEADERS}" = "true" ] || return 0
+
+          emit_common_rule() {
+            local rule_path="$1" file_path="$2" content_type="$3" cache_control="$4"
+            if [ -e "${OUTPUT_DIR%/}/${file_path}" ]; then
+              echo "${rule_path}"
+              echo "  Content-Type: ${content_type}"
+              [ -n "${cache_control}" ] && echo "  Cache-Control: ${cache_control}"
+              echo
+            fi
+          }
+
+          {
+            echo "# --- preset: common-content ---"
+            emit_common_rule '/.well-known/security.txt' '.well-known/security.txt' 'text/plain; charset=utf-8' "${COMMON_SECURITY_TXT_CACHE_CONTROL}"
+            emit_common_rule '/robots.txt' 'robots.txt' 'text/plain; charset=utf-8' "${COMMON_ROBOTS_TXT_CACHE_CONTROL}"
+            emit_common_rule '/sitemap.xml' 'sitemap.xml' 'application/xml; charset=utf-8' "${COMMON_SITEMAP_XML_CACHE_CONTROL}"
+            emit_common_rule '/humans.txt' 'humans.txt' 'text/plain; charset=utf-8' "${COMMON_HUMANS_TXT_CACHE_CONTROL}"
+          } >> "${tmp}"
+        }
+
         # --------------- 5. Assemble ------------------------------------
         gen_header
         if [ -n "${normalized}" ]; then
@@ -349,6 +414,8 @@ runs:
             esac
           done
         fi
+
+        gen_common_content_headers
 
         if [ -n "${CUSTOM_RULES//[[:space:]]/}" ]; then
           {
