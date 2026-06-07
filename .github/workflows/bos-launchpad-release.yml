@@ -1409,69 +1409,9 @@ jobs:
           PY
 
       - name: Summarize launchpad config
-        shell: bash
-        env:
-          CFG_JSON: ${{ steps.normalize.outputs.cfg }}
-          CLOUDFLARE_JSON: ${{ steps.normalize.outputs.cloudflare }}
-          SYNC_JSON: ${{ steps.normalize.outputs.sync }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-
-          cfg = json.loads(os.environ.get("CFG_JSON") or "{}")
-          cf = json.loads(os.environ.get("CLOUDFLARE_JSON") or "{}")
-          sync = json.loads(os.environ.get("SYNC_JSON") or "{}")
-
-          stages = cfg.get("stages") if isinstance(cfg.get("stages"), dict) else {}
-          upstream = cfg.get("upstream") if isinstance(cfg.get("upstream"), dict) else {}
-          release = cfg.get("release") if isinstance(cfg.get("release"), dict) else {}
-
-          stage_flags = {
-              "docker": stages.get("docker") is True,
-              "balena": stages.get("balena") is True,
-              "github_release": stages.get("github_release") is True,
-              "cloudflare_pages": bool(cf.get("enabled")),
-              "sync_managed_files": bool(sync.get("enabled")),
-          }
-          enabled_stages = ", ".join([k for k, v in stage_flags.items() if v]) or "(none)"
-
-          cf_site = (cf.get("site_url") or "").strip() or "(unset)"
-          cf_project = (cf.get("project_name") or "").strip() or "(unset)"
-          cf_env = (cf.get("deployment_environment") or "").strip() or "(unset)"
-          sync_services = sync.get("services") if isinstance(sync.get("services"), list) else []
-          sync_services_text = ", ".join(sync_services) if sync_services else "(none)"
-
-          lines = [
-              "## Launchpad config snapshot",
-              "",
-              "| Field | Value |",
-              "| --- | --- |",
-              f"| Enabled stages | `{enabled_stages}` |",
-              f"| Upstream source | `{(upstream.get('source') or '').strip() or '(unset)'}` |",
-              f"| Cloudflare project | `{cf_project}` |",
-              f"| Cloudflare environment | `{cf_env}` |",
-              f"| Cloudflare site URL | `{cf_site}` |",
-              f"| Sync mode | `{(sync.get('mode') or 'commit')}` |",
-              f"| Sync services | `{sync_services_text}` |",
-              f"| Release template path | `{(release.get('template_path') or '').strip() or '(unset)'}` |",
-          ]
-
-          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summary_path:
-              with open(summary_path, "a", encoding="utf-8") as f:
-                  f.write("\n".join(lines) + "\n")
-
-          print("Launchpad config snapshot:")
-          print(f"  enabled_stages: {enabled_stages}")
-          print(f"  upstream_source: {(upstream.get('source') or '').strip() or '(unset)'}")
-          print(f"  cloudflare_project: {cf_project}")
-          print(f"  cloudflare_environment: {cf_env}")
-          print(f"  cloudflare_site_url: {cf_site}")
-          print(f"  sync_mode: {(sync.get('mode') or 'commit')}")
-          print(f"  sync_services: {sync_services_text}")
-          PY
+        uses: ./.github/actions/summarize-launchpad-config
+        with:
+          cfg_json: ${{ steps.normalize.outputs.cfg }}
 
   # ---------------------------------------------------------------------------
   # Stage 0 — Consolidated security scan (opt-in, gating by default).

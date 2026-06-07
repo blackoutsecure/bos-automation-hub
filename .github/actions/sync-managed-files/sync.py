@@ -1017,69 +1017,9 @@ jobs:
         uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
 
       - name: Summarize launchpad config
-        shell: bash
-        env:
-          CFG_JSON: ${{ steps.read.outputs.cfg }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-
-          cfg = json.loads(os.environ.get("CFG_JSON") or "{}")
-          if not isinstance(cfg, dict):
-              cfg = {}
-
-          stages = cfg.get("stages") if isinstance(cfg.get("stages"), dict) else {}
-          cloudflare = cfg.get("cloudflare") if isinstance(cfg.get("cloudflare"), dict) else {}
-          sync = cfg.get("sync_files") if isinstance(cfg.get("sync_files"), dict) else {}
-          upstream = cfg.get("upstream") if isinstance(cfg.get("upstream"), dict) else {}
-
-          enabled = [
-              name
-              for name in ["docker", "balena", "github_release", "companion_docker", "cloudflare_pages"]
-              if stages.get(name) is True
-          ]
-          if cloudflare.get("project_name"):
-              enabled.append("cloudflare_pages")
-          enabled_stages = ", ".join(sorted(set(enabled))) or "(none)"
-
-          site_url = (cloudflare.get("site_url") or "").strip() or "(unset)"
-          project = (cloudflare.get("project_name") or "").strip() or "(unset)"
-          env_name = (cloudflare.get("deployment_environment") or "").strip() or "(unset)"
-          sync_mode = (sync.get("mode") or "commit") if isinstance(sync.get("mode"), str) else "commit"
-          services = sync.get("services") if isinstance(sync.get("services"), list) else []
-          services_text = ", ".join([s for s in services if isinstance(s, str) and s.strip()]) or "(none)"
-          upstream_source = (upstream.get("source") or "").strip() or "(unset)"
-
-          lines = [
-              "## Launchpad config snapshot",
-              "",
-              "| Field | Value |",
-              "| --- | --- |",
-              f"| Enabled stages | `{enabled_stages}` |",
-              f"| Upstream source | `{upstream_source}` |",
-              f"| Cloudflare project | `{project}` |",
-              f"| Cloudflare environment | `{env_name}` |",
-              f"| Cloudflare site URL | `{site_url}` |",
-              f"| Sync mode | `{sync_mode}` |",
-              f"| Sync services | `{services_text}` |",
-          ]
-
-          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summary_path:
-              with open(summary_path, "a", encoding="utf-8") as f:
-                  f.write("\\n".join(lines) + "\\n")
-
-          print("Launchpad config snapshot:")
-          print(f"  enabled_stages: {enabled_stages}")
-          print(f"  upstream_source: {upstream_source}")
-          print(f"  cloudflare_project: {project}")
-          print(f"  cloudflare_environment: {env_name}")
-          print(f"  cloudflare_site_url: {site_url}")
-          print(f"  sync_mode: {sync_mode}")
-          print(f"  sync_services: {services_text}")
-          PY
+        uses: blackoutsecure/bos-automation-hub/.github/actions/summarize-launchpad-config@main
+        with:
+          cfg_json: ${{ steps.read.outputs.cfg }}
 
   release:
     name: Release
