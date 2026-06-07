@@ -1228,7 +1228,7 @@ concurrency:
 
 jobs:
   parse-config:
-    name: Parse .bos-launchpad.yaml
+    name: Parse launchpad config
     if: inputs.use_launchpad_config || inputs.sync_managed_files
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -1241,18 +1241,36 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert .bos-launchpad.yaml to normalized JSON
+      - name: Convert launchpad config to normalized JSON
         id: read
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f .bos-launchpad.yaml ]]; then
-            echo "::error file=.bos-launchpad.yaml::Required config file not found. See https://github.com/blackoutsecure/bos-automation-hub for the schema."
+          cfg_file=''
+          cfg_kind=''
+          if [[ -f bos-launchpad-config.json ]]; then
+            cfg_file='bos-launchpad-config.json'
+            cfg_kind='json'
+          elif [[ -f .bos-launchpad.yaml ]]; then
+            cfg_file='.bos-launchpad.yaml'
+            cfg_kind='yaml'
+          elif [[ -f .bos-launchpad.yml ]]; then
+            cfg_file='.bos-launchpad.yml'
+            cfg_kind='yaml'
+          else
+            echo "::error::Required config file not found. Expected bos-launchpad-config.json (preferred) or legacy .bos-launchpad.yaml/.bos-launchpad.yml."
             exit 1
           fi
-          if ! cfg="$(yq -o=json -I=0 '.' .bos-launchpad.yaml)"; then
-            echo "::error file=.bos-launchpad.yaml::YAML parse error (see preceding yq output)."
-            exit 1
+          if [[ "$cfg_kind" == 'json' ]]; then
+            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
+              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
+              exit 1
+            fi
+          else
+            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
+              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
+              exit 1
+            fi
           fi
           CFG_JSON="$cfg" python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
@@ -1262,7 +1280,7 @@ jobs:
           cfg = json.loads(os.environ["CFG_JSON"])
           if not isinstance(cfg, dict):
               print(
-                  "::error file=.bos-launchpad.yaml::Top-level config must be a YAML mapping.",
+                "::error::Top-level config must be a JSON object/YAML mapping.",
                   file=sys.stderr,
               )
               sys.exit(1)

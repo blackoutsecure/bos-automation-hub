@@ -25,13 +25,13 @@
 # Blackout Secure Launchpad — universal kicker (hub-managed).
 #
 # Calls `bos-launchpad-release.yml` in blackoutsecure/bos-automation-hub. Reads
-# per-repo customization from `.bos-launchpad.yaml` at the repo root.
+# per-repo customization from `bos-launchpad-config.json` at the repo root.
 #
-# CUSTOMIZE via `.bos-launchpad.yaml` — NOT this file. The hub
+# CUSTOMIZE via `bos-launchpad-config.json` — NOT this file. The hub
 # overwrites this workflow in place on every sync; hand-edits are
 # lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 #
-# Required vars   (names overridable via `.bos-launchpad.yaml`):
+# Required vars   (names overridable via `bos-launchpad-config.json`):
 #   DOCKERHUB_NAMESPACE, BALENA_NAMESPACE
 # Required secrets:
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
@@ -44,7 +44,7 @@ run-name: >-
       || github.event_name == 'schedule'
       && 'scheduled'
       || 'push'
-  }} / ref:${{ github.ref_name }} / cf-env:${{ vars.CLOUDFLARE_DEPLOYMENT_ENV || 'from-.bos-launchpad.yaml' }} / cf-domain:${{ vars.CLOUDFLARE_SITE_URL || 'from-.bos-launchpad.yaml' }}
+  }} / ref:${{ github.ref_name }} / cf-env:${{ vars.CLOUDFLARE_DEPLOYMENT_ENV || 'from-bos-launchpad-config.json' }} / cf-domain:${{ vars.CLOUDFLARE_SITE_URL || 'from-bos-launchpad-config.json' }}
 
 on:
   schedule:
@@ -53,7 +53,7 @@ on:
     branches: [main]
     # Source paths that should trigger the workflow on commit. Whether
     # push events actually FORCE a rebuild is controlled by
-    # `triggers.force_on_push` in `.bos-launchpad.yaml` (default
+    # `triggers.force_on_push` in `bos-launchpad-config.json` (default
     # `false`: a push that doesn't move upstream is a no-op release).
     paths:
       - 'Dockerfile'
@@ -62,7 +62,9 @@ on:
       - 'build/**'
       - 'scripts/**'
       - '.github/upstream/**'
+      - 'bos-launchpad-config.json'
       - '.bos-launchpad.yaml'
+      - '.bos-launchpad.yml'
       - 'bos-managed-files.yaml'
       - '.github/workflows/bos-launchpad.yml'
   workflow_dispatch:
@@ -84,7 +86,7 @@ permissions:
 
 jobs:
   parse-config:
-    name: Parse .bos-launchpad.yaml
+    name: Parse launchpad config
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -94,26 +96,44 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert .bos-launchpad.yaml to JSON
+      - name: Convert launchpad config to JSON
         id: read
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f .bos-launchpad.yaml ]]; then
-            echo "::error file=.bos-launchpad.yaml::Required config file not found. See https://github.com/blackoutsecure/bos-automation-hub for the schema."
+          cfg_file=''
+          cfg_kind=''
+          if [[ -f bos-launchpad-config.json ]]; then
+            cfg_file='bos-launchpad-config.json'
+            cfg_kind='json'
+          elif [[ -f .bos-launchpad.yaml ]]; then
+            cfg_file='.bos-launchpad.yaml'
+            cfg_kind='yaml'
+          elif [[ -f .bos-launchpad.yml ]]; then
+            cfg_file='.bos-launchpad.yml'
+            cfg_kind='yaml'
+          else
+            echo "::error::Required config file not found. Expected bos-launchpad-config.json (preferred) or legacy .bos-launchpad.yaml/.bos-launchpad.yml."
             exit 1
           fi
-          # yq is preinstalled on ubuntu-latest GitHub-hosted runners.
-          # `-I=0` emits compact (single-line) JSON to keep the GHA
-          # output payload small and avoid heredoc edge cases.
-          if ! cfg="$(yq -o=json -I=0 '.' .bos-launchpad.yaml)"; then
-            echo "::error file=.bos-launchpad.yaml::YAML parse error (see preceding yq output)."
-            exit 1
+          if [[ "$cfg_kind" == 'json' ]]; then
+            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
+              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
+              exit 1
+            fi
+          else
+            # yq is preinstalled on ubuntu-latest GitHub-hosted runners.
+            # `-I=0` emits compact (single-line) JSON to keep the GHA
+            # output payload small and avoid heredoc edge cases.
+            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
+              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
+              exit 1
+            fi
           fi
           # Round-trip through python's JSON parser as a sanity check —
           # catches any yq quirk that produces non-conformant JSON.
           if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-            echo "::error file=.bos-launchpad.yaml::Resulting JSON did not parse — yq emitted invalid output."
+            echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
             exit 1
           fi
           # Heredoc framing tolerates literal newlines inside string
@@ -177,9 +197,7 @@ jobs:
           summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
           if summary_path:
               with open(summary_path, "a", encoding="utf-8") as f:
-                  f.write("
-".join(lines) + "
-")
+                  f.write("\n".join(lines) + "\n")
 
           print("Launchpad config snapshot:")
           print(f"  enabled_stages: {enabled_stages}")

@@ -25,10 +25,10 @@
 # Blackout Secure Launchpad — gate kicker (hub-managed).
 #
 # Calls `bos-gate.yml` in blackoutsecure/bos-automation-hub. Reads
-# per-repo customization from `.bos-launchpad.yaml` at the repo root
+# per-repo customization from `bos-launchpad-config.json` at the repo root
 # (the optional `gate:` block — every key has a sensible default).
 #
-# CUSTOMIZE via `.bos-launchpad.yaml` — NOT this file. The hub
+# CUSTOMIZE via `bos-launchpad-config.json` — NOT this file. The hub
 # overwrites this workflow in place on every sync; hand-edits are
 # lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 #
@@ -71,7 +71,7 @@ permissions:
 
 jobs:
   parse-config:
-    name: Parse .bos-launchpad.yaml
+    name: Parse launchpad config
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -81,26 +81,41 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert .bos-launchpad.yaml to JSON
+      - name: Convert launchpad config to JSON
         id: read
         shell: bash
         run: |
           set -euo pipefail
-          # `.bos-launchpad.yaml` is OPTIONAL for the gate kicker — every
+          # Launchpad config is OPTIONAL for the gate kicker — every
           # gate input has a default in `bos-gate.yml`. When the file is
           # absent we emit `{}` so the downstream `fromJson(...).gate.*
           # || <default>` expressions flow through cleanly.
-          if [[ -f .bos-launchpad.yaml ]]; then
-            if ! cfg="$(yq -o=json -I=0 '.' .bos-launchpad.yaml)"; then
-              echo "::error file=.bos-launchpad.yaml::YAML parse error (see preceding yq output)."
+          cfg='{}'
+          cfg_file=''
+          if [[ -f bos-launchpad-config.json ]]; then
+            cfg_file='bos-launchpad-config.json'
+            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
+              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
               exit 1
             fi
+          elif [[ -f .bos-launchpad.yaml ]]; then
+            cfg_file='.bos-launchpad.yaml'
+            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
+              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
+              exit 1
+            fi
+          elif [[ -f .bos-launchpad.yml ]]; then
+            cfg_file='.bos-launchpad.yml'
+            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
+              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
+              exit 1
+            fi
+          fi
+          if [[ -n "$cfg_file" ]]; then
             if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-              echo "::error file=.bos-launchpad.yaml::Resulting JSON did not parse — yq emitted invalid output."
+              echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
               exit 1
             fi
-          else
-            cfg='{}'
           fi
           {
             echo "cfg<<__BOS_EOF__"
