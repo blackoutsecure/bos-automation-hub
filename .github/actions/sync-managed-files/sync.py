@@ -941,15 +941,9 @@ jobs:
 
 _BOS_LAUNCHPAD_RELEASE_YML = """\
 # Blackout Secure Launchpad — universal kicker (hub-managed).
-#
-# Calls `bos-launchpad-release.yml` in blackoutsecure/bos-automation-hub. Reads
-# per-repo customization from `bos-launchpad-config.json` at the repo root.
-#
-# CUSTOMIZE via `bos-launchpad-config.json` — NOT this file. The hub
-# overwrites this workflow in place on every sync; hand-edits are
-# lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
-#
-# Required vars   (names overridable via `bos-launchpad-config.json`):
+# Customize via `bos-launchpad-config.json` (repo root), not this file.
+# Schema docs: https://github.com/blackoutsecure/bos-automation-hub
+# Required vars (names overridable via `bos-launchpad-config.json`):
 #   DOCKERHUB_NAMESPACE, BALENA_NAMESPACE
 # Required secrets:
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
@@ -966,13 +960,9 @@ run-name: >-
 
 on:
   schedule:
-    - cron: '17 */6 * * *'   # stagger off :00 to dodge org cron pile-ups
+    - cron: '17 */6 * * *'
   push:
     branches: [main]
-    # Source paths that should trigger the workflow on commit. Whether
-    # push events actually FORCE a rebuild is controlled by
-    # `triggers.force_on_push` in `bos-launchpad-config.json` (default
-    # `false`: a push that doesn't move upstream is a no-op release).
     paths:
       - 'Dockerfile'
       - '.dockerignore'
@@ -995,8 +985,6 @@ on:
         options: [commit, check]
         default: commit
 
-# No top-level `concurrency:` — the hub workflow owns serialization.
-# Declaring it on both sides triggers a GHA self-deadlock.
 permissions:
   contents: read
 
@@ -1032,7 +1020,6 @@ jobs:
       models:          read    # nested release.yml -> github-release.yml AI changelog
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
     with:
-      # ----- Monitor stage -----
       upstream_repo:     ${{ fromJson(needs.parse-config.outputs.cfg).upstream.repo || '' }}
       source:            ${{ fromJson(needs.parse-config.outputs.cfg).upstream.source || 'github_release' }}
       upstream_branch:   ${{ fromJson(needs.parse-config.outputs.cfg).upstream.branch || '' }}
@@ -1043,27 +1030,17 @@ jobs:
       version_url:       ${{ fromJson(needs.parse-config.outputs.cfg).upstream.version_url || '' }}
       tag_pattern:       ${{ fromJson(needs.parse-config.outputs.cfg).upstream.tag_pattern || '' }}
       track_file:        ${{ fromJson(needs.parse-config.outputs.cfg).upstream.track_file || '.github/upstream/tracked-release.json' }}
-      # Force gating: schedule NEVER forces; push forces only when the
-      # data file opts in via `triggers.force_on_push: true`; dispatch
-      # honours the operator checkbox.
       force_run: ${{ (github.event_name == 'push' && fromJson(needs.parse-config.outputs.cfg).triggers.force_on_push == true) || (github.event_name == 'workflow_dispatch' && inputs.force_run) }}
 
-      # ----- Stage toggles -----
       docker:           ${{ fromJson(needs.parse-config.outputs.cfg).stages.docker == true }}
       balena:           ${{ fromJson(needs.parse-config.outputs.cfg).stages.balena == true }}
       github_release:   ${{ fromJson(needs.parse-config.outputs.cfg).stages.github_release == true }}
       companion_docker: ${{ fromJson(needs.parse-config.outputs.cfg).stages.companion_docker == true }}
 
-      # ----- Docker stage -----
       image_name:                ${{ fromJson(needs.parse-config.outputs.cfg).docker.image_name || '' }}
-      # `vars[<expr>]` does dynamic key lookup against the `vars`
-      # context. Default `DOCKERHUB_NAMESPACE` matches the historic
-      # caller convention; override via `docker.namespace_var`.
       dockerhub_namespace:       ${{ vars[fromJson(needs.parse-config.outputs.cfg).docker.namespace_var || 'DOCKERHUB_NAMESPACE'] }}
       docker_extra_tags:         ${{ fromJson(needs.parse-config.outputs.cfg).docker.extra_tags || '' }}
       docker_short_description:  ${{ fromJson(needs.parse-config.outputs.cfg).docker.short_description || '' }}
-      # `!= false` semantics: missing key → null → null != false → true.
-      # Match the launchpad's own default (true) for these flags.
       docker_latest:             ${{ fromJson(needs.parse-config.outputs.cfg).docker.latest != false }}
       docker_multi_arch:         ${{ fromJson(needs.parse-config.outputs.cfg).docker.multi_arch != false }}
       docker_update_description: ${{ fromJson(needs.parse-config.outputs.cfg).docker.update_description != false }}
