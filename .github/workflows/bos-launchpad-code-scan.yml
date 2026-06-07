@@ -1,0 +1,101 @@
+# Compatibility alias for the long-lived public workflow path.
+#
+# `repo-security-scan.yml` remained in-tree after an earlier rename, but
+# downstream launchpads and docs still reference `bos-launchpad-code-scan.yml`.
+# Workflow filenames are part of the public contract, so keep this path alive
+# and delegate to the canonical implementation.
+
+name: Repo Security Scan (compat alias)
+
+"on":
+  workflow_call:
+    inputs:
+      fail_on:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: string
+        default: fail
+      enable_kit_composite:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: boolean
+        default: true
+      enable_posture:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: boolean
+        default: true
+      enable_scanners:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: boolean
+        default: true
+      enable_upload:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: boolean
+        default: true
+      codeql_languages:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: string
+        default: ''
+      codeql_queries:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: string
+        default: security-and-quality
+      codeql_timeout_minutes:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: number
+        default: 30
+      runs_on:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: string
+        default: ''
+      codeql_runs_on:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: string
+        default: ''
+      use_advanced_pat:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: boolean
+        default: false
+      kit_http_timeout:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+        type: string
+        default: '20'
+    secrets:
+      scanning_pat:
+        description: Forwarded to `repo-security-scan.yml`.
+        required: false
+    outputs:
+      scan_outcome:
+        description: Severity-tier verdict from the delegated scan workflow.
+        value: ${{ jobs.scan.outputs.scan_outcome }}
+
+permissions: {}
+
+jobs:
+  scan:
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/repo-security-scan.yml@main
+    with:
+      fail_on:               ${{ inputs.fail_on }}
+      enable_kit_composite:  ${{ inputs.enable_kit_composite }}
+      enable_posture:        ${{ inputs.enable_posture }}
+      enable_scanners:       ${{ inputs.enable_scanners }}
+      enable_upload:         ${{ inputs.enable_upload }}
+      codeql_languages:      ${{ inputs.codeql_languages }}
+      codeql_queries:        ${{ inputs.codeql_queries }}
+      codeql_timeout_minutes: ${{ inputs.codeql_timeout_minutes }}
+      runs_on:               ${{ inputs.runs_on }}
+      codeql_runs_on:        ${{ inputs.codeql_runs_on }}
+      use_advanced_pat:      ${{ inputs.use_advanced_pat }}
+      kit_http_timeout:      ${{ inputs.kit_http_timeout }}
+    secrets:
+      scanning_pat: ${{ secrets.scanning_pat }}
