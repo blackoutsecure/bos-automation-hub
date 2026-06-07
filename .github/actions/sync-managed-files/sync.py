@@ -972,7 +972,7 @@ on:
       - '.github/upstream/**'
       - 'bos-launchpad-config.json'
       - 'bos-managed-files.yaml'
-      - '.github/workflows/bos-universal-kicker.yml'
+      - '.github/workflows/bos-universal-launchpad.yml'
   workflow_dispatch:
     inputs:
       force_run:
@@ -2342,18 +2342,18 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
       ".wranglerignore": _WRANGLERIGNORE_CF_PAGES,
     },
     "bos_launchpad": {
-      ".github/workflows/bos-universal-kicker.yml": _BOS_LAUNCHPAD_RELEASE_YML,
+      ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     # Deprecated aliases kept for migration compatibility. They now
     # resolve to the universal kicker path.
     "bos_launchpad_release": {
-      ".github/workflows/bos-universal-kicker.yml": _BOS_LAUNCHPAD_RELEASE_YML,
+      ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_cf_pages": {
-      ".github/workflows/bos-universal-kicker.yml": _BOS_LAUNCHPAD_RELEASE_YML,
+      ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_sync_files": {
-      ".github/workflows/bos-universal-kicker.yml": _BOS_LAUNCHPAD_RELEASE_YML,
+      ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_gate": {
         ".github/workflows/bos-launchpad-gate.yml": _BOS_LAUNCHPAD_GATE_YML,
