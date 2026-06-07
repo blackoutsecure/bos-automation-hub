@@ -634,7 +634,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         description: >-
           Run the hub's `cf-pages-redirects-generate` composite action
           before deploy to dynamically build a Cloudflare Pages
-          `_redirects` file. See the `.bos-launchpad.yaml`
+          `_redirects` file. See the `bos-launchpad-config.json`
           `cloudflare.redirects.*` block for the full input schema.
         required: false
         type: boolean
@@ -662,7 +662,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           Run the hub's `cf-pages-headers-generate` composite action
           before deploy to dynamically build a Cloudflare Pages
           `_headers` file from composable presets. See the
-          `.bos-launchpad.yaml` `cloudflare.headers.*` block for the
+          `bos-launchpad-config.json` `cloudflare.headers.*` block for the
           full input schema.
         required: false
         type: boolean
@@ -759,7 +759,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       use_launchpad_config:
         description: >-
           When `true`, read Cloudflare Pages settings from the caller
-          repo's `.bos-launchpad.yaml` instead of the `cloudflare_*`
+          repo's `bos-launchpad-config.json` instead of the `cloudflare_*`
           workflow-call inputs. Intended for the universal
           `bos-launchpad.yml` kicker; legacy split callers leave this
           `false` and continue forwarding explicit inputs.
@@ -770,7 +770,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         description: >-
           When `true`, also run the hub's `sync-managed-files.yml`
           reusable using the `sync_files:` block from the caller repo's
-          `.bos-launchpad.yaml`. Intended for the universal
+          `bos-launchpad-config.json`. Intended for the universal
           `bos-launchpad.yml` kicker.
         required: false
         type: boolean
@@ -778,7 +778,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       sync_mode:
         description: >-
           Optional override for the integrated sync stage's mode.
-          Empty (default) uses `.bos-launchpad.yaml` `sync_files.mode`
+          Empty (default) uses `bos-launchpad-config.json` `sync_files.mode`
           or falls back to `commit`.
         required: false
         type: string
@@ -1246,31 +1246,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cfg_file=''
-          cfg_kind=''
-          if [[ -f bos-launchpad-config.json ]]; then
-            cfg_file='bos-launchpad-config.json'
-            cfg_kind='json'
-          elif [[ -f .bos-launchpad.yaml ]]; then
-            cfg_file='.bos-launchpad.yaml'
-            cfg_kind='yaml'
-          elif [[ -f .bos-launchpad.yml ]]; then
-            cfg_file='.bos-launchpad.yml'
-            cfg_kind='yaml'
-          else
-            echo "::error::Required config file not found. Expected bos-launchpad-config.json (preferred) or legacy .bos-launchpad.yaml/.bos-launchpad.yml."
+          cfg_file='bos-launchpad-config.json'
+          if [[ ! -f "$cfg_file" ]]; then
+            echo "::error file=$cfg_file::Required config file not found."
             exit 1
           fi
-          if [[ "$cfg_kind" == 'json' ]]; then
-            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-              exit 1
-            fi
-          else
-            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
-              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
-              exit 1
-            fi
+          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
+            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
+            exit 1
           fi
           CFG_JSON="$cfg" python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json

@@ -91,29 +91,15 @@ jobs:
           # absent we emit `{}` so the downstream `fromJson(...).gate.*
           # || <default>` expressions flow through cleanly.
           cfg='{}'
-          cfg_file=''
           if [[ -f bos-launchpad-config.json ]]; then
-            cfg_file='bos-launchpad-config.json'
-            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-              exit 1
-            fi
-          elif [[ -f .bos-launchpad.yaml ]]; then
-            cfg_file='.bos-launchpad.yaml'
-            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
-              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
-              exit 1
-            fi
-          elif [[ -f .bos-launchpad.yml ]]; then
-            cfg_file='.bos-launchpad.yml'
-            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
-              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
+            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' bos-launchpad-config.json)"; then
+              echo "::error file=bos-launchpad-config.json::JSON parse error (see preceding python output)."
               exit 1
             fi
           fi
-          if [[ -n "$cfg_file" ]]; then
+          if [[ -f bos-launchpad-config.json ]]; then
             if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-              echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
+              echo "::error file=bos-launchpad-config.json::Resulting JSON did not parse — invalid config payload."
               exit 1
             fi
           fi

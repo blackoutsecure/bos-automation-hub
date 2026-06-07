@@ -63,8 +63,6 @@ on:
       - 'scripts/**'
       - '.github/upstream/**'
       - 'bos-launchpad-config.json'
-      - '.bos-launchpad.yaml'
-      - '.bos-launchpad.yml'
       - 'bos-managed-files.yaml'
       - '.github/workflows/bos-launchpad.yml'
   workflow_dispatch:
@@ -101,34 +99,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cfg_file=''
-          cfg_kind=''
-          if [[ -f bos-launchpad-config.json ]]; then
-            cfg_file='bos-launchpad-config.json'
-            cfg_kind='json'
-          elif [[ -f .bos-launchpad.yaml ]]; then
-            cfg_file='.bos-launchpad.yaml'
-            cfg_kind='yaml'
-          elif [[ -f .bos-launchpad.yml ]]; then
-            cfg_file='.bos-launchpad.yml'
-            cfg_kind='yaml'
-          else
-            echo "::error::Required config file not found. Expected bos-launchpad-config.json (preferred) or legacy .bos-launchpad.yaml/.bos-launchpad.yml."
+          cfg_file='bos-launchpad-config.json'
+          if [[ ! -f "$cfg_file" ]]; then
+            echo "::error file=$cfg_file::Required config file not found."
             exit 1
           fi
-          if [[ "$cfg_kind" == 'json' ]]; then
-            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-              exit 1
-            fi
-          else
-            # yq is preinstalled on ubuntu-latest GitHub-hosted runners.
-            # `-I=0` emits compact (single-line) JSON to keep the GHA
-            # output payload small and avoid heredoc edge cases.
-            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
-              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
-              exit 1
-            fi
+          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
+            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
+            exit 1
           fi
           # Round-trip through python's JSON parser as a sanity check —
           # catches any yq quirk that produces non-conformant JSON.

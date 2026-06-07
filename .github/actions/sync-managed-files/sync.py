@@ -915,8 +915,8 @@ jobs:
 # Both kickers delegate to the SAME hub reusable
 # (`bos-launchpad-release.yml` — the launchpad handles both modes via
 # inputs) and read per-repo customization from a consumer-owned
-# `.bos-launchpad.yaml` data file at the repo root. The kicker pipes
-# that YAML through `yq -o=json` to a job output and the downstream
+# `bos-launchpad-config.json` data file at the repo root. The kicker
+# parses that JSON to a job output and the downstream
 # `release:` / `cloudflare:` job consumes it via
 # `fromJson(needs.parse-config.outputs.cfg).<path>` for each launchpad
 # input. The data file is NOT hub-managed — consumers own it.
@@ -936,8 +936,7 @@ jobs:
 # call. Hand-author its caller; don't enable either kicker service
 # for that repo.
 #
-# Schema for `bos-launchpad-config.json` (legacy `.bos-launchpad.yaml`
-# / `.bos-launchpad.yml` still accepted) is documented in the hub README
+# Schema for `bos-launchpad-config.json` is documented in the hub README
 # under "bos_launchpad_release / bos_launchpad_cf_pages services".
 
 _BOS_LAUNCHPAD_RELEASE_YML = """\
@@ -982,8 +981,6 @@ on:
       - 'scripts/**'
       - '.github/upstream/**'
       - 'bos-launchpad-config.json'
-      - '.bos-launchpad.yaml'
-      - '.bos-launchpad.yml'
       - 'bos-managed-files.yaml'
       - '.github/workflows/bos-launchpad.yml'
   workflow_dispatch:
@@ -1020,34 +1017,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cfg_file=''
-          cfg_kind=''
-          if [[ -f bos-launchpad-config.json ]]; then
-            cfg_file='bos-launchpad-config.json'
-            cfg_kind='json'
-          elif [[ -f .bos-launchpad.yaml ]]; then
-            cfg_file='.bos-launchpad.yaml'
-            cfg_kind='yaml'
-          elif [[ -f .bos-launchpad.yml ]]; then
-            cfg_file='.bos-launchpad.yml'
-            cfg_kind='yaml'
-          else
-            echo "::error::Required config file not found. Expected bos-launchpad-config.json (preferred) or legacy .bos-launchpad.yaml/.bos-launchpad.yml."
+          cfg_file='bos-launchpad-config.json'
+          if [[ ! -f "$cfg_file" ]]; then
+            echo "::error file=$cfg_file::Required config file not found."
             exit 1
           fi
-          if [[ "$cfg_kind" == 'json' ]]; then
-            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-              exit 1
-            fi
-          else
-            # yq is preinstalled on ubuntu-latest GitHub-hosted runners.
-            # `-I=0` emits compact (single-line) JSON to keep the GHA
-            # output payload small and avoid heredoc edge cases.
-            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
-              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
-              exit 1
-            fi
+          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
+            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
+            exit 1
           fi
           # Round-trip through python's JSON parser as a sanity check —
           # catches any yq quirk that produces non-conformant JSON.
@@ -1327,31 +1304,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cfg_file=''
-          cfg_kind=''
-          if [[ -f bos-launchpad-config.json ]]; then
-            cfg_file='bos-launchpad-config.json'
-            cfg_kind='json'
-          elif [[ -f .bos-launchpad.yaml ]]; then
-            cfg_file='.bos-launchpad.yaml'
-            cfg_kind='yaml'
-          elif [[ -f .bos-launchpad.yml ]]; then
-            cfg_file='.bos-launchpad.yml'
-            cfg_kind='yaml'
-          else
-            echo "::error::Required config file not found. Expected bos-launchpad-config.json (preferred) or legacy .bos-launchpad.yaml/.bos-launchpad.yml."
+          cfg_file='bos-launchpad-config.json'
+          if [[ ! -f "$cfg_file" ]]; then
+            echo "::error file=$cfg_file::Required config file not found."
             exit 1
           fi
-          if [[ "$cfg_kind" == 'json' ]]; then
-            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-              exit 1
-            fi
-          else
-            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
-              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
-              exit 1
-            fi
+          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
+            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
+            exit 1
           fi
           if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
             echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
@@ -1491,8 +1451,6 @@ on:
     # PR-time job if present.
     paths:
       - 'bos-launchpad-config.json'
-      - '.bos-launchpad.yaml'
-      - '.bos-launchpad.yml'
       - 'bos-managed-files.yaml'
   workflow_dispatch:
     inputs:
@@ -1524,31 +1482,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cfg_file=''
-          cfg_kind=''
-          if [[ -f bos-launchpad-config.json ]]; then
-            cfg_file='bos-launchpad-config.json'
-            cfg_kind='json'
-          elif [[ -f .bos-launchpad.yaml ]]; then
-            cfg_file='.bos-launchpad.yaml'
-            cfg_kind='yaml'
-          elif [[ -f .bos-launchpad.yml ]]; then
-            cfg_file='.bos-launchpad.yml'
-            cfg_kind='yaml'
-          else
-            echo "::error::Required config file not found. Expected bos-launchpad-config.json (preferred) or legacy .bos-launchpad.yaml/.bos-launchpad.yml."
+          cfg_file='bos-launchpad-config.json'
+          if [[ ! -f "$cfg_file" ]]; then
+            echo "::error file=$cfg_file::Required config file not found."
             exit 1
           fi
-          if [[ "$cfg_kind" == 'json' ]]; then
-            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-              exit 1
-            fi
-          else
-            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
-              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
-              exit 1
-            fi
+          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
+            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
+            exit 1
           fi
           if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
             echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
@@ -1686,29 +1627,15 @@ jobs:
           # absent we emit `{}` so the downstream `fromJson(...).gate.*
           # || <default>` expressions flow through cleanly.
           cfg='{}'
-          cfg_file=''
           if [[ -f bos-launchpad-config.json ]]; then
-            cfg_file='bos-launchpad-config.json'
-            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-              echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-              exit 1
-            fi
-          elif [[ -f .bos-launchpad.yaml ]]; then
-            cfg_file='.bos-launchpad.yaml'
-            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
-              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
-              exit 1
-            fi
-          elif [[ -f .bos-launchpad.yml ]]; then
-            cfg_file='.bos-launchpad.yml'
-            if ! cfg="$(yq -o=json -I=0 '.' "$cfg_file")"; then
-              echo "::error file=$cfg_file::YAML parse error (see preceding yq output)."
+            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' bos-launchpad-config.json)"; then
+              echo "::error file=bos-launchpad-config.json::JSON parse error (see preceding python output)."
               exit 1
             fi
           fi
-          if [[ -n "$cfg_file" ]]; then
+          if [[ -f bos-launchpad-config.json ]]; then
             if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-              echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
+              echo "::error file=bos-launchpad-config.json::Resulting JSON did not parse — invalid config payload."
               exit 1
             fi
           fi
@@ -3241,58 +3168,39 @@ def sync_files(
             continue
         for rel_path, body in SERVICE_INIT_FILES[svc].items():
             abs_path = os.path.join(root, rel_path)
-        if (
-          svc == "bos_launchpad_config"
-          and rel_path == "bos-launchpad-config.json"
-          and (
-            os.path.exists(os.path.join(root, ".bos-launchpad.yaml"))
-            or os.path.exists(os.path.join(root, ".bos-launchpad.yml"))
-          )
-        ):
-          before = ""
-          after = before
-          all_changes.append(
-            FileChange(path=rel_path, before=before, after=after)
-          )
-          print(
-            "::notice::Skipping init for bos-launchpad-config.json "
-            "because legacy .bos-launchpad.yaml/.bos-launchpad.yml exists."
-          )
-          continue
-            
-          if os.path.exists(abs_path):
-            with open(abs_path, "r", encoding="utf-8") as fh:
-              before = fh.read()
-            # File exists → hub does nothing. Emit a no-op
-            # FileChange so the diff output and the
-            # `changed_files` list both reflect that the service
-            # was considered. `change.changed` is False so it
-            # won't be written.
-            after = before
-          else:
-            before = ""
-            # Dynamic license-text resolution: for `license`
-            # service, swap the registered placeholder body for
-            # the right canonical text from `_LICENSE_REGISTRY`
-            # BEFORE placeholder rendering. Other services use
-            # their registered body as-is.
-            resolved_body = body
-            if svc in _DYNAMIC_LICENSE_INIT_SERVICES:
-              resolved_body = _resolve_license_text(
-                _managed_config["license_type"]
-              )
-            rendered = (
-              _render_placeholders(resolved_body, _placeholder_subs)
-              if svc in _TEMPLATED_INIT_SERVICES
-              else resolved_body
-            )
-            if svc in _NO_HEADER_INIT_SERVICES:
-              # Verbatim — no "Initialized by hub" header so
-              # license-detection tools can still match the
-              # canonical SHA.
-              after = rendered if rendered.endswith("\n") else rendered + "\n"
+            if os.path.exists(abs_path):
+                with open(abs_path, "r", encoding="utf-8") as fh:
+                    before = fh.read()
+                # File exists → hub does nothing. Emit a no-op
+                # FileChange so the diff output and the
+                # `changed_files` list both reflect that the service
+                # was considered. `change.changed` is False so it
+                # won't be written.
+                after = before
             else:
-              after = _make_init_file(svc, rendered)
+                before = ""
+                # Dynamic license-text resolution: for `license`
+                # service, swap the registered placeholder body for
+                # the right canonical text from `_LICENSE_REGISTRY`
+                # BEFORE placeholder rendering. Other services use
+                # their registered body as-is.
+                resolved_body = body
+                if svc in _DYNAMIC_LICENSE_INIT_SERVICES:
+                    resolved_body = _resolve_license_text(
+                        _managed_config["license_type"]
+                    )
+                rendered = (
+                    _render_placeholders(resolved_body, _placeholder_subs)
+                    if svc in _TEMPLATED_INIT_SERVICES
+                    else resolved_body
+                )
+                if svc in _NO_HEADER_INIT_SERVICES:
+                    # Verbatim — no "Initialized by hub" header so
+                    # license-detection tools can still match the
+                    # canonical SHA.
+                    after = rendered if rendered.endswith("\n") else rendered + "\n"
+                else:
+                    after = _make_init_file(svc, rendered)
             all_changes.append(
                 FileChange(path=rel_path, before=before, after=after)
             )
