@@ -1,0 +1,11 @@
+# Normalize all text files to LF on checkout and in the index.
+* text=auto eol=lf
+
+# Explicit binary types (defensive — git usually auto-detects).
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.pdf  binary

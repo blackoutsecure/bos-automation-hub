@@ -1,0 +1,4 @@
+# `balena.yml` is rendered by the bos-automation-hub workflow into the
+# repo root before `balena push` runs; @balena/compose reads it from the
+# build context, so it MUST NOT be excluded.
+!balena.yml

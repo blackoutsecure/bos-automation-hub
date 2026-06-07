@@ -634,7 +634,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         description: >-
           Run the hub's `cf-pages-redirects-generate` composite action
           before deploy to dynamically build a Cloudflare Pages
-          `_redirects` file. See the `.bos-launchpad.yaml`
+          `_redirects` file. See the `bos-launchpad-config.json`
           `cloudflare.redirects.*` block for the full input schema.
         required: false
         type: boolean
@@ -662,7 +662,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           Run the hub's `cf-pages-headers-generate` composite action
           before deploy to dynamically build a Cloudflare Pages
           `_headers` file from composable presets. See the
-          `.bos-launchpad.yaml` `cloudflare.headers.*` block for the
+          `bos-launchpad-config.json` `cloudflare.headers.*` block for the
           full input schema.
         required: false
         type: boolean
@@ -759,7 +759,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       use_launchpad_config:
         description: >-
           When `true`, read Cloudflare Pages settings from the caller
-          repo's `.bos-launchpad.yaml` instead of the `cloudflare_*`
+          repo's `bos-launchpad-config.json` instead of the `cloudflare_*`
           workflow-call inputs. Intended for the universal
           `bos-launchpad.yml` kicker; legacy split callers leave this
           `false` and continue forwarding explicit inputs.
@@ -770,7 +770,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         description: >-
           When `true`, also run the hub's `sync-managed-files.yml`
           reusable using the `sync_files:` block from the caller repo's
-          `.bos-launchpad.yaml`. Intended for the universal
+          `bos-launchpad-config.json`. Intended for the universal
           `bos-launchpad.yml` kicker.
         required: false
         type: boolean
@@ -778,7 +778,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       sync_mode:
         description: >-
           Optional override for the integrated sync stage's mode.
-          Empty (default) uses `.bos-launchpad.yaml` `sync_files.mode`
+          Empty (default) uses `bos-launchpad-config.json` `sync_files.mode`
           or falls back to `commit`.
         required: false
         type: string
@@ -1228,33 +1228,31 @@ concurrency:
 
 jobs:
   parse-config:
-    name: Parse .bos-launchpad.yaml
+    name: Parse launchpad config
     if: inputs.use_launchpad_config || inputs.sync_managed_files
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
-      cfg: ${{ steps.read.outputs.cfg }}
-      cloudflare: ${{ steps.read.outputs.cloudflare }}
-      sync: ${{ steps.read.outputs.sync }}
+      cfg: ${{ steps.normalize.outputs.cfg }}
+      cloudflare: ${{ steps.normalize.outputs.cloudflare }}
+      sync: ${{ steps.normalize.outputs.sync }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert .bos-launchpad.yaml to normalized JSON
+      - name: Read launchpad config JSON
         id: read
+        uses: ./.github/actions/read-launchpad-config
+
+      - name: Normalize launchpad config outputs
+        id: normalize
         shell: bash
+        env:
+          CFG_JSON: ${{ steps.read.outputs.cfg }}
         run: |
           set -euo pipefail
-          if [[ ! -f .bos-launchpad.yaml ]]; then
-            echo "::error file=.bos-launchpad.yaml::Required config file not found. See https://github.com/blackoutsecure/bos-automation-hub for the schema."
-            exit 1
-          fi
-          if ! cfg="$(yq -o=json -I=0 '.' .bos-launchpad.yaml)"; then
-            echo "::error file=.bos-launchpad.yaml::YAML parse error (see preceding yq output)."
-            exit 1
-          fi
-          CFG_JSON="$cfg" python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           import os
           import sys
@@ -1262,7 +1260,7 @@ jobs:
           cfg = json.loads(os.environ["CFG_JSON"])
           if not isinstance(cfg, dict):
               print(
-                  "::error file=.bos-launchpad.yaml::Top-level config must be a YAML mapping.",
+                "::error::Top-level config must be a JSON object/YAML mapping.",
                   file=sys.stderr,
               )
               sys.exit(1)
@@ -1411,69 +1409,9 @@ jobs:
           PY
 
       - name: Summarize launchpad config
-        shell: bash
-        env:
-          CFG_JSON: ${{ steps.read.outputs.cfg }}
-          CLOUDFLARE_JSON: ${{ steps.read.outputs.cloudflare }}
-          SYNC_JSON: ${{ steps.read.outputs.sync }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-
-          cfg = json.loads(os.environ.get("CFG_JSON") or "{}")
-          cf = json.loads(os.environ.get("CLOUDFLARE_JSON") or "{}")
-          sync = json.loads(os.environ.get("SYNC_JSON") or "{}")
-
-          stages = cfg.get("stages") if isinstance(cfg.get("stages"), dict) else {}
-          upstream = cfg.get("upstream") if isinstance(cfg.get("upstream"), dict) else {}
-          release = cfg.get("release") if isinstance(cfg.get("release"), dict) else {}
-
-          stage_flags = {
-              "docker": stages.get("docker") is True,
-              "balena": stages.get("balena") is True,
-              "github_release": stages.get("github_release") is True,
-              "cloudflare_pages": bool(cf.get("enabled")),
-              "sync_managed_files": bool(sync.get("enabled")),
-          }
-          enabled_stages = ", ".join([k for k, v in stage_flags.items() if v]) or "(none)"
-
-          cf_site = (cf.get("site_url") or "").strip() or "(unset)"
-          cf_project = (cf.get("project_name") or "").strip() or "(unset)"
-          cf_env = (cf.get("deployment_environment") or "").strip() or "(unset)"
-          sync_services = sync.get("services") if isinstance(sync.get("services"), list) else []
-          sync_services_text = ", ".join(sync_services) if sync_services else "(none)"
-
-          lines = [
-              "## Launchpad config snapshot",
-              "",
-              "| Field | Value |",
-              "| --- | --- |",
-              f"| Enabled stages | `{enabled_stages}` |",
-              f"| Upstream source | `{(upstream.get('source') or '').strip() or '(unset)'}` |",
-              f"| Cloudflare project | `{cf_project}` |",
-              f"| Cloudflare environment | `{cf_env}` |",
-              f"| Cloudflare site URL | `{cf_site}` |",
-              f"| Sync mode | `{(sync.get('mode') or 'commit')}` |",
-              f"| Sync services | `{sync_services_text}` |",
-              f"| Release template path | `{(release.get('template_path') or '').strip() or '(unset)'}` |",
-          ]
-
-          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summary_path:
-              with open(summary_path, "a", encoding="utf-8") as f:
-                  f.write("\n".join(lines) + "\n")
-
-          print("Launchpad config snapshot:")
-          print(f"  enabled_stages: {enabled_stages}")
-          print(f"  upstream_source: {(upstream.get('source') or '').strip() or '(unset)'}")
-          print(f"  cloudflare_project: {cf_project}")
-          print(f"  cloudflare_environment: {cf_env}")
-          print(f"  cloudflare_site_url: {cf_site}")
-          print(f"  sync_mode: {(sync.get('mode') or 'commit')}")
-          print(f"  sync_services: {sync_services_text}")
-          PY
+        uses: ./.github/actions/summarize-launchpad-config
+        with:
+          cfg_json: ${{ steps.normalize.outputs.cfg }}
 
   # ---------------------------------------------------------------------------
   # Stage 0 — Consolidated security scan (opt-in, gating by default).

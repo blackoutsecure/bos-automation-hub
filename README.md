@@ -1989,6 +1989,9 @@ services are **not** removed — they're simply ignored on this run.
 | `dependabot_actions`   | section          | `.github/dependabot.yml`                         | `package-ecosystem: github-actions` weekly schedule, grouped for `docker/*` and `actions/*` patterns. Recommended for every repo that uses GitHub Actions. Honors `dependabot_target_branch:` in `bos-managed-files.yaml` (see *Per-repo `bos-managed-files.yaml` config* below). |
 | `dependabot_npm`       | section          | `.github/dependabot.yml`                         | `package-ecosystem: npm` weekly schedule, grouped by `dev-dependencies` / `prod-dependencies`. Enable for Node Marketplace Action repos. Honors `dependabot_target_branch:`. |
 | `dependabot_pip`       | section          | `.github/dependabot.yml`                         | `package-ecosystem: pip` weekly schedule. Enable for Python Marketplace Action repos. Honors `dependabot_target_branch:`. |
+| `wranglerignore`       | section          | `.wranglerignore`                                | Cloudflare Pages hygiene block in marker-based managed section mode (preserves user lines outside markers). By default does **not** ignore `_headers`. Set `dotfiles_mode: override` in `bos-managed-files.yaml` to force whole-file overwrite behavior. |
+| `shellcheckrc`         | whole-file       | `.shellcheckrc`                                  | Central ShellCheck defaults for repos with shell scripting. Sets `shell=bash`, enables external sources, and disables known GitHub Actions false positives (`SC2016`, `SC1091`). |
+| `markdownlint`         | whole-file       | `.markdownlint.yaml`                             | Central markdownlint defaults tuned for docs-heavy repos: `MD013` off, `MD024.siblings_only`, `MD028/MD033/MD034/MD041` off. |
 | `prettier`             | whole-file       | `.prettierrc.yaml`                               | Canonical Prettier config (semi, single-quote, trailing-comma, 100-char width, LF). YAML-flavored so the file can carry the "Managed by" header comment. |
 | `logger`               | whole-file       | `root/usr/local/bin/log-functions.sh`            | Canonical shared logging library for s6-overlay init / svc scripts. Emits `<RFC3339 UTC> <tag>[<level>]: <msg>`. Supports both `log_info "x"` (function-per-level, `SVC_NAME`) and `log info "x"` (generic dispatcher, `LOG_TAG`) APIs so existing consumers keep working unchanged. Includes `LOG_LEVEL` gating, `log_kv`, and `log_pipe_cmd`. |
 | `bos_launchpad` | whole-file | `.github/workflows/bos-launchpad.yml` | Hub-managed **universal** kicker for release/deploy/sync orchestration. Calls `bos-launchpad-release.yml@main` on a 6-hour cron + `main` push (paths-filtered) + `workflow_dispatch`, sets `use_launchpad_config: true`, and enables integrated sync via `sync_managed_files: true`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (`upstream`, `stages`, `docker`, `balena`, `release`, `cloudflare`, `sync_files`, optional `security_scan` and `repo_metadata` blocks). Replaces the old split kicker model (`bos_launchpad_release` / `bos_launchpad_cf_pages` / `bos_launchpad_sync_files`). |
@@ -2258,7 +2261,7 @@ the same PR without first publishing the kicker.
 > `.bos-launchpad.yaml` for each kicker flavor (release + cf-pages
 > + sync-files + gate).
 
-### `bos-managed-files.yaml` schema (used by `license` / `notice_apache2` / `codeowners` / `dependabot_*`)
+### `bos-managed-files.yaml` schema (used by `license` / `notice_apache2` / `codeowners` / `dependabot_*` / `wranglerignore`)
 
 Optional per-repo file at the repo root that supplies values for
 `{{KEY}}` placeholders rendered into the templated services. All
@@ -2267,7 +2270,8 @@ hub falls back to org-canonical defaults. The file is parsed by a
 tiny stdlib-only flat-YAML reader: only `key: value` pairs are
 supported (no nesting, no lists, no multi-line scalars). Unknown
 keys, malformed lines, out-of-range years, unknown `license_type`,
-and invalid Git branch names fail the action.
+invalid Git branch names, and invalid dotfile strategy/precedence/path
+settings fail the action.
 
 > **Visible filename (not a dotfile).** The config lives at
 > `bos-managed-files.yaml` — deliberately NOT a dotfile — so it shows
@@ -2317,6 +2321,64 @@ license_type: apache-2.0
 # Default: "" (no `target-branch:` line — Dependabot uses the
 # repo default branch).
 dependabot_target_branch: dev
+
+# Dotfile write mode for services that support additive management.
+# Today this controls the `wranglerignore` service:
+#   * managed_section (default): keep user lines, manage only marker block
+#   * override: whole-file overwrite mode
+# Default: managed_section
+dotfiles_mode: managed_section
+
+# Dotfile conflict precedence in managed-section mode:
+#   * central (default): central managed patterns win when they conflict
+#     with local patterns
+#   * local: local patterns win
+# Default: central
+dotfiles_conflict_precedence: central
+
+# Optional per-file local-precedence override list (comma/space-separated).
+# Useful when global precedence is central but specific dotfiles should
+# preserve local intent on conflicts.
+# Supported paths:
+#   .gitignore .dockerignore .editorconfig .gitattributes .wranglerignore
+# Default: "" (none)
+dotfiles_local_precedence_paths: .wranglerignore
+
+# Dotfile path selection strategy:
+#   * auto (default): infer needed dotfiles from repo/workstream signals
+#   * all: sync every managed dotfile path
+#   * explicit: sync only paths listed in dotfiles_force_enable_paths
+# Default: auto
+dotfiles_sync_strategy: auto
+
+# Optional workstream hint for auto strategy.
+# Supported: auto | container | node | python | static_site | action | generic
+# Default: auto
+dotfiles_workstream: auto
+
+# Comma/space-separated managed dotfile paths to force-enable,
+# regardless of strategy auto-detection.
+# Supported paths:
+#   .gitignore .dockerignore .editorconfig .gitattributes .wranglerignore
+#   .shellcheckrc .markdownlint.yaml
+# Default: "" (none)
+dotfiles_force_enable_paths: .shellcheckrc
+
+# Comma/space-separated managed dotfile paths to force-disable,
+# regardless of strategy auto-detection.
+# Supported paths:
+#   .gitignore .dockerignore .editorconfig .gitattributes .wranglerignore
+#   .shellcheckrc .markdownlint.yaml
+# Default: "" (none)
+dotfiles_force_disable_paths: .wranglerignore
+
+# Optional post-disable cleanup for managed dotfiles.
+# When true, the hub removes marker blocks from disabled section dotfiles
+# and deletes the file only when no local unmanaged content remains;
+# whole-file dotfiles are deleted only when they exactly match canonical
+# hub-managed content.
+# Default: false
+dotfiles_prune_disabled: false
 ```
 
 **Placeholder reference**
