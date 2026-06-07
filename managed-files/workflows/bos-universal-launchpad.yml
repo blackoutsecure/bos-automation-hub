@@ -49,7 +49,10 @@ permissions:
 jobs:
   parse-config:
     name: Parse launchpad config
-    runs-on: ubuntu-latest
+    # Resolve runner from org-shared `vars.DEFAULT_RUNNER` when set,
+    # supporting both bare label and JSON-array formats. Fallback to
+    # `ubuntu-latest` if the variable is not defined in the consumer.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 2
     outputs:
       cfg: ${{ steps.read.outputs.cfg }}

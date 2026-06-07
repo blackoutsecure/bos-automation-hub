@@ -983,7 +983,7 @@ _GHA_LINT_SHELL_YML = _load_managed_template_or_default(
 # for that repo.
 #
 # Schema for `bos-launchpad-config.json` is documented in the hub README
-# under "bos_launchpad_release / bos_launchpad_cf_pages services".
+# under the `bos_launchpad` service section.
 
 _BOS_LAUNCHPAD_RELEASE_YML = """\
 # Blackout Secure Launchpad — universal kicker (hub-managed).
@@ -1037,7 +1037,10 @@ permissions:
 jobs:
   parse-config:
     name: Parse launchpad config
-    runs-on: ubuntu-latest
+    # Resolve runner from org-shared `vars.DEFAULT_RUNNER` when set,
+    # supporting both bare label and JSON-array formats. Fallback to
+    # `ubuntu-latest` if the variable is not defined in the consumer.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 2
     outputs:
       cfg: ${{ steps.read.outputs.cfg }}
@@ -2436,17 +2439,6 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     "bos_launchpad": {
       ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
-    # Deprecated aliases kept for migration compatibility. They now
-    # resolve to the universal kicker path.
-    "bos_launchpad_release": {
-      ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
-    },
-    "bos_launchpad_cf_pages": {
-      ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
-    },
-    "bos_launchpad_sync_files": {
-      ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
-    },
     "bos_launchpad_reference": {
       ".github/workflows/bos-universal-launchpad-caller-reference.yml": _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
     },
@@ -2523,12 +2515,7 @@ KNOWN_SERVICES = (
 # Cross-registry path conflicts: a single file path may only be claimed
 # by ONE registry mode. Within SERVICE_FILES, MULTIPLE services MAY
 # target the same path — at most one may be enabled per repo, enforced
-# at parse time by `parse_services()`. Some SERVICE_FILES pairs are
-# also semantically mutually exclusive even when their paths differ
-# (e.g. `bos_launchpad_release` writes `bos-launchpad-release.yml` and
-# `bos_launchpad_cf_pages` writes `bos-launchpad-cf-pages.yml`, but a
-# repo should still enable only one); those are listed in
-# `_SEMANTIC_MUTEX_GROUPS` above. Within SERVICE_INIT_FILES, MULTIPLE
+# at parse time by `parse_services()`. Within SERVICE_INIT_FILES, MULTIPLE
 # services may also target the same path (e.g. `gha_lint_node` /
 # `gha_lint_python` / `gha_lint_shell` all write
 # `.github/workflows/lint.yml`) with the same mutex semantics. All
