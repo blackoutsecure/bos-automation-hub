@@ -57,7 +57,10 @@ permissions:
 jobs:
   parse-config:
     name: Parse launchpad config
-    runs-on: ubuntu-latest
+    # Resolve runner from org-shared `vars.DEFAULT_RUNNER` when set,
+    # supporting both bare label and JSON-array formats. Fallback to
+    # `ubuntu-latest` if the variable is not defined in the consumer.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 2
     outputs:
       cfg: ${{ steps.read.outputs.cfg }}
@@ -122,5 +125,5 @@ jobs:
       git_user_name:   ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.git_user_name || 'github-actions[bot]' }}
       git_user_email:  ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.git_user_email || '41898282+github-actions[bot]@users.noreply.github.com' }}
       push_retries:    ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.push_retries || 3 }}
-      runs_on:         ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.runs_on || 'ubuntu-latest' }}
+      runs_on:         ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest' }}
       timeout_minutes: ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.timeout_minutes || 5 }}
