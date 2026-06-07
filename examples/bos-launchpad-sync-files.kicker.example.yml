@@ -40,6 +40,14 @@
 # `.github/workflows/sync-managed-files.yml` — only the *caller*
 # pattern moves to this kicker.
 name: Blackout Secure Launchpad (sync managed files)
+run-name: >-
+  Blackout Secure Launchpad / sync managed files / ${{
+    github.event_name == 'workflow_dispatch'
+      && format('manual ({0})', inputs.mode)
+      || github.event_name == 'schedule'
+      && 'scheduled'
+      || 'push'
+  }}
 
 on:
   schedule:

@@ -37,6 +37,14 @@
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
 #   UPSTREAM_TOKEN (optional — only for private upstream repos)
 name: Blackout Secure Launchpad
+run-name: >-
+  Blackout Secure Launchpad / release / ${{
+    github.event_name == 'workflow_dispatch'
+      && (inputs.force_run && 'manual force' || 'manual')
+      || github.event_name == 'schedule'
+      && 'scheduled'
+      || 'push'
+  }}
 
 on:
   schedule:

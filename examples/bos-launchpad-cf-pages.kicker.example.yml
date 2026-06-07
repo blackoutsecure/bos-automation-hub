@@ -41,6 +41,12 @@
 #   CLOUDFLARE_PAGES_ADMIN_TOKEN — optional; only used when
 #     `cloudflare.ai_bindings` is set. Falls back to CLOUDFLARE_API_TOKEN.
 name: Blackout Secure Launchpad
+run-name: >-
+  Blackout Secure Launchpad / Cloudflare Pages / ${{
+    github.event_name == 'workflow_dispatch'
+      && (inputs.force_run && 'manual force' || 'manual')
+      || 'push'
+  }}
 
 on:
   push:
@@ -156,11 +162,6 @@ jobs:
       cloudflare_manifest_dir:              ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_dir || '' }}
       cloudflare_manifest_categories:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_categories || '' }}
       cloudflare_manifest_icons_dir:        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_icons_dir || '' }}
-      # ----- _redirects generator -----
-      cloudflare_generate_redirects:        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.generate == true }}
-      cloudflare_redirects_custom_rules: |-
-        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.custom_rules || '' }}
-      cloudflare_redirects_replace_existing: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.replace_existing == true }}
 
       # ----- _headers generator (hub-local composite action) -----
       cloudflare_generate_headers:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.generate == true }}
