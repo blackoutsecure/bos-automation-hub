@@ -1498,10 +1498,10 @@ jobs:
       manifest_dir:               ${{ inputs.cloudflare_manifest_dir }}
       manifest_categories:        ${{ inputs.cloudflare_manifest_categories }}
       manifest_icons_dir:         ${{ inputs.cloudflare_manifest_icons_dir }}
-      cloudflare_generate_redirects:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.generate == true }}
-      cloudflare_redirects_custom_rules: |-
+      generate_redirects:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.generate == true }}
+      redirects_custom_rules: |-
         ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.custom_rules || '' }}
-      cloudflare_redirects_replace_existing: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.replace_existing == true }}
+      redirects_replace_existing: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.replace_existing == true }}
       generate_headers:           ${{ inputs.cloudflare_generate_headers }}
       headers_presets:            ${{ inputs.cloudflare_headers_presets }}
       headers_csp:                ${{ inputs.cloudflare_headers_csp }}
