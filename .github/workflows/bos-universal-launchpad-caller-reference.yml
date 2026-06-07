@@ -1,12 +1,15 @@
+# Managed by https://github.com/blackoutsecure/bos-automation-hub —
+# do not edit. To modify, update the `bos_launchpad_reference` service in
+# .github/actions/sync-managed-files/sync.py.
+
 # Reference caller template for copy/paste into consumer repositories.
-# Source baseline: blackoutsecure-site/.github/workflows/bos-universal-launchpad.yml
+# Source of truth: .github/actions/sync-managed-files/sync.py (`_BOS_LAUNCHPAD_RELEASE_YML`).
 #
 # Safety guard:
-# This file is intentionally stored in bos-automation-hub as a template and
-# does not execute in this repository. Copy into a consumer repo and keep the
-# same content (or adjust triggers/config) for active use.
-#
-# Blackout Secure Launchpad — universal launchpad caller.
+# This workflow is intentionally stored in bos-automation-hub as a
+# reference and is disabled in this repository.
+
+# Blackout Secure Launchpad — universal kicker (hub-managed).
 # Customize via `bos-launchpad-config.json` (repo root), not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 # Required vars (names overridable via `bos-launchpad-config.json`):

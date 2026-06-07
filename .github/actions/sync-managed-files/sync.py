@@ -1411,6 +1411,30 @@ jobs:
 """
 
 
+# Canonical copy/paste caller reference kept in the hub workflows folder.
+# It is derived from the same launchpad template the hub syncs into
+# consumers, with a repository guard so it never executes in the hub.
+_BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = (
+  "# Reference caller template for copy/paste into consumer repositories.\n"
+  "# Source of truth: .github/actions/sync-managed-files/sync.py"
+  " (`_BOS_LAUNCHPAD_RELEASE_YML`).\n"
+  "#\n"
+  "# Safety guard:\n"
+  "# This workflow is intentionally stored in bos-automation-hub as a\n"
+  "# reference and is disabled in this repository.\n\n"
+  + _BOS_LAUNCHPAD_RELEASE_YML.replace(
+    "name: Blackout Secure Launchpad (kicker)",
+    "name: Blackout Secure Launchpad (caller reference)",
+    1,
+  ).replace(
+    "  parse-config:\n",
+    "  parse-config:\n"
+    "    if: ${{ github.repository != 'blackoutsecure/bos-automation-hub' }}\n",
+    1,
+  )
+)
+
+
 # The hub does NOT enable `bos_launchpad_gate` on itself — `hub-gate.yml`
 # at `.github/workflows/hub-gate.yml` uses a local `./` ref to
 # `bos-gate.yml` so a broken gate definition can be fixed inside the
@@ -2354,6 +2378,9 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     },
     "bos_launchpad_sync_files": {
       ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
+    },
+    "bos_launchpad_reference": {
+      ".github/workflows/bos-universal-launchpad-caller-reference.yml": _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
     },
     "bos_launchpad_gate": {
         ".github/workflows/bos-launchpad-gate.yml": _BOS_LAUNCHPAD_GATE_YML,
