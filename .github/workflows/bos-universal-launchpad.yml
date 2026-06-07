@@ -1243,7 +1243,7 @@ jobs:
           persist-credentials: false
       - name: Read launchpad config JSON
         id: read
-        uses: ./.github/actions/read-launchpad-config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
 
       - name: Normalize launchpad config outputs
         id: normalize
@@ -1409,7 +1409,7 @@ jobs:
           PY
 
       - name: Summarize launchpad config
-        uses: ./.github/actions/summarize-launchpad-config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/summarize-launchpad-config@main
         with:
           cfg_json: ${{ steps.normalize.outputs.cfg }}
 
@@ -1578,7 +1578,7 @@ jobs:
                                # `publish` job for the AI changelog step.
                                # Validated at workflow-load time regardless of
                                # whether the caller enables AI changelog.
-    uses: ./.github/workflows/release.yml
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release.yml@main
     with:
       tag_name:                        v${{ needs.monitor.outputs.upstream_version }}
       docker:                          ${{ inputs.docker }}
