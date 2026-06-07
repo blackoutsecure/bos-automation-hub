@@ -45,6 +45,14 @@
 # leaf jobs — the `Gate summary` aggregator stays green-stable when
 # the underlying gate set changes.
 name: Blackout Secure Launchpad (gate)
+run-name: >-
+  Blackout Secure Launchpad / gate / ${{
+    github.event_name == 'pull_request'
+      && format('PR #{0}', github.event.pull_request.number)
+      || github.event_name == 'merge_group'
+      && 'merge queue'
+      || 'manual'
+  }}
 
 on:
   pull_request:

@@ -955,6 +955,14 @@ _BOS_LAUNCHPAD_RELEASE_YML = """\
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
 #   UPSTREAM_TOKEN (optional — only for private upstream repos)
 name: Blackout Secure Launchpad
+run-name: >-
+  Blackout Secure Launchpad / release / ${{
+    github.event_name == 'workflow_dispatch'
+      && (inputs.force_run && 'manual force' || 'manual')
+      || github.event_name == 'schedule'
+      && 'scheduled'
+      || 'push'
+  }}
 
 on:
   schedule:
@@ -1151,6 +1159,12 @@ _BOS_LAUNCHPAD_CF_PAGES_YML = """\
 #   CLOUDFLARE_PAGES_ADMIN_TOKEN — optional; only used when
 #     `cloudflare.ai_bindings` is set. Falls back to CLOUDFLARE_API_TOKEN.
 name: Blackout Secure Launchpad
+run-name: >-
+  Blackout Secure Launchpad / Cloudflare Pages / ${{
+    github.event_name == 'workflow_dispatch'
+      && (inputs.force_run && 'manual force' || 'manual')
+      || 'push'
+  }}
 
 on:
   push:
@@ -1306,6 +1320,14 @@ _BOS_LAUNCHPAD_SYNC_FILES_YML = """\
 # `.github/workflows/sync-managed-files.yml` — only the *caller*
 # pattern moves to this kicker.
 name: Blackout Secure Launchpad (sync managed files)
+run-name: >-
+  Blackout Secure Launchpad / sync managed files / ${{
+    github.event_name == 'workflow_dispatch'
+      && format('manual ({0})', inputs.mode)
+      || github.event_name == 'schedule'
+      && 'scheduled'
+      || 'push'
+  }}
 
 on:
   schedule:
@@ -1451,6 +1473,14 @@ _BOS_LAUNCHPAD_GATE_YML = """\
 # leaf jobs — the `Gate summary` aggregator stays green-stable when
 # the underlying gate set changes.
 name: Blackout Secure Launchpad (gate)
+run-name: >-
+  Blackout Secure Launchpad / gate / ${{
+    github.event_name == 'pull_request'
+      && format('PR #{0}', github.event.pull_request.number)
+      || github.event_name == 'merge_group'
+      && 'merge queue'
+      || 'manual'
+  }}
 
 on:
   pull_request:
