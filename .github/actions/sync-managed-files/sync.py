@@ -950,7 +950,7 @@ _GHA_LINT_SHELL_YML = _load_managed_template_or_default(
 # --------------------------------------------------------------------------- #
 #
 # Two whole-file kicker workflows that write to DISTINCT paths
-# (`.github/workflows/bos-launchpad-release.yml` for container release,
+# (`.github/workflows/bos-universal-launchpad.yml` for container release,
 # `.github/workflows/bos-launchpad-cf-pages.yml` for static-site CF
 # Pages) but are still MUTUALLY EXCLUSIVE per consumer repo — enforced
 # at parse time via `_SEMANTIC_MUTEX_GROUPS` because the path-collision
@@ -959,7 +959,7 @@ _GHA_LINT_SHELL_YML = _load_managed_template_or_default(
 # pipelines on every `main` push.
 #
 # Both kickers delegate to the SAME hub reusable
-# (`bos-launchpad-release.yml` — the launchpad handles both modes via
+# (`bos-universal-launchpad.yml` — the launchpad handles both modes via
 # inputs) and read per-repo customization from a consumer-owned
 # `bos-launchpad-config.json` data file at the repo root. The kicker
 # parses that JSON to a job output and the downstream
@@ -1067,7 +1067,7 @@ jobs:
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
       models:          read    # nested release.yml -> github-release.yml AI changelog
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-launchpad.yml@main
     with:
       upstream_repo:     ${{ fromJson(needs.parse-config.outputs.cfg).upstream.repo || '' }}
       source:            ${{ fromJson(needs.parse-config.outputs.cfg).upstream.source || 'github_release' }}
@@ -1190,7 +1190,7 @@ jobs:
 _BOS_LAUNCHPAD_CF_PAGES_YML = """\
 # Blackout Secure Launchpad — Cloudflare Pages kicker (hub-managed).
 #
-# Calls `bos-launchpad-release.yml` in blackoutsecure/bos-automation-hub. Reads
+# Calls `bos-universal-launchpad.yml` in blackoutsecure/bos-automation-hub. Reads
 # per-repo customization from `bos-launchpad-config.json` at the repo root.
 #
 # CUSTOMIZE via `bos-launchpad-config.json` — NOT this file. The hub
@@ -1259,7 +1259,7 @@ jobs:
       pull-requests:   write
       security-events: write
       models:          read    # nested release.yml -> github-release.yml AI changelog
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-launchpad-release.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-launchpad.yml@main
     with:
       # ----- Cloudflare Pages stage -----
       cloudflare_pages:                     ${{ fromJson(needs.parse-config.outputs.cfg).stages.cloudflare_pages != false }}
