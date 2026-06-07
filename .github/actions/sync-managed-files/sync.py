@@ -1396,7 +1396,7 @@ jobs:
           sf = (cfg or {}).get("sync_files") or {}
           svcs = sf.get("services")
           if not isinstance(svcs, list) or not svcs:
-                print("::error file=bos-launchpad-config.json::sync_files.services must be a non-empty list of service names.", file=sys.stderr)
+              print("::error file=bos-launchpad-config.json::sync_files.services must be a non-empty list of service names.", file=sys.stderr)
               sys.exit(1)
           for s in svcs:
               if not isinstance(s, str) or not s.strip():

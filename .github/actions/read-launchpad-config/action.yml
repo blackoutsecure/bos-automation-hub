@@ -35,7 +35,7 @@ runs:
             exit 1
           fi
         else
-          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8"),), separators=(",", ":")))' "$cfg_file")"; then
+          if ! cfg="$(python3 -c 'import json,sys; obj=json.load(open(sys.argv[1], encoding="utf-8")); print(json.dumps(obj, separators=(",", ":")))' "$cfg_file")"; then
             echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
             exit 1
           fi
