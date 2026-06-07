@@ -1,0 +1,92 @@
+# Lint for a Node-based GitHub Action repo. Runs:
+#   - actionlint (workflow + composite action YAML)
+#   - eslint    (npm run lint, if defined)
+#   - prettier  (npm run format -- --check, if defined)
+#
+# This is a starter template — the hub writes it only when missing and
+# will never overwrite it. Adjust scripts/Node version to taste.
+
+name: Lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.js'
+      - '**/*.json'
+      - '**/*.md'
+      - '**/*.yml'
+      - '**/*.yaml'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.eslintrc*'
+      - 'eslint.config.*'
+      - '.prettierrc*'
+      - '.github/workflows/lint.yml'
+  pull_request:
+    paths:
+      - '**/*.js'
+      - '**/*.json'
+      - '**/*.md'
+      - '**/*.yml'
+      - '**/*.yaml'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.eslintrc*'
+      - 'eslint.config.*'
+      - '.prettierrc*'
+      - '.github/workflows/lint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Run actionlint
+        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
+        with:
+          matcher: true
+          fail-on-error: true
+          shellcheck: true
+
+  node-lint:
+    name: eslint + prettier
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6.0.0
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: ESLint
+        run: |
+          if npm run | grep -qE '^  lint$'; then
+            npm run lint -- --max-warnings=0 || npm run lint
+          else
+            echo "::notice::no 'lint' script in package.json — skipping eslint"
+          fi
+      - name: Prettier
+        run: |
+          if npm run | grep -qE '^  format$'; then
+            npx prettier --check "**/*.{js,json,md,yml,yaml}" \
+              --ignore-path .gitignore || \
+            echo "::warning::prettier reported drift; run 'npm run format' locally to fix"
+          else
+            echo "::notice::no 'format' script in package.json — skipping prettier"
+          fi

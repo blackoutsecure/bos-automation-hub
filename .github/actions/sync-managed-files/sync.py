@@ -922,6 +922,28 @@ jobs:
           fi
 """
 
+# Managed-files overrides for init workflow starter templates.
+_GHA_SYNC_COMMIT_YML = _load_managed_template_or_default(
+  "workflows/sync-managed-files.yml",
+  _GHA_SYNC_COMMIT_YML,
+)
+_GHA_SYNC_DRIFT_CHECK_YML = _load_managed_template_or_default(
+  "workflows/sync-drift-check.yml",
+  _GHA_SYNC_DRIFT_CHECK_YML,
+)
+_GHA_LINT_NODE_YML = _load_managed_template_or_default(
+  "workflows/lint.node.yml",
+  _GHA_LINT_NODE_YML,
+)
+_GHA_LINT_PYTHON_YML = _load_managed_template_or_default(
+  "workflows/lint.python.yml",
+  _GHA_LINT_PYTHON_YML,
+)
+_GHA_LINT_SHELL_YML = _load_managed_template_or_default(
+  "workflows/lint.shell.yml",
+  _GHA_LINT_SHELL_YML,
+)
+
 
 # --------------------------------------------------------------------------- #
 # bos-launchpad kicker workflows                                              #
@@ -1441,6 +1463,11 @@ jobs:
       timeout_minutes: ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.timeout_minutes || 5 }}
 """
 
+_BOS_LAUNCHPAD_SYNC_FILES_YML = _load_managed_template_or_default(
+  "workflows/bos-launchpad-sync-files.yml",
+  _BOS_LAUNCHPAD_SYNC_FILES_YML,
+)
+
 
 # Canonical copy/paste caller reference kept in the hub workflows folder.
 # It is derived from the same launchpad template the hub syncs into
@@ -1463,6 +1490,11 @@ _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = (
     "    if: ${{ github.repository != 'blackoutsecure/bos-automation-hub' }}\n",
     1,
   )
+)
+
+_BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = _load_managed_template_or_default(
+  "workflows/bos-universal-launchpad-caller-reference.yml",
+  _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
 )
 
 
@@ -1568,6 +1600,11 @@ jobs:
       # admin-reach PAT exposed via org/repo secrets as `SCANNING_PAT`).
       scanning_pat: ${{ secrets.SCANNING_PAT }}
 """
+
+_BOS_LAUNCHPAD_GATE_YML = _load_managed_template_or_default(
+  "workflows/bos-launchpad-gate.yml",
+  _BOS_LAUNCHPAD_GATE_YML,
+)
 
 _BOS_LAUNCHPAD_CONFIG_INIT_JSON = """\
 {

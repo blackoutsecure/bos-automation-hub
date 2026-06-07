@@ -44,9 +44,21 @@ extra disk read per file at sync time, which is negligible.
 ## Authority — read carefully
 
 > **Current status:** most templates still use `sync.py`'s inline `_*`
-> constants as source of truth. One exception is now active:
-> `managed-files/workflows/bos-universal-launchpad.yml` is read by
-> `sync.py` and overrides the inline default when present.
+> constants as source of truth. Active workflow-template overrides are now
+> enabled for files under `managed-files/workflows/`:
+>
+> * `bos-universal-launchpad.yml`
+> * `bos-universal-launchpad-caller-reference.yml`
+> * `bos-launchpad-gate.yml`
+> * `bos-launchpad-sync-files.yml`
+> * `sync-managed-files.yml`
+> * `sync-drift-check.yml`
+> * `lint.node.yml`
+> * `lint.python.yml`
+> * `lint.shell.yml`
+>
+> When these files exist, `sync.py` reads them and overrides the inline
+> default bodies.
 
 This remains deliberate. Migration is a separate, reviewable change per
 file — not a big-bang flip.
