@@ -1656,7 +1656,7 @@ jobs:
   # existing upstream-tracked callers stay byte-stable.
   # ---------------------------------------------------------------------------
   cloudflare-pages:
-    name: Cloudflare Pages deploy
+    name: Cloudflare Pages deploy (legacy inputs)
     needs: [security_scan]
     # `!cancelled()` lets this job evaluate even when `security_scan`
     # was skipped (caller passed `enable_security_scan: false`), which
@@ -1743,7 +1743,7 @@ jobs:
       CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
 
   cloudflare-pages-config:
-    name: Cloudflare Pages deploy
+    name: Cloudflare Pages deploy (config-driven)
     needs: [parse-config, security_scan]
     if: >-
       always()
