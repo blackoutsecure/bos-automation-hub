@@ -536,6 +536,7 @@ jobs:
     timeout-minutes: 30
     environment: ${{ inputs.deployment_environment }}
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
       # Hoist inputs that several steps read so they live in one place
       # and never get expanded inline inside `run:` bodies.
       PROJECT_NAME: ${{ inputs.cloudflare_project_name }}
