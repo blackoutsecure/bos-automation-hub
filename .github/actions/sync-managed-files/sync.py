@@ -954,7 +954,7 @@ _BOS_LAUNCHPAD_RELEASE_YML = """\
 # Required secrets:
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
 #   UPSTREAM_TOKEN (optional — only for private upstream repos)
-name: Blackout Secure Launchpad
+name: Blackout Secure Launchpad (kicker)
 run-name: >-
   Blackout Secure Launchpad / universal / ${{
     github.event_name == 'workflow_dispatch'
