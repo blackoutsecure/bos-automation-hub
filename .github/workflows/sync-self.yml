@@ -23,8 +23,12 @@ on:
       # When the canonical blocks themselves change, re-sync immediately
       # so the hub's own dotfiles never lag behind the content it ships.
       - '.github/actions/sync-managed-files/sync.py'
-      # Re-sync when managed-file source templates change.
-      - 'managed-files/**'
+      # Re-sync when managed-file source templates change in known
+      # canonical template folders.
+      - 'managed-files/README.md'
+      - 'managed-files/community-health/**'
+      - 'managed-files/github-meta/**'
+      - 'managed-files/org-profile/**'
 
 permissions:
   contents: read
