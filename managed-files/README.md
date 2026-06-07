@@ -43,13 +43,13 @@ extra disk read per file at sync time, which is negligible.
 
 ## Authority — read carefully
 
-> **As of this directory's creation, `sync.py`'s `_*` string constants
-> remain the single source of truth.** Nothing in this folder is read by
-> `sync.py` yet.
+> **Current status:** most templates still use `sync.py`'s inline `_*`
+> constants as source of truth. One exception is now active:
+> `managed-files/workflows/bos-universal-launchpad.yml` is read by
+> `sync.py` and overrides the inline default when present.
 
-This is deliberate. Migration is a separate, reviewable change per file —
-not a big-bang flip. The folder + README exist first so the convention is
-agreed before any extraction happens.
+This remains deliberate. Migration is a separate, reviewable change per
+file — not a big-bang flip.
 
 ## Naming convention (when content lands here)
 

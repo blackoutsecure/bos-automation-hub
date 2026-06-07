@@ -66,6 +66,7 @@ import difflib
 import os
 import re
 import sys
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 MARKER_NAMESPACE = "bos-automation-hub"
@@ -73,6 +74,29 @@ MARKER_NOTE = (
     "Managed by https://github.com/blackoutsecure/bos-automation-hub — "
     "do not edit between markers."
 )
+
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_MANAGED_FILES_ROOT = _REPO_ROOT / "managed-files"
+
+
+def _load_managed_template_or_default(relative_path: str, default_body: str) -> str:
+  """Return managed-files template content when present, else
+  ``default_body``.
+
+  This lets managed-files become the canonical authoring surface while
+  preserving existing inline constants as safe fallbacks.
+  """
+  candidate = _MANAGED_FILES_ROOT / relative_path
+  try:
+    if candidate.is_file():
+      content = candidate.read_text(encoding="utf-8")
+      if content and not content.endswith("\n"):
+        content += "\n"
+      return content
+  except OSError:
+    # Fall back to inline default if the template cannot be read.
+    pass
+  return default_body
 
 
 # --------------------------------------------------------------------------- #
@@ -1279,6 +1303,13 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
 """
+
+# Managed-files override: when present, treat this on-disk template as
+# canonical for the universal launchpad kicker body.
+_BOS_LAUNCHPAD_RELEASE_YML = _load_managed_template_or_default(
+  "workflows/bos-universal-launchpad.yml",
+  _BOS_LAUNCHPAD_RELEASE_YML,
+)
 
 
 _BOS_LAUNCHPAD_SYNC_FILES_YML = """\

@@ -29,6 +29,7 @@ on:
       - 'managed-files/community-health/**'
       - 'managed-files/github-meta/**'
       - 'managed-files/org-profile/**'
+      - 'managed-files/workflows/**'
 
 permissions:
   contents: read
