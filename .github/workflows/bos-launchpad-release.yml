@@ -1778,7 +1778,7 @@ jobs:
       extra_wrangler_args:        ${{ fromJson(needs.parse-config.outputs.cloudflare).extra_wrangler_args }}
       ai_bindings:                ${{ toJson(fromJson(needs.parse-config.outputs.cloudflare).ai_bindings) }}
       deploy_artifact_name:       ${{ fromJson(needs.parse-config.outputs.cloudflare).deploy_artifact_name }}
-      deploy:                     ${{ fromJson(needs.parse-config.outputs.cloudflare).deploy }}
+      deploy:                     ${{ inputs.force_run && 'true' || fromJson(needs.parse-config.outputs.cloudflare).deploy }}
       runs_on:                    ${{ fromJson(needs.parse-config.outputs.cloudflare).runs_on }}
       checkout_fetch_depth:       ${{ fromJson(needs.parse-config.outputs.cloudflare).checkout_fetch_depth }}
       purge_cache:                ${{ fromJson(needs.parse-config.outputs.cloudflare).purge_cache }}
