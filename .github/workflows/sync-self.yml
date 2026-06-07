@@ -15,15 +15,16 @@ on:
     - cron: '11 14 * * 1'   # Monday 14:11 UTC — stagger off :00
   workflow_dispatch:
   push:
-    # Hub uses dev-default convention — keep self-sync alive on both
-    # the working (`dev`) and promoted (`main`) branches so dotfile
-    # drift gets corrected wherever the change lands.
-    branches: [dev, main]
+    # Self-sync is anchored to the promoted canonical branch.
+    branches: [main]
     paths:
       - '.github/workflows/sync-self.yml'
+      - '.github/workflows/sync-managed-files.yml'
       # When the canonical blocks themselves change, re-sync immediately
       # so the hub's own dotfiles never lag behind the content it ships.
       - '.github/actions/sync-managed-files/sync.py'
+      # Re-sync when managed-file source templates change.
+      - 'managed-files/**'
 
 permissions:
   contents: read
@@ -36,7 +37,7 @@ jobs:
   sync:
     permissions:
       contents: write   # required to push the canonical content back
-    uses: ./.github/workflows/sync-managed-files.yml
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
     with:
       services: |
         common
