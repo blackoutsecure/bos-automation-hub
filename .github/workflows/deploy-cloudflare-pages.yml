@@ -1203,7 +1203,6 @@ jobs:
           accountId: ${{ steps.account.outputs.value }}
           wranglerVersion: ${{ inputs.wrangler_version }}
           workingDirectory: ${{ inputs.working_directory }}
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           command: ${{ steps.cmd.outputs.command }}
 
       - name: Resolve cache-purge gate
