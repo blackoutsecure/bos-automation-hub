@@ -3,7 +3,7 @@ description: Emit a launchpad config snapshot table to GITHUB_STEP_SUMMARY and l
 
 inputs:
   cfg_json:
-    description: Compact JSON object from read-launchpad-config.
+    description: Compact JSON object from shared/launchpad-config.
     required: true
 
 runs:

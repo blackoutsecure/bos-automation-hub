@@ -51,7 +51,6 @@ extra disk read per file at sync time, which is negligible.
 > * `bos-universal-launchpad-kicker-reference.yml`
 > * `bos-launchpad-gate.yml`
 > * `bos-launchpad-sync-files.yml`
-> * `sync-managed-files.yml`
 > * `sync-drift-check.yml`
 > * `lint.node.yml`
 > * `lint.python.yml`
@@ -146,7 +145,6 @@ managed-files/
     ├── bos-launchpad-cf-pages.yml         ← from _BOS_LAUNCHPAD_CF_PAGES_YML
     ├── bos-launchpad-sync-files.yml       ← from _BOS_LAUNCHPAD_SYNC_FILES_YML
     ├── bos-launchpad-org-default.yml      ← (NEW) kicker for the `.github` org repo (TBD)
-    ├── sync-managed-files.yml             ← from _GHA_SYNC_COMMIT_YML
     ├── sync-drift-check.yml               ← from _GHA_SYNC_DRIFT_CHECK_YML
     ├── lint.node.yml                      ← from _GHA_LINT_NODE_YML
     ├── lint.python.yml                    ← from _GHA_LINT_PYTHON_YML

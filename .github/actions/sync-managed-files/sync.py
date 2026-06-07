@@ -657,74 +657,6 @@ _MARKDOWNLINT_YAML_DEFAULT = _load_managed_template_or_default(
 # all target the same `.github/workflows/lint.yml`, so at most ONE may
 # be enabled per repo (enforced at parse time by `parse_services()`).
 
-_GHA_SYNC_COMMIT_YML = """\
-# Calls the bos-automation-hub `sync-managed-files.yml` reusable in
-# `commit` mode on a weekly schedule. Edit the `services:` list below
-# to control which canonical blocks / files the hub maintains in this
-# repo. Disabling a service leaves any existing content untouched.
-#
-# Known services:
-#   common            common .gitignore + .editorconfig sections
-#   docker            Docker-related .dockerignore section
-#   balena            balena.yml re-include for .dockerignore
-#   node              Node.js .gitignore + .dockerignore sections
-#   python            Python .gitignore + .dockerignore sections
-#   lf_line_endings   .gitattributes LF normalization block
-#   wranglerignore    managed section in .wranglerignore (default)
-#                     set `dotfiles_mode: override` in bos-managed-files.yaml
-#                     to force whole-file overwrite mode instead
-#                     conflict precedence is controlled by
-#                     `dotfiles_conflict_precedence` (default: central),
-#                     with per-file local overrides via
-#                     `dotfiles_local_precedence_paths`
-#   shellcheckrc      full .shellcheckrc defaults (whole-file)
-#   markdownlint      full .markdownlint.yaml defaults (whole-file)
-#   dependabot_actions  github-actions ecosystem in .github/dependabot.yml
-#   dependabot_npm      npm ecosystem in .github/dependabot.yml
-#   dependabot_pip      pip ecosystem in .github/dependabot.yml
-#   prettier          full .prettierrc.yaml (overwritten on every run)
-#   logger            full root/usr/local/bin/log-functions.sh
-
-name: Sync managed files
-
-on:
-  schedule:
-    - cron: '17 14 * * 1'   # Monday 14:17 UTC
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/sync-managed-files.yml'
-
-permissions:
-  contents: read
-
-concurrency:
-  group: sync-managed-files-${{ github.ref }}
-  cancel-in-progress: false
-
-jobs:
-  sync:
-    permissions:
-      contents: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
-    with:
-      services: |
-        common
-        lf_line_endings
-        # Uncomment what this repo needs:
-        # node
-        # python
-        # docker
-        # balena
-        # dependabot_actions
-        # dependabot_npm
-        # dependabot_pip
-        # prettier
-        # logger
-        # wranglerignore
-"""
-
 _GHA_SYNC_DRIFT_CHECK_YML = """\
 # PR-time drift check. Runs the bos-automation-hub
 # `sync-managed-files.yml` reusable in `check` mode and fails the job
@@ -1036,10 +968,6 @@ jobs:
 """
 
 # Managed-files overrides for init workflow starter templates.
-_GHA_SYNC_COMMIT_YML = _load_managed_template_or_default(
-  "workflows/sync-managed-files.yml",
-  _GHA_SYNC_COMMIT_YML,
-)
 _GHA_SYNC_DRIFT_CHECK_YML = _load_managed_template_or_default(
   "workflows/sync-drift-check.yml",
   _GHA_SYNC_DRIFT_CHECK_YML,
@@ -1156,85 +1084,15 @@ jobs:
     runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 2
     outputs:
-      cfg: ${{ steps.read.outputs.cfg }}
+      cfg: ${{ steps.config.outputs.cfg }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Read launchpad config JSON
-        id: read
-        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
-
-      - name: Summarize launchpad config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/summarize-launchpad-config@main
-        with:
-          cfg_json: ${{ steps.read.outputs.cfg }}
-
-      - name: Summarize launchpad config
-        shell: bash
-        env:
-          CFG_JSON: ${{ steps.read.outputs.cfg }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-
-          cfg = json.loads(os.environ.get("CFG_JSON") or "{}")
-          if not isinstance(cfg, dict):
-              cfg = {}
-
-          stages = cfg.get("stages") if isinstance(cfg.get("stages"), dict) else {}
-          cloudflare = cfg.get("cloudflare") if isinstance(cfg.get("cloudflare"), dict) else {}
-          sync = cfg.get("sync_files") if isinstance(cfg.get("sync_files"), dict) else {}
-          upstream = cfg.get("upstream") if isinstance(cfg.get("upstream"), dict) else {}
-
-          enabled = [
-              name
-              for name in ["docker", "balena", "github_release", "companion_docker", "cloudflare_pages"]
-              if stages.get(name) is True
-          ]
-          if cloudflare.get("project_name"):
-              enabled.append("cloudflare_pages")
-          enabled_stages = ", ".join(sorted(set(enabled))) or "(none)"
-
-          site_url = (cloudflare.get("site_url") or "").strip() or "(unset)"
-          project = (cloudflare.get("project_name") or "").strip() or "(unset)"
-          env_name = (cloudflare.get("deployment_environment") or "").strip() or "(unset)"
-          sync_mode = (sync.get("mode") or "commit") if isinstance(sync.get("mode"), str) else "commit"
-          services = sync.get("services") if isinstance(sync.get("services"), list) else []
-          services_text = ", ".join([s for s in services if isinstance(s, str) and s.strip()]) or "(none)"
-          upstream_source = (upstream.get("source") or "").strip() or "(unset)"
-
-          lines = [
-              "## Launchpad config snapshot",
-              "",
-              "| Field | Value |",
-              "| --- | --- |",
-              f"| Enabled stages | `{enabled_stages}` |",
-              f"| Upstream source | `{upstream_source}` |",
-              f"| Cloudflare project | `{project}` |",
-              f"| Cloudflare environment | `{env_name}` |",
-              f"| Cloudflare site URL | `{site_url}` |",
-              f"| Sync mode | `{sync_mode}` |",
-              f"| Sync services | `{services_text}` |",
-          ]
-
-          summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summary_path:
-              with open(summary_path, "a", encoding="utf-8") as f:
-                  f.write("\\n".join(lines) + "\\n")
-
-          print("Launchpad config snapshot:")
-          print(f"  enabled_stages: {enabled_stages}")
-          print(f"  upstream_source: {upstream_source}")
-          print(f"  cloudflare_project: {project}")
-          print(f"  cloudflare_environment: {env_name}")
-          print(f"  cloudflare_site_url: {site_url}")
-          print(f"  sync_mode: {sync_mode}")
-          print(f"  sync_services: {services_text}")
-          PY
+      - name: Load launchpad config
+        id: config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
 
   release:
     name: Release
@@ -1413,15 +1271,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
-      cfg: ${{ steps.read.outputs.cfg }}
+      cfg: ${{ steps.config.outputs.cfg }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Read launchpad config JSON
-        id: read
-        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
+      - name: Load launchpad config
+        id: config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
 
   launchpad:
     name: Cloudflare Pages
@@ -1578,19 +1436,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
-      cfg: ${{ steps.read.outputs.cfg }}
+      cfg: ${{ steps.config.outputs.cfg }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Read launchpad config JSON
-        id: read
-        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
+      - name: Load launchpad config
+        id: config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
       - name: Validate sync_files.services
         shell: bash
         env:
-          CFG_JSON: ${{ steps.read.outputs.cfg }}
+          CFG_JSON: ${{ steps.config.outputs.cfg }}
         run: |
           set -euo pipefail
           # Sanity-check `sync_files.services` is a non-empty list.
@@ -1738,15 +1596,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
-      cfg: ${{ steps.read.outputs.cfg }}
+      cfg: ${{ steps.config.outputs.cfg }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Read launchpad config JSON
-        id: read
-        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
+      - name: Load launchpad config
+        id: config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
         with:
           allow_missing: 'true'
 
@@ -2917,18 +2775,15 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     "prettier": {
         ".prettierrc.yaml": _PRETTIERRC_YAML,
     },
-    # Universal launchpad services stay active:
-    # - `bos_launchpad` syncs the per-repo universal kicker
-    # - `bos_launchpad_reference` keeps the hub's canonical reference
     "bos_launchpad": {
       ".github/workflows/bos-universal-launchpad-kicker.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_reference": {
       ".github/workflows/bos-universal-launchpad-kicker-reference.yml": _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
     },
-    # Deprecated/no-op: retained as known service name so existing
-    # consumer configs don't hard-fail parse-time.
-    "bos_launchpad_gate": {},
+    "bos_launchpad_gate": {
+      ".github/workflows/bos-launchpad-gate.yml": _BOS_LAUNCHPAD_GATE_YML,
+    },
 }
 
 # Service pairs (or larger groups) that are semantically mutually
@@ -2936,15 +2791,9 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
 # Enforced at parse time in `parse_services()` so a misconfiguration
 # (e.g. both kicker flavors enabled) fails fast with a clear message
 # instead of producing two simultaneously-triggering kicker workflows.
-_SEMANTIC_MUTEX_GROUPS: List[Tuple[str, ...]] = [
-  # No semantic mutex currently needed. Launchpad aliases above map to
-  # the same path and are handled by the per-path collision guard.
-]
+_SEMANTIC_MUTEX_GROUPS: List[Tuple[str, ...]] = []
 
 SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
-    "gha_sync_commit": {
-        ".github/workflows/sync-managed-files.yml": _GHA_SYNC_COMMIT_YML,
-    },
     "gha_sync_drift_check": {
         ".github/workflows/sync-drift-check.yml": _GHA_SYNC_DRIFT_CHECK_YML,
     },

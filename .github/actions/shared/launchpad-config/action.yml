@@ -1,0 +1,257 @@
+name: Launchpad config
+description: Read, validate, normalize, and summarize bos-launchpad-config.json.
+
+inputs:
+  config_path:
+    description: Path to the launchpad config JSON file.
+    required: false
+    default: bos-launchpad-config.json
+  allow_missing:
+    description: Emit {} when config file is missing instead of failing.
+    required: false
+    default: 'false'
+
+outputs:
+  cfg:
+    description: Compact JSON object for downstream fromJson usage.
+    value: ${{ steps.config.outputs.cfg }}
+  cloudflare:
+    description: Normalized Cloudflare block derived from the config.
+    value: ${{ steps.config.outputs.cloudflare }}
+  sync:
+    description: Normalized sync_files block derived from the config.
+    value: ${{ steps.config.outputs.sync }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read, normalize, and summarize config
+      id: config
+      shell: bash
+      env:
+        CONFIG_PATH: ${{ inputs.config_path }}
+        ALLOW_MISSING: ${{ inputs.allow_missing }}
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import json
+        import os
+        import sys
+
+        config_path = os.environ.get("CONFIG_PATH") or "bos-launchpad-config.json"
+        allow_missing = (os.environ.get("ALLOW_MISSING") or "false").lower() == "true"
+        output_path = os.environ["GITHUB_OUTPUT"]
+        summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+
+        def error(message):
+            print(message, file=sys.stderr)
+
+        if not os.path.isfile(config_path):
+            if allow_missing:
+                cfg = {}
+            else:
+                error(f"::error file={config_path}::Required config file not found.")
+                sys.exit(1)
+        else:
+            try:
+                with open(config_path, encoding="utf-8") as handle:
+                    cfg = json.load(handle)
+            except Exception:
+                error(f"::error file={config_path}::JSON parse error (see preceding python output).")
+                raise
+
+        if not isinstance(cfg, dict):
+            error(f"::error file={config_path}::Top-level config must be a JSON object.")
+            sys.exit(1)
+
+        def as_dict(value):
+            return value if isinstance(value, dict) else {}
+
+        def as_list(value):
+            return value if isinstance(value, list) else []
+
+        def as_int(value, default):
+            if isinstance(value, bool):
+                return default
+            if isinstance(value, int):
+                return value
+            if isinstance(value, str) and value.strip():
+                try:
+                    return int(value.strip())
+                except ValueError:
+                    return default
+            return default
+
+        stages = as_dict(cfg.get("stages"))
+        upstream = as_dict(cfg.get("upstream"))
+        release = as_dict(cfg.get("release"))
+        cloudflare_raw = as_dict(cfg.get("cloudflare"))
+        redirects = as_dict(cloudflare_raw.get("redirects"))
+        headers = as_dict(cloudflare_raw.get("headers"))
+        sync_raw = as_dict(cfg.get("sync_files"))
+
+        cloudflare = {
+            "enabled": stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name")),
+            "project_name": str(cloudflare_raw.get("project_name") or ""),
+            "deployment_environment": str(cloudflare_raw.get("deployment_environment") or ""),
+            "site_url": str(cloudflare_raw.get("site_url") or ""),
+            "public_dir": str(cloudflare_raw.get("public_dir") or "."),
+            "deploy_dir": str(cloudflare_raw.get("deploy_dir") or "./dist"),
+            "clean_deploy_dir": cloudflare_raw.get("clean_deploy_dir") is not False,
+            "copy_files": str(cloudflare_raw.get("copy_files") or ""),
+            "copy_dirs": str(cloudflare_raw.get("copy_dirs") or ""),
+            "prebuild_command": str(cloudflare_raw.get("prebuild_command") or ""),
+            "working_directory": str(cloudflare_raw.get("working_directory") or ""),
+            "branch": str(cloudflare_raw.get("branch") or ""),
+            "commit_message": str(cloudflare_raw.get("commit_message") or ""),
+            "wrangler_version": str(cloudflare_raw.get("wrangler_version") or ""),
+            "extra_wrangler_args": str(cloudflare_raw.get("extra_wrangler_args") or ""),
+            "ai_bindings": as_list(cloudflare_raw.get("ai_bindings")),
+            "deploy_artifact_name": str(cloudflare_raw.get("deploy_artifact_name") or ""),
+            "deploy": str(cloudflare_raw.get("deploy") or ""),
+            "runs_on": str(cloudflare_raw.get("runs_on") or ""),
+            "checkout_fetch_depth": as_int(cloudflare_raw.get("checkout_fetch_depth"), 0),
+            "purge_cache": cloudflare_raw.get("purge_cache") is not False,
+            "generate_sitemap": cloudflare_raw.get("generate_sitemap") is True,
+            "generate_robots": cloudflare_raw.get("generate_robots") is True,
+            "generate_security_txt": cloudflare_raw.get("generate_security_txt") is True,
+            "security_contact": str(cloudflare_raw.get("security_contact") or ""),
+            "generate_manifest": cloudflare_raw.get("generate_manifest") is True,
+            "manifest_name": str(cloudflare_raw.get("manifest_name") or ""),
+            "manifest_short_name": str(cloudflare_raw.get("manifest_short_name") or ""),
+            "manifest_description": str(cloudflare_raw.get("manifest_description") or ""),
+            "manifest_orientation": str(cloudflare_raw.get("manifest_orientation") or ""),
+            "manifest_theme_color": str(cloudflare_raw.get("manifest_theme_color") or ""),
+            "manifest_background_color": str(cloudflare_raw.get("manifest_background_color") or ""),
+            "manifest_lang": str(cloudflare_raw.get("manifest_lang") or ""),
+            "manifest_dir": str(cloudflare_raw.get("manifest_dir") or ""),
+            "manifest_categories": str(cloudflare_raw.get("manifest_categories") or ""),
+            "manifest_icons_dir": str(cloudflare_raw.get("manifest_icons_dir") or ""),
+            "generate_redirects": redirects.get("generate") is True or cloudflare_raw.get("generate_redirects") is True,
+            "redirects_custom_rules": str(redirects.get("custom_rules") or cloudflare_raw.get("redirects_custom_rules") or ""),
+            "redirects_replace_existing": redirects.get("replace_existing") is True or cloudflare_raw.get("redirects_replace_existing") is True,
+            "generate_headers": headers.get("generate") is True or cloudflare_raw.get("generate_headers") is True,
+            "headers_presets": str(headers.get("presets") or cloudflare_raw.get("headers_presets") or "security,cache"),
+            "headers_csp": str(headers.get("csp") or cloudflare_raw.get("headers_csp") or ""),
+            "headers_hsts_max_age": str(headers.get("hsts_max_age") or cloudflare_raw.get("headers_hsts_max_age") or "63072000"),
+            "headers_permissions_policy": str(
+                headers.get("permissions_policy")
+                or cloudflare_raw.get("headers_permissions_policy")
+                or "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+            ),
+            "headers_cache_html_control": str(
+                headers.get("cache_html_control")
+                or cloudflare_raw.get("headers_cache_html_control")
+                or "public, max-age=0, must-revalidate"
+            ),
+            "headers_cache_assets_pattern": str(
+                headers.get("cache_assets_pattern")
+                or cloudflare_raw.get("headers_cache_assets_pattern")
+                or "/assets/*"
+            ),
+            "headers_cache_assets_control": str(
+                headers.get("cache_assets_control")
+                or cloudflare_raw.get("headers_cache_assets_control")
+                or "public, max-age=31536000, immutable"
+            ),
+            "generate_common_content_headers": (
+                headers.get("generate_common_content_headers") is not False
+                and cloudflare_raw.get("generate_common_content_headers") is not False
+            ),
+            "common_security_txt_cache_control": str(
+                headers.get("common_security_txt_cache_control")
+                or cloudflare_raw.get("common_security_txt_cache_control")
+                or "public, max-age=86400"
+            ),
+            "common_robots_txt_cache_control": str(
+                headers.get("common_robots_txt_cache_control")
+                or cloudflare_raw.get("common_robots_txt_cache_control")
+                or "public, max-age=86400"
+            ),
+            "common_sitemap_xml_cache_control": str(
+                headers.get("common_sitemap_xml_cache_control")
+                or cloudflare_raw.get("common_sitemap_xml_cache_control")
+                or "public, max-age=86400"
+            ),
+            "common_humans_txt_cache_control": str(
+                headers.get("common_humans_txt_cache_control")
+                or cloudflare_raw.get("common_humans_txt_cache_control")
+                or "public, max-age=86400"
+            ),
+            "headers_custom_rules": str(headers.get("custom_rules") or cloudflare_raw.get("headers_custom_rules") or ""),
+            "headers_replace_existing": headers.get("replace_existing") is True or cloudflare_raw.get("headers_replace_existing") is True,
+        }
+
+        sync_services = [
+            service.strip()
+            for service in as_list(sync_raw.get("services"))
+            if isinstance(service, str) and service.strip()
+        ]
+        sync = {
+            "enabled": bool(sync_services),
+            "services": sync_services,
+            "mode": str(sync_raw.get("mode") or "commit"),
+            "commit_message": str(sync_raw.get("commit_message") or "chore: sync managed files from bos-automation-hub"),
+            "git_user_name": str(sync_raw.get("git_user_name") or "github-actions[bot]"),
+            "git_user_email": str(sync_raw.get("git_user_email") or "41898282+github-actions[bot]@users.noreply.github.com"),
+            "push_retries": as_int(sync_raw.get("push_retries"), 3),
+            "runs_on": str(sync_raw.get("runs_on") or "ubuntu-latest"),
+            "timeout_minutes": as_int(sync_raw.get("timeout_minutes"), 5),
+        }
+
+        compact_cfg = json.dumps(cfg, separators=(",", ":"))
+        compact_cloudflare = json.dumps(cloudflare, separators=(",", ":"))
+        compact_sync = json.dumps(sync, separators=(",", ":"))
+
+        cloudflare_enabled = stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name"))
+        stage_flags = {
+            "docker": stages.get("docker") is True,
+            "balena": stages.get("balena") is True,
+            "github_release": stages.get("github_release") is True,
+            "cloudflare_pages": cloudflare_enabled,
+            "sync_managed_files": bool(sync_services),
+        }
+        enabled_stages = ", ".join([key for key, value in stage_flags.items() if value]) or "(none)"
+        cf_site = (cloudflare_raw.get("site_url") or "").strip() or "(unset)"
+        cf_project = (cloudflare_raw.get("project_name") or "").strip() or "(unset)"
+        cf_env = (cloudflare_raw.get("deployment_environment") or "").strip() or "(unset)"
+        sync_mode = (sync_raw.get("mode") or "commit") if isinstance(sync_raw.get("mode"), str) else "commit"
+        sync_services_text = ", ".join(sync_services) if sync_services else "(none)"
+        upstream_source = (upstream.get("source") or "").strip() or "(unset)"
+        release_template_path = (release.get("template_path") or "").strip() or "(unset)"
+
+        summary_lines = [
+            "## Launchpad config snapshot",
+            "",
+            "| Field | Value |",
+            "| --- | --- |",
+            f"| Enabled stages | `{enabled_stages}` |",
+            f"| Upstream source | `{upstream_source}` |",
+            f"| Cloudflare project | `{cf_project}` |",
+            f"| Cloudflare environment | `{cf_env}` |",
+            f"| Cloudflare site URL | `{cf_site}` |",
+            f"| Sync mode | `{sync_mode}` |",
+            f"| Sync services | `{sync_services_text}` |",
+            f"| Release template path | `{release_template_path}` |",
+        ]
+
+        if summary_path:
+            with open(summary_path, "a", encoding="utf-8") as handle:
+                handle.write("\n".join(summary_lines) + "\n")
+
+        print("Launchpad config snapshot:")
+        print(f"  enabled_stages: {enabled_stages}")
+        print(f"  upstream_source: {upstream_source}")
+        print(f"  cloudflare_project: {cf_project}")
+        print(f"  cloudflare_environment: {cf_env}")
+        print(f"  cloudflare_site_url: {cf_site}")
+        print(f"  sync_mode: {sync_mode}")
+        print(f"  sync_services: {sync_services_text}")
+
+        with open(output_path, "a", encoding="utf-8") as handle:
+            handle.write("cfg<<__BOS_EOF__\n")
+            handle.write(compact_cfg + "\n")
+            handle.write("__BOS_EOF__\n")
+            handle.write(f"cloudflare={compact_cloudflare}\n")
+            handle.write(f"sync={compact_sync}\n")
+        PY
