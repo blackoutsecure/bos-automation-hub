@@ -962,7 +962,7 @@ run-name: >-
       || github.event_name == 'schedule'
       && 'scheduled'
       || 'push'
-  }}
+  }} / ref:${{ github.ref_name }} / cf-env:${{ vars.CLOUDFLARE_DEPLOYMENT_ENV || 'from-.bos-launchpad.yaml' }} / cf-domain:${{ vars.CLOUDFLARE_SITE_URL || 'from-.bos-launchpad.yaml' }}
 
 on:
   schedule:
