@@ -756,6 +756,33 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      use_launchpad_config:
+        description: >-
+          When `true`, read Cloudflare Pages settings from the caller
+          repo's `.bos-launchpad.yaml` instead of the `cloudflare_*`
+          workflow-call inputs. Intended for the universal
+          `bos-launchpad.yml` kicker; legacy split callers leave this
+          `false` and continue forwarding explicit inputs.
+        required: false
+        type: boolean
+        default: false
+      sync_managed_files:
+        description: >-
+          When `true`, also run the hub's `sync-managed-files.yml`
+          reusable using the `sync_files:` block from the caller repo's
+          `.bos-launchpad.yaml`. Intended for the universal
+          `bos-launchpad.yml` kicker.
+        required: false
+        type: boolean
+        default: false
+      sync_mode:
+        description: >-
+          Optional override for the integrated sync stage's mode.
+          Empty (default) uses `.bos-launchpad.yaml` `sync_files.mode`
+          or falls back to `commit`.
+        required: false
+        type: string
+        default: ''
 
       # ----- Release pipeline: GitHub Release stage ------------------------
       release_template_path:
@@ -1178,7 +1205,16 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         value: ${{ jobs.cloudflare-pages.outputs.purged }}
       cloudflare_ai_bindings:
         description: 'JSON array of Workers AI binding names present on the project after the deploy stage (empty `[]` when none requested).'
-        value: ${{ jobs.cloudflare-pages.outputs.ai_bindings }}
+        value: ${{ jobs.cloudflare-pages-config.outputs.ai_bindings || jobs.cloudflare-pages.outputs.ai_bindings }}
+      sync_changed:
+        description: '`true` when the integrated sync-managed-files stage changed at least one file.'
+        value: ${{ jobs.sync-managed-files.outputs.changed }}
+      sync_changed_files:
+        description: 'Newline-separated list of files changed by the integrated sync-managed-files stage.'
+        value: ${{ jobs.sync-managed-files.outputs.changed_files }}
+      sync_commit_sha:
+        description: 'Commit SHA created by the integrated sync-managed-files stage, when one was created.'
+        value: ${{ jobs.sync-managed-files.outputs.commit_sha }}
 
 permissions:
   contents: read
@@ -1191,6 +1227,189 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  parse-config:
+    name: Parse .bos-launchpad.yaml
+    if: inputs.use_launchpad_config || inputs.sync_managed_files
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      cfg: ${{ steps.read.outputs.cfg }}
+      cloudflare: ${{ steps.read.outputs.cloudflare }}
+      sync: ${{ steps.read.outputs.sync }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Convert .bos-launchpad.yaml to normalized JSON
+        id: read
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f .bos-launchpad.yaml ]]; then
+            echo "::error file=.bos-launchpad.yaml::Required config file not found. See https://github.com/blackoutsecure/bos-automation-hub for the schema."
+            exit 1
+          fi
+          if ! cfg="$(yq -o=json -I=0 '.' .bos-launchpad.yaml)"; then
+            echo "::error file=.bos-launchpad.yaml::YAML parse error (see preceding yq output)."
+            exit 1
+          fi
+          CFG_JSON="$cfg" python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import sys
+
+          cfg = json.loads(os.environ["CFG_JSON"])
+          if not isinstance(cfg, dict):
+              print(
+                  "::error file=.bos-launchpad.yaml::Top-level config must be a YAML mapping.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          def as_dict(value):
+              return value if isinstance(value, dict) else {}
+
+          def as_list(value):
+              return value if isinstance(value, list) else []
+
+          def as_int(value, default):
+              if isinstance(value, bool):
+                  return default
+              if isinstance(value, int):
+                  return value
+              if isinstance(value, str) and value.strip():
+                  try:
+                      return int(value.strip())
+                  except ValueError:
+                      return default
+              return default
+
+          stages = as_dict(cfg.get("stages"))
+          cloudflare_raw = as_dict(cfg.get("cloudflare"))
+          redirects = as_dict(cloudflare_raw.get("redirects"))
+          headers = as_dict(cloudflare_raw.get("headers"))
+          sync_raw = as_dict(cfg.get("sync_files"))
+
+          cloudflare = {
+              "enabled": stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name")),
+              "project_name": str(cloudflare_raw.get("project_name") or ""),
+              "deployment_environment": str(cloudflare_raw.get("deployment_environment") or ""),
+              "site_url": str(cloudflare_raw.get("site_url") or ""),
+              "public_dir": str(cloudflare_raw.get("public_dir") or "."),
+              "deploy_dir": str(cloudflare_raw.get("deploy_dir") or "./dist"),
+              "clean_deploy_dir": cloudflare_raw.get("clean_deploy_dir") is not False,
+              "copy_files": str(cloudflare_raw.get("copy_files") or ""),
+              "copy_dirs": str(cloudflare_raw.get("copy_dirs") or ""),
+              "prebuild_command": str(cloudflare_raw.get("prebuild_command") or ""),
+              "working_directory": str(cloudflare_raw.get("working_directory") or ""),
+              "branch": str(cloudflare_raw.get("branch") or ""),
+              "commit_message": str(cloudflare_raw.get("commit_message") or ""),
+              "wrangler_version": str(cloudflare_raw.get("wrangler_version") or ""),
+              "extra_wrangler_args": str(cloudflare_raw.get("extra_wrangler_args") or ""),
+              "ai_bindings": as_list(cloudflare_raw.get("ai_bindings")),
+              "deploy_artifact_name": str(cloudflare_raw.get("deploy_artifact_name") or ""),
+              "deploy": str(cloudflare_raw.get("deploy") or ""),
+              "runs_on": str(cloudflare_raw.get("runs_on") or ""),
+              "checkout_fetch_depth": as_int(cloudflare_raw.get("checkout_fetch_depth"), 0),
+              "purge_cache": cloudflare_raw.get("purge_cache") is not False,
+              "generate_sitemap": cloudflare_raw.get("generate_sitemap") is True,
+              "generate_robots": cloudflare_raw.get("generate_robots") is True,
+              "generate_security_txt": cloudflare_raw.get("generate_security_txt") is True,
+              "security_contact": str(cloudflare_raw.get("security_contact") or ""),
+              "generate_manifest": cloudflare_raw.get("generate_manifest") is True,
+              "manifest_name": str(cloudflare_raw.get("manifest_name") or ""),
+              "manifest_short_name": str(cloudflare_raw.get("manifest_short_name") or ""),
+              "manifest_description": str(cloudflare_raw.get("manifest_description") or ""),
+              "manifest_orientation": str(cloudflare_raw.get("manifest_orientation") or ""),
+              "manifest_theme_color": str(cloudflare_raw.get("manifest_theme_color") or ""),
+              "manifest_background_color": str(cloudflare_raw.get("manifest_background_color") or ""),
+              "manifest_lang": str(cloudflare_raw.get("manifest_lang") or ""),
+              "manifest_dir": str(cloudflare_raw.get("manifest_dir") or ""),
+              "manifest_categories": str(cloudflare_raw.get("manifest_categories") or ""),
+              "manifest_icons_dir": str(cloudflare_raw.get("manifest_icons_dir") or ""),
+              "generate_redirects": redirects.get("generate") is True or cloudflare_raw.get("generate_redirects") is True,
+              "redirects_custom_rules": str(redirects.get("custom_rules") or cloudflare_raw.get("redirects_custom_rules") or ""),
+              "redirects_replace_existing": redirects.get("replace_existing") is True or cloudflare_raw.get("redirects_replace_existing") is True,
+              "generate_headers": headers.get("generate") is True or cloudflare_raw.get("generate_headers") is True,
+              "headers_presets": str(headers.get("presets") or cloudflare_raw.get("headers_presets") or "security,cache"),
+              "headers_csp": str(headers.get("csp") or cloudflare_raw.get("headers_csp") or ""),
+              "headers_hsts_max_age": str(headers.get("hsts_max_age") or cloudflare_raw.get("headers_hsts_max_age") or "63072000"),
+              "headers_permissions_policy": str(
+                  headers.get("permissions_policy")
+                  or cloudflare_raw.get("headers_permissions_policy")
+                  or "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+              ),
+              "headers_cache_html_control": str(
+                  headers.get("cache_html_control")
+                  or cloudflare_raw.get("headers_cache_html_control")
+                  or "public, max-age=0, must-revalidate"
+              ),
+              "headers_cache_assets_pattern": str(
+                  headers.get("cache_assets_pattern")
+                  or cloudflare_raw.get("headers_cache_assets_pattern")
+                  or "/assets/*"
+              ),
+              "headers_cache_assets_control": str(
+                  headers.get("cache_assets_control")
+                  or cloudflare_raw.get("headers_cache_assets_control")
+                  or "public, max-age=31536000, immutable"
+              ),
+              "generate_common_content_headers": (
+                  headers.get("generate_common_content_headers") is not False
+                  and cloudflare_raw.get("generate_common_content_headers") is not False
+              ),
+              "common_security_txt_cache_control": str(
+                  headers.get("common_security_txt_cache_control")
+                  or cloudflare_raw.get("common_security_txt_cache_control")
+                  or "public, max-age=86400"
+              ),
+              "common_robots_txt_cache_control": str(
+                  headers.get("common_robots_txt_cache_control")
+                  or cloudflare_raw.get("common_robots_txt_cache_control")
+                  or "public, max-age=86400"
+              ),
+              "common_sitemap_xml_cache_control": str(
+                  headers.get("common_sitemap_xml_cache_control")
+                  or cloudflare_raw.get("common_sitemap_xml_cache_control")
+                  or "public, max-age=86400"
+              ),
+              "common_humans_txt_cache_control": str(
+                  headers.get("common_humans_txt_cache_control")
+                  or cloudflare_raw.get("common_humans_txt_cache_control")
+                  or "public, max-age=86400"
+              ),
+              "headers_custom_rules": str(headers.get("custom_rules") or cloudflare_raw.get("headers_custom_rules") or ""),
+              "headers_replace_existing": headers.get("replace_existing") is True or cloudflare_raw.get("headers_replace_existing") is True,
+          }
+
+          sync_services = [
+              service.strip()
+              for service in as_list(sync_raw.get("services"))
+              if isinstance(service, str) and service.strip()
+          ]
+          sync = {
+              "enabled": bool(sync_services),
+              "services": sync_services,
+              "mode": str(sync_raw.get("mode") or "commit"),
+              "commit_message": str(sync_raw.get("commit_message") or "chore: sync managed files from bos-automation-hub"),
+              "git_user_name": str(sync_raw.get("git_user_name") or "github-actions[bot]"),
+              "git_user_email": str(sync_raw.get("git_user_email") or "41898282+github-actions[bot]@users.noreply.github.com"),
+              "push_retries": as_int(sync_raw.get("push_retries"), 3),
+              "runs_on": str(sync_raw.get("runs_on") or "ubuntu-latest"),
+              "timeout_minutes": as_int(sync_raw.get("timeout_minutes"), 5),
+          }
+
+          compact_cfg = json.dumps(cfg, separators=(",", ":"))
+          compact_cloudflare = json.dumps(cloudflare, separators=(",", ":"))
+          compact_sync = json.dumps(sync, separators=(",", ":"))
+          print("cfg<<__BOS_EOF__")
+          print(compact_cfg)
+          print("__BOS_EOF__")
+          print(f"cloudflare={compact_cloudflare}")
+          print(f"sync={compact_sync}")
+          PY
+
   # ---------------------------------------------------------------------------
   # Stage 0 — Consolidated security scan (opt-in, gating by default).
   # Runs in parallel with `monitor` so the wall-clock impact on the
@@ -1498,10 +1717,10 @@ jobs:
       manifest_dir:               ${{ inputs.cloudflare_manifest_dir }}
       manifest_categories:        ${{ inputs.cloudflare_manifest_categories }}
       manifest_icons_dir:         ${{ inputs.cloudflare_manifest_icons_dir }}
-      generate_redirects:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.generate == true }}
+      generate_redirects:         ${{ inputs.cloudflare_generate_redirects }}
       redirects_custom_rules: |-
-        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.custom_rules || '' }}
-      redirects_replace_existing: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects.replace_existing == true }}
+        ${{ inputs.cloudflare_redirects_custom_rules }}
+      redirects_replace_existing: ${{ inputs.cloudflare_redirects_replace_existing }}
       generate_headers:           ${{ inputs.cloudflare_generate_headers }}
       headers_presets:            ${{ inputs.cloudflare_headers_presets }}
       headers_csp:                ${{ inputs.cloudflare_headers_csp }}
@@ -1522,6 +1741,107 @@ jobs:
       CLOUDFLARE_PAGES_ADMIN_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
+
+  cloudflare-pages-config:
+    name: Cloudflare Pages deploy
+    needs: [parse-config, security_scan]
+    if: >-
+      always()
+      && !cancelled()
+      && inputs.use_launchpad_config
+      && needs.parse-config.result == 'success'
+      && fromJson(needs.parse-config.outputs.cloudflare).enabled == true
+      && (
+        !inputs.security_scan_blocks_release
+        || needs.security_scan.result == 'success'
+        || needs.security_scan.result == 'skipped'
+      )
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
+    with:
+      cloudflare_project_name:    ${{ fromJson(needs.parse-config.outputs.cloudflare).project_name }}
+      deployment_environment:     ${{ fromJson(needs.parse-config.outputs.cloudflare).deployment_environment }}
+      site_url:                   ${{ fromJson(needs.parse-config.outputs.cloudflare).site_url }}
+      public_dir:                 ${{ fromJson(needs.parse-config.outputs.cloudflare).public_dir }}
+      deploy_dir:                 ${{ fromJson(needs.parse-config.outputs.cloudflare).deploy_dir }}
+      clean_deploy_dir:           ${{ fromJson(needs.parse-config.outputs.cloudflare).clean_deploy_dir }}
+      copy_files: |-
+        ${{ fromJson(needs.parse-config.outputs.cloudflare).copy_files }}
+      copy_dirs: |-
+        ${{ fromJson(needs.parse-config.outputs.cloudflare).copy_dirs }}
+      prebuild_command:           ${{ fromJson(needs.parse-config.outputs.cloudflare).prebuild_command }}
+      working_directory:          ${{ fromJson(needs.parse-config.outputs.cloudflare).working_directory }}
+      branch:                     ${{ fromJson(needs.parse-config.outputs.cloudflare).branch }}
+      commit_message:             ${{ fromJson(needs.parse-config.outputs.cloudflare).commit_message }}
+      wrangler_version:           ${{ fromJson(needs.parse-config.outputs.cloudflare).wrangler_version }}
+      extra_wrangler_args:        ${{ fromJson(needs.parse-config.outputs.cloudflare).extra_wrangler_args }}
+      ai_bindings:                ${{ toJson(fromJson(needs.parse-config.outputs.cloudflare).ai_bindings) }}
+      deploy_artifact_name:       ${{ fromJson(needs.parse-config.outputs.cloudflare).deploy_artifact_name }}
+      deploy:                     ${{ fromJson(needs.parse-config.outputs.cloudflare).deploy }}
+      runs_on:                    ${{ fromJson(needs.parse-config.outputs.cloudflare).runs_on }}
+      checkout_fetch_depth:       ${{ fromJson(needs.parse-config.outputs.cloudflare).checkout_fetch_depth }}
+      purge_cache:                ${{ fromJson(needs.parse-config.outputs.cloudflare).purge_cache }}
+      generate_sitemap:           ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_sitemap }}
+      generate_robots:            ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_robots }}
+      generate_security_txt:      ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_security_txt }}
+      security_contact:           ${{ fromJson(needs.parse-config.outputs.cloudflare).security_contact }}
+      generate_manifest:          ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_manifest }}
+      manifest_name:              ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_name }}
+      manifest_short_name:        ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_short_name }}
+      manifest_description:       ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_description }}
+      manifest_orientation:       ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_orientation }}
+      manifest_theme_color:       ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_theme_color }}
+      manifest_background_color:  ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_background_color }}
+      manifest_lang:              ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_lang }}
+      manifest_dir:               ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_dir }}
+      manifest_categories:        ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_categories }}
+      manifest_icons_dir:         ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_icons_dir }}
+      generate_redirects:         ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_redirects }}
+      redirects_custom_rules: |-
+        ${{ fromJson(needs.parse-config.outputs.cloudflare).redirects_custom_rules }}
+      redirects_replace_existing: ${{ fromJson(needs.parse-config.outputs.cloudflare).redirects_replace_existing }}
+      generate_headers:           ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_headers }}
+      headers_presets:            ${{ fromJson(needs.parse-config.outputs.cloudflare).headers_presets }}
+      headers_csp:                ${{ fromJson(needs.parse-config.outputs.cloudflare).headers_csp }}
+      headers_hsts_max_age:       ${{ fromJson(needs.parse-config.outputs.cloudflare).headers_hsts_max_age }}
+      headers_permissions_policy: ${{ fromJson(needs.parse-config.outputs.cloudflare).headers_permissions_policy }}
+      headers_cache_html_control: ${{ fromJson(needs.parse-config.outputs.cloudflare).headers_cache_html_control }}
+      headers_cache_assets_pattern: ${{ fromJson(needs.parse-config.outputs.cloudflare).headers_cache_assets_pattern }}
+      headers_cache_assets_control: ${{ fromJson(needs.parse-config.outputs.cloudflare).headers_cache_assets_control }}
+      generate_common_content_headers: ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_common_content_headers }}
+      common_security_txt_cache_control: ${{ fromJson(needs.parse-config.outputs.cloudflare).common_security_txt_cache_control }}
+      common_robots_txt_cache_control: ${{ fromJson(needs.parse-config.outputs.cloudflare).common_robots_txt_cache_control }}
+      common_sitemap_xml_cache_control: ${{ fromJson(needs.parse-config.outputs.cloudflare).common_sitemap_xml_cache_control }}
+      common_humans_txt_cache_control: ${{ fromJson(needs.parse-config.outputs.cloudflare).common_humans_txt_cache_control }}
+      headers_custom_rules:       ${{ fromJson(needs.parse-config.outputs.cloudflare).headers_custom_rules }}
+      headers_replace_existing:   ${{ fromJson(needs.parse-config.outputs.cloudflare).headers_replace_existing }}
+    secrets:
+      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_PAGES_ADMIN_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
+
+  sync-managed-files:
+    name: Sync managed files
+    needs: [parse-config]
+    if: >-
+      !cancelled()
+      && inputs.sync_managed_files
+      && needs.parse-config.result == 'success'
+      && fromJson(needs.parse-config.outputs.sync).enabled == true
+    permissions:
+      contents: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
+    with:
+      services: ${{ join(fromJson(needs.parse-config.outputs.sync).services, ' ') }}
+      mode: ${{ inputs.sync_mode || fromJson(needs.parse-config.outputs.sync).mode || 'commit' }}
+      commit_message: ${{ fromJson(needs.parse-config.outputs.sync).commit_message }}
+      git_user_name: ${{ fromJson(needs.parse-config.outputs.sync).git_user_name }}
+      git_user_email: ${{ fromJson(needs.parse-config.outputs.sync).git_user_email }}
+      push_retries: ${{ fromJson(needs.parse-config.outputs.sync).push_retries }}
+      runs_on: ${{ fromJson(needs.parse-config.outputs.sync).runs_on }}
+      timeout_minutes: ${{ fromJson(needs.parse-config.outputs.sync).timeout_minutes }}
 
   # ---------------------------------------------------------------------------
   # Stage 4 — Repo About-box sync (opt-in, independent of the deploy path).

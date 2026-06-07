@@ -940,7 +940,7 @@ jobs:
 # under "bos_launchpad_release / bos_launchpad_cf_pages services".
 
 _BOS_LAUNCHPAD_RELEASE_YML = """\
-# Blackout Secure Launchpad — release kicker (hub-managed).
+# Blackout Secure Launchpad — universal kicker (hub-managed).
 #
 # Calls `bos-launchpad-release.yml` in blackoutsecure/bos-automation-hub. Reads
 # per-repo customization from `.bos-launchpad.yaml` at the repo root.
@@ -956,7 +956,7 @@ _BOS_LAUNCHPAD_RELEASE_YML = """\
 #   UPSTREAM_TOKEN (optional — only for private upstream repos)
 name: Blackout Secure Launchpad
 run-name: >-
-  Blackout Secure Launchpad / release / ${{
+  Blackout Secure Launchpad / universal / ${{
     github.event_name == 'workflow_dispatch'
       && (inputs.force_run && 'manual force' || 'manual')
       || github.event_name == 'schedule'
@@ -981,13 +981,19 @@ on:
       - 'scripts/**'
       - '.github/upstream/**'
       - '.bos-launchpad.yaml'
-      - '.github/workflows/bos-launchpad-release.yml'
+      - 'bos-managed-files.yaml'
+      - '.github/workflows/bos-launchpad.yml'
   workflow_dispatch:
     inputs:
       force_run:
         description: 'Force: run pipeline even if upstream unchanged'
         type: boolean
         default: false
+      sync_mode:
+        description: 'Sync mode for integrated managed-files stage'
+        type: choice
+        options: [commit, check]
+        default: commit
 
 # No top-level `concurrency:` — the hub workflow owns serialization.
 # Declaring it on both sides triggers a GHA self-deadlock.
@@ -1131,11 +1137,48 @@ jobs:
 
       # ----- Shared -----
       platforms: ${{ fromJson(needs.parse-config.outputs.cfg).platforms || 'linux/amd64,linux/arm64' }}
+
+      # ----- Universal kicker wiring -----
+      use_launchpad_config: true
+      sync_managed_files: true
+      sync_mode: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_mode || '' }}
+
+      # ----- Optional stages configured from data file -----
+      enable_security_scan:         ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.enable == true }}
+      security_scan_fail_on:        ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.fail_on || 'fail' }}
+      security_scan_blocks_release: ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.blocks_release != false }}
+      security_scan_enable_kit_composite: ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.enable_kit_composite != false }}
+      security_scan_enable_posture:       ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.enable_posture != false }}
+      security_scan_enable_scanners:      ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.enable_scanners != false }}
+      security_scan_enable_upload:        ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.enable_upload != false }}
+      security_scan_codeql_languages:     ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.codeql_languages || '' }}
+      security_scan_codeql_queries:       ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.codeql_queries || 'security-and-quality' }}
+      security_scan_codeql_runs_on:       ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.codeql_runs_on || '' }}
+      security_scan_use_advanced_pat:     ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.use_advanced_pat == true }}
+
+      enable_repo_metadata:          ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.enable == true }}
+      repo_metadata_description:     ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.description || '' }}
+      repo_metadata_homepage:        ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.homepage || '' }}
+      repo_metadata_topics:          ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.topics || '' }}
+      repo_metadata_generate_topics: ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.generate_topics == true }}
+      repo_metadata_topics_fallback: ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.topics_fallback || '' }}
+      repo_metadata_ai_enabled:      ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.ai_enabled != false }}
+      repo_metadata_ai_model:        ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.ai_model || 'openai/gpt-4o-mini' }}
+      repo_metadata_show_releases:   ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.show_releases != false }}
+      repo_metadata_show_deployments: ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.show_deployments == true }}
+      repo_metadata_show_packages:   ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.show_packages == true }}
+      repo_metadata_dry_run:         ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.dry_run == true }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
       BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
       UPSTREAM_TOKEN:     ${{ secrets.UPSTREAM_TOKEN }}
+      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_PAGES_ADMIN_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      scanning_pat:       ${{ secrets.SCANNING_PAT }}
+      REPO_ADMIN_PAT:     ${{ secrets.REPO_ADMIN_PAT }}
 """
 
 
@@ -1566,6 +1609,22 @@ jobs:
       # (sufficient for PS001 only; the wider posture audit needs an
       # admin-reach PAT exposed via org/repo secrets as `SCANNING_PAT`).
       scanning_pat: ${{ secrets.SCANNING_PAT }}
+"""
+
+_BOS_LAUNCHPAD_CONFIG_INIT_YAML = """\
+# .bos-launchpad.yaml — initialized by bos-automation-hub (init-if-missing).
+#
+# This file is repo-owned after creation. The hub never overwrites it.
+# Keep release/deploy/sync/gate configuration here.
+
+sync_files:
+  services:
+    - common
+    - lf_line_endings
+
+# Enable optional stages by adding sections such as `upstream:`, `stages:`,
+# `docker:`, `balena:`, `cloudflare:`, `security_scan:`, `repo_metadata:`,
+# and `gate:`. See the hub README schema reference for full details.
 """
 
 
@@ -2384,14 +2443,19 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     "wranglerignore": {
       ".wranglerignore": _WRANGLERIGNORE_CF_PAGES,
     },
+    "bos_launchpad": {
+      ".github/workflows/bos-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
+    },
+    # Deprecated aliases kept for migration compatibility. They now
+    # resolve to the universal kicker path.
     "bos_launchpad_release": {
-        ".github/workflows/bos-launchpad-release.yml": _BOS_LAUNCHPAD_RELEASE_YML,
+      ".github/workflows/bos-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_cf_pages": {
-        ".github/workflows/bos-launchpad-cf-pages.yml": _BOS_LAUNCHPAD_CF_PAGES_YML,
+      ".github/workflows/bos-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_sync_files": {
-        ".github/workflows/bos-launchpad-sync-files.yml": _BOS_LAUNCHPAD_SYNC_FILES_YML,
+      ".github/workflows/bos-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_gate": {
         ".github/workflows/bos-launchpad-gate.yml": _BOS_LAUNCHPAD_GATE_YML,
@@ -2404,12 +2468,8 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
 # (e.g. both kicker flavors enabled) fails fast with a clear message
 # instead of producing two simultaneously-triggering kicker workflows.
 _SEMANTIC_MUTEX_GROUPS: List[Tuple[str, ...]] = [
-    # Both kicker flavors deliver via the same upstream `bos-launchpad-
-    # release.yml@main` reusable but with different `with:` blocks and
-    # trigger shapes (cron-driven container release vs push-driven static
-    # site). Each writes its own kicker file so the path-collision check
-    # below cannot catch this combo — keep them explicitly paired here.
-    ("bos_launchpad_release", "bos_launchpad_cf_pages"),
+  # No semantic mutex currently needed. Launchpad aliases above map to
+  # the same path and are handled by the per-path collision guard.
 ]
 
 SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
@@ -2455,6 +2515,9 @@ SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
     },
     "codeowners": {
         ".github/CODEOWNERS": _CODEOWNERS_TEMPLATE,
+    },
+    "bos_launchpad_config": {
+      ".bos-launchpad.yaml": _BOS_LAUNCHPAD_CONFIG_INIT_YAML,
     },
 }
 

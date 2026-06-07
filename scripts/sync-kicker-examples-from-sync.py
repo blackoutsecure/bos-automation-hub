@@ -3,19 +3,15 @@
 
 The on-disk snapshots
 
-  * ``examples/bos-launchpad-release.kicker.example.yml``
-  * ``examples/bos-launchpad-cf-pages.kicker.example.yml``
-  * ``examples/bos-launchpad-sync-files.kicker.example.yml``
-  * ``examples/bos-launchpad-gate.kicker.example.yml``
+    * ``examples/bos-launchpad.kicker.example.yml``
+    * ``examples/bos-launchpad-gate.kicker.example.yml``
 
 are read-only reference renders of the kicker workflows that the hub's
 ``sync-managed-files`` action writes into each consumer repo when the
-corresponding ``bos_launchpad_release`` / ``bos_launchpad_cf_pages`` /
-``bos_launchpad_sync_files`` / ``bos_launchpad_gate`` service is enabled.
+corresponding ``bos_launchpad`` / ``bos_launchpad_gate`` service is enabled.
 The canonical source of truth lives in
 ``.github/actions/sync-managed-files/sync.py`` as the Python string
-constants ``_BOS_LAUNCHPAD_RELEASE_YML``, ``_BOS_LAUNCHPAD_CF_PAGES_YML``,
-``_BOS_LAUNCHPAD_SYNC_FILES_YML``, and ``_BOS_LAUNCHPAD_GATE_YML``.
+constants ``_BOS_LAUNCHPAD_RELEASE_YML`` and ``_BOS_LAUNCHPAD_GATE_YML``.
 
 This script keeps the two in sync.
 
@@ -76,21 +72,9 @@ _DISCLAIMER_TEMPLATE = """\
 _CASES = [
     (
         "_BOS_LAUNCHPAD_RELEASE_YML",
-        "bos_launchpad_release",
-        "bos-launchpad-release.yml",
-        EXAMPLES_DIR / "bos-launchpad-release.kicker.example.yml",
-    ),
-    (
-        "_BOS_LAUNCHPAD_CF_PAGES_YML",
-        "bos_launchpad_cf_pages",
-        "bos-launchpad-cf-pages.yml",
-        EXAMPLES_DIR / "bos-launchpad-cf-pages.kicker.example.yml",
-    ),
-    (
-        "_BOS_LAUNCHPAD_SYNC_FILES_YML",
-        "bos_launchpad_sync_files",
-        "bos-launchpad-sync-files.yml",
-        EXAMPLES_DIR / "bos-launchpad-sync-files.kicker.example.yml",
+        "bos_launchpad",
+        "bos-launchpad.yml",
+        EXAMPLES_DIR / "bos-launchpad.kicker.example.yml",
     ),
     (
         "_BOS_LAUNCHPAD_GATE_YML",
