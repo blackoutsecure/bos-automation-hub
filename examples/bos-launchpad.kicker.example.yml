@@ -94,33 +94,9 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert launchpad config to JSON
+      - name: Read launchpad config JSON
         id: read
-        shell: bash
-        run: |
-          set -euo pipefail
-          cfg_file='bos-launchpad-config.json'
-          if [[ ! -f "$cfg_file" ]]; then
-            echo "::error file=$cfg_file::Required config file not found."
-            exit 1
-          fi
-          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-            exit 1
-          fi
-          # Round-trip through python's JSON parser as a sanity check —
-          # catches any yq quirk that produces non-conformant JSON.
-          if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-            echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
-            exit 1
-          fi
-          # Heredoc framing tolerates literal newlines inside string
-          # values even though we asked yq for compact JSON.
-          {
-            echo "cfg<<__BOS_EOF__"
-            echo "$cfg"
-            echo "__BOS_EOF__"
-          } >> "$GITHUB_OUTPUT"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
 
       - name: Summarize launchpad config
         shell: bash

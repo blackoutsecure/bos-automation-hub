@@ -81,33 +81,11 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert launchpad config to JSON
+      - name: Read launchpad config JSON
         id: read
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Launchpad config is OPTIONAL for the gate kicker — every
-          # gate input has a default in `bos-gate.yml`. When the file is
-          # absent we emit `{}` so the downstream `fromJson(...).gate.*
-          # || <default>` expressions flow through cleanly.
-          cfg='{}'
-          if [[ -f bos-launchpad-config.json ]]; then
-            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' bos-launchpad-config.json)"; then
-              echo "::error file=bos-launchpad-config.json::JSON parse error (see preceding python output)."
-              exit 1
-            fi
-          fi
-          if [[ -f bos-launchpad-config.json ]]; then
-            if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-              echo "::error file=bos-launchpad-config.json::Resulting JSON did not parse — invalid config payload."
-              exit 1
-            fi
-          fi
-          {
-            echo "cfg<<__BOS_EOF__"
-            echo "$cfg"
-            echo "__BOS_EOF__"
-          } >> "$GITHUB_OUTPUT"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
+        with:
+          allow_missing: 'true'
 
   gate:
     name: gate

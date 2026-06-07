@@ -1012,33 +1012,9 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert launchpad config to JSON
+      - name: Read launchpad config JSON
         id: read
-        shell: bash
-        run: |
-          set -euo pipefail
-          cfg_file='bos-launchpad-config.json'
-          if [[ ! -f "$cfg_file" ]]; then
-            echo "::error file=$cfg_file::Required config file not found."
-            exit 1
-          fi
-          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-            exit 1
-          fi
-          # Round-trip through python's JSON parser as a sanity check —
-          # catches any yq quirk that produces non-conformant JSON.
-          if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-            echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
-            exit 1
-          fi
-          # Heredoc framing tolerates literal newlines inside string
-          # values even though we asked yq for compact JSON.
-          {
-            echo "cfg<<__BOS_EOF__"
-            echo "$cfg"
-            echo "__BOS_EOF__"
-          } >> "$GITHUB_OUTPUT"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
 
       - name: Summarize launchpad config
         shell: bash
@@ -1299,29 +1275,9 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert launchpad config to JSON
+      - name: Read launchpad config JSON
         id: read
-        shell: bash
-        run: |
-          set -euo pipefail
-          cfg_file='bos-launchpad-config.json'
-          if [[ ! -f "$cfg_file" ]]; then
-            echo "::error file=$cfg_file::Required config file not found."
-            exit 1
-          fi
-          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-            exit 1
-          fi
-          if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-            echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
-            exit 1
-          fi
-          {
-            echo "cfg<<__BOS_EOF__"
-            echo "$cfg"
-            echo "__BOS_EOF__"
-          } >> "$GITHUB_OUTPUT"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
 
   launchpad:
     name: Cloudflare Pages
@@ -1477,24 +1433,15 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert launchpad config to JSON
+      - name: Read launchpad config JSON
         id: read
+        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
+      - name: Validate sync_files.services
         shell: bash
+        env:
+          CFG_JSON: ${{ steps.read.outputs.cfg }}
         run: |
           set -euo pipefail
-          cfg_file='bos-launchpad-config.json'
-          if [[ ! -f "$cfg_file" ]]; then
-            echo "::error file=$cfg_file::Required config file not found."
-            exit 1
-          fi
-          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-            exit 1
-          fi
-          if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-            echo "::error file=$cfg_file::Resulting JSON did not parse — invalid config payload."
-            exit 1
-          fi
           # Sanity-check `sync_files.services` is a non-empty list.
           # The reusable also validates this, but failing here points
           # the operator at the data file instead of the kicker run.
@@ -1503,7 +1450,7 @@ jobs:
           # via f-strings) that shellcheck mis-flags as broken bash
           # expansion. They are correct python literals.
           # shellcheck disable=SC2016
-          if ! echo "$cfg" | python3 -c '
+          if ! echo "$CFG_JSON" | python3 -c '
           import json, sys
           cfg = json.loads(sys.stdin.read())
           sf = (cfg or {}).get("sync_files") or {}
@@ -1518,11 +1465,6 @@ jobs:
           '; then
             exit 1
           fi
-          {
-            echo "cfg<<__BOS_EOF__"
-            echo "$cfg"
-            echo "__BOS_EOF__"
-          } >> "$GITHUB_OUTPUT"
 
   sync:
     name: Sync managed dotfiles
@@ -1617,33 +1559,11 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert launchpad config to JSON
+      - name: Read launchpad config JSON
         id: read
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Launchpad config is OPTIONAL for the gate kicker — every
-          # gate input has a default in `bos-gate.yml`. When the file is
-          # absent we emit `{}` so the downstream `fromJson(...).gate.*
-          # || <default>` expressions flow through cleanly.
-          cfg='{}'
-          if [[ -f bos-launchpad-config.json ]]; then
-            if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' bos-launchpad-config.json)"; then
-              echo "::error file=bos-launchpad-config.json::JSON parse error (see preceding python output)."
-              exit 1
-            fi
-          fi
-          if [[ -f bos-launchpad-config.json ]]; then
-            if ! echo "$cfg" | python3 -c 'import json,sys; json.loads(sys.stdin.read())' >/dev/null; then
-              echo "::error file=bos-launchpad-config.json::Resulting JSON did not parse — invalid config payload."
-              exit 1
-            fi
-          fi
-          {
-            echo "cfg<<__BOS_EOF__"
-            echo "$cfg"
-            echo "__BOS_EOF__"
-          } >> "$GITHUB_OUTPUT"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/read-launchpad-config@main
+        with:
+          allow_missing: 'true'
 
   gate:
     name: gate

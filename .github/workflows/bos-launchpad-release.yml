@@ -1233,29 +1233,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
-      cfg: ${{ steps.read.outputs.cfg }}
-      cloudflare: ${{ steps.read.outputs.cloudflare }}
-      sync: ${{ steps.read.outputs.sync }}
+      cfg: ${{ steps.normalize.outputs.cfg }}
+      cloudflare: ${{ steps.normalize.outputs.cloudflare }}
+      sync: ${{ steps.normalize.outputs.sync }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Convert launchpad config to normalized JSON
+      - name: Read launchpad config JSON
         id: read
+        uses: ./.github/actions/read-launchpad-config
+
+      - name: Normalize launchpad config outputs
+        id: normalize
         shell: bash
+        env:
+          CFG_JSON: ${{ steps.read.outputs.cfg }}
         run: |
           set -euo pipefail
-          cfg_file='bos-launchpad-config.json'
-          if [[ ! -f "$cfg_file" ]]; then
-            echo "::error file=$cfg_file::Required config file not found."
-            exit 1
-          fi
-          if ! cfg="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), separators=(",", ":")))' "$cfg_file")"; then
-            echo "::error file=$cfg_file::JSON parse error (see preceding python output)."
-            exit 1
-          fi
-          CFG_JSON="$cfg" python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           import os
           import sys
@@ -1414,9 +1411,9 @@ jobs:
       - name: Summarize launchpad config
         shell: bash
         env:
-          CFG_JSON: ${{ steps.read.outputs.cfg }}
-          CLOUDFLARE_JSON: ${{ steps.read.outputs.cloudflare }}
-          SYNC_JSON: ${{ steps.read.outputs.sync }}
+          CFG_JSON: ${{ steps.normalize.outputs.cfg }}
+          CLOUDFLARE_JSON: ${{ steps.normalize.outputs.cloudflare }}
+          SYNC_JSON: ${{ steps.normalize.outputs.sync }}
         run: |
           set -euo pipefail
           python3 - <<'PY'
