@@ -1,0 +1,27 @@
+# OS noise
+.DS_Store
+Thumbs.db
+._*
+
+# Editor / IDE noise
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local env files (NEVER commit credentials)
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+
+# TLS / private keys
+.secrets/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets.*

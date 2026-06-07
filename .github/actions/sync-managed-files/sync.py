@@ -11,7 +11,8 @@ Three registries are supported:
   ``<<< bos-automation-hub:<service> <<<`` marker lines using the
   comment syntax of the target file. Used for multi-tenant dotfiles
   (``.gitignore``, ``.dockerignore``, ``.editorconfig``,
-  ``.gitattributes``, ``.github/dependabot.yml``) where multiple
+  ``.gitattributes``, ``.github/dependabot.yml``, ``.wranglerignore``)
+  where multiple
   services contribute distinct blocks to the same file and
   hand-authored content must coexist outside the markers. Files
   listed in ``SECTION_FILE_HEADERS`` are created with a top-level
@@ -22,8 +23,8 @@ Three registries are supported:
   one or more files outright. The hub overwrites the file with the
   canonical content (prefixed by a single-line ``Managed by…`` header
   comment) on every run. Used for shared scripts where the entire file
-  body is authoritative (e.g. ``log-functions.sh``, ``.prettierrc.yaml``,
-  ``.wranglerignore``). No markers; no merging — a file may only be
+  body is authoritative (e.g. ``log-functions.sh``, ``.prettierrc.yaml``).
+  No markers; no merging — a file may only be
   claimed by exactly one whole-file service.
 
 * ``SERVICE_INIT_FILES`` (init-if-missing mode) — each enabled service
@@ -67,7 +68,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 MARKER_NAMESPACE = "bos-automation-hub"
 MARKER_NOTE = (
@@ -162,6 +163,19 @@ yarn-error.log*
 .pnpm-debug.log*
 """
 
+_GITIGNORE_COMMON = _load_managed_template_or_default(
+  "dotfiles/.gitignore.common",
+  _GITIGNORE_COMMON,
+)
+_GITIGNORE_PYTHON = _load_managed_template_or_default(
+  "dotfiles/.gitignore.python",
+  _GITIGNORE_PYTHON,
+)
+_GITIGNORE_NODE = _load_managed_template_or_default(
+  "dotfiles/.gitignore.node",
+  _GITIGNORE_NODE,
+)
+
 # --------------------------------------------------------------------------- #
 
 _DOCKERIGNORE_DOCKER = """\
@@ -233,6 +247,23 @@ yarn-error.log*
 .pnpm-debug.log*
 """
 
+_DOCKERIGNORE_DOCKER = _load_managed_template_or_default(
+  "dotfiles/.dockerignore.common",
+  _DOCKERIGNORE_DOCKER,
+)
+_DOCKERIGNORE_BALENA = _load_managed_template_or_default(
+  "dotfiles/.dockerignore.balena",
+  _DOCKERIGNORE_BALENA,
+)
+_DOCKERIGNORE_PYTHON = _load_managed_template_or_default(
+  "dotfiles/.dockerignore.python",
+  _DOCKERIGNORE_PYTHON,
+)
+_DOCKERIGNORE_NODE = _load_managed_template_or_default(
+  "dotfiles/.dockerignore.node",
+  _DOCKERIGNORE_NODE,
+)
+
 # --------------------------------------------------------------------------- #
 
 _EDITORCONFIG_COMMON = """\
@@ -253,6 +284,11 @@ trim_trailing_whitespace = false
 indent_style = tab
 """
 
+_EDITORCONFIG_COMMON = _load_managed_template_or_default(
+  "dotfiles/.editorconfig",
+  _EDITORCONFIG_COMMON,
+)
+
 # --------------------------------------------------------------------------- #
 
 _GITATTRIBUTES_LF = """\
@@ -268,6 +304,11 @@ _GITATTRIBUTES_LF = """\
 *.ico  binary
 *.pdf  binary
 """
+
+_GITATTRIBUTES_LF = _load_managed_template_or_default(
+  "dotfiles/.gitattributes",
+  _GITATTRIBUTES_LF,
+)
 
 # --------------------------------------------------------------------------- #
 # Whole-file canonical content                                                #
@@ -532,10 +573,74 @@ _WRANGLERIGNORE_CF_PAGES = """\
 
 # Documentation
 README.md
+"""
+
+# Legacy whole-file body kept for one-time migration from the old
+# overwrite mode. If an existing `.wranglerignore` exactly matches this
+# body (plus the old managed header), sync drops it and re-hydrates the
+# file in marker-based section mode.
+_WRANGLERIGNORE_CF_PAGES_LEGACY_V1 = """\
+# Version Control & Development
+.git
+.github
+.gitignore
+
+# IDE & Editor
+.vscode
+
+# Documentation
+README.md
 
 # Config Files
 _headers
 """
+
+_WRANGLERIGNORE_CF_PAGES = _load_managed_template_or_default(
+  "dotfiles/.wranglerignore",
+  _WRANGLERIGNORE_CF_PAGES,
+)
+
+_SHELLCHECKRC_DEFAULT = """\
+# Central ShellCheck defaults for Blackout Secure repositories.
+#
+# Composite action `run:` blocks are executed by GitHub Actions with
+# bash. We keep shellcheck aligned with that runtime.
+shell=bash
+
+# SC2016: GitHub expressions (`${{ ... }}`) in single quotes are
+# intentional in workflow/composite snippets.
+# SC1091: sourced relative helper files are resolved at runtime.
+disable=SC2016,SC1091
+external-sources=true
+"""
+
+_SHELLCHECKRC_DEFAULT = _load_managed_template_or_default(
+    "dotfiles/.shellcheckrc",
+    _SHELLCHECKRC_DEFAULT,
+)
+
+_MARKDOWNLINT_YAML_DEFAULT = """\
+default: true
+
+# Long URLs and code snippets are common in docs-heavy repos.
+MD013: false
+
+MD024:
+  siblings_only: true
+
+# GitHub admonitions and inline HTML are intentionally used.
+MD028: false
+MD033: false
+MD034: false
+
+# Templates/release notes may start at H2.
+MD041: false
+"""
+
+_MARKDOWNLINT_YAML_DEFAULT = _load_managed_template_or_default(
+    "dotfiles/.markdownlint.yaml",
+    _MARKDOWNLINT_YAML_DEFAULT,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -565,7 +670,15 @@ _GHA_SYNC_COMMIT_YML = """\
 #   node              Node.js .gitignore + .dockerignore sections
 #   python            Python .gitignore + .dockerignore sections
 #   lf_line_endings   .gitattributes LF normalization block
-#   wranglerignore    full .wranglerignore for Cloudflare Pages repo hygiene
+#   wranglerignore    managed section in .wranglerignore (default)
+#                     set `dotfiles_mode: override` in bos-managed-files.yaml
+#                     to force whole-file overwrite mode instead
+#                     conflict precedence is controlled by
+#                     `dotfiles_conflict_precedence` (default: central),
+#                     with per-file local overrides via
+#                     `dotfiles_local_precedence_paths`
+#   shellcheckrc      full .shellcheckrc defaults (whole-file)
+#   markdownlint      full .markdownlint.yaml defaults (whole-file)
 #   dependabot_actions  github-actions ecosystem in .github/dependabot.yml
 #   dependabot_npm      npm ecosystem in .github/dependabot.yml
 #   dependabot_pip      pip ecosystem in .github/dependabot.yml
@@ -950,7 +1063,7 @@ _GHA_LINT_SHELL_YML = _load_managed_template_or_default(
 # --------------------------------------------------------------------------- #
 #
 # Two whole-file kicker workflows that write to DISTINCT paths
-# (`.github/workflows/bos-universal-launchpad.yml` for container release,
+# (`.github/workflows/bos-universal-launchpad-kicker.yml` for container release,
 # `.github/workflows/bos-launchpad-cf-pages.yml` for static-site CF
 # Pages) but are still MUTUALLY EXCLUSIVE per consumer repo — enforced
 # at parse time via `_SEMANTIC_MUTEX_GROUPS` because the path-collision
@@ -959,7 +1072,7 @@ _GHA_LINT_SHELL_YML = _load_managed_template_or_default(
 # pipelines on every `main` push.
 #
 # Both kickers delegate to the SAME hub reusable
-# (`bos-universal-launchpad.yml` — the launchpad handles both modes via
+# (`bos-universal-launchpad-kicker.yml` — the launchpad handles both modes via
 # inputs) and read per-repo customization from a consumer-owned
 # `bos-launchpad-config.json` data file at the repo root. The kicker
 # parses that JSON to a job output and the downstream
@@ -1018,7 +1131,7 @@ on:
       - '.github/upstream/**'
       - 'bos-launchpad-config.json'
       - 'bos-managed-files.yaml'
-      - '.github/workflows/bos-universal-launchpad.yml'
+      - '.github/workflows/bos-universal-launchpad-kicker.yml'
   workflow_dispatch:
     inputs:
       force_run:
@@ -1332,7 +1445,7 @@ jobs:
 # Managed-files override: when present, treat this on-disk template as
 # canonical for the universal launchpad kicker body.
 _BOS_LAUNCHPAD_RELEASE_YML = _load_managed_template_or_default(
-  "workflows/bos-universal-launchpad.yml",
+  "workflows/bos-universal-launchpad-kicker.yml",
   _BOS_LAUNCHPAD_RELEASE_YML,
 )
 
@@ -1496,7 +1609,7 @@ _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = (
 )
 
 _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = _load_managed_template_or_default(
-  "workflows/bos-universal-launchpad-caller-reference.yml",
+  "workflows/bos-universal-launchpad-kicker-reference.yml",
   _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
 )
 
@@ -2056,6 +2169,14 @@ _CODEOWNERS_TEMPLATE = """\
 #     maintainers_team: "@blackoutsecure/maintainers"
 #     license_type: apache-2.0
 #     dependabot_target_branch: dev   # optional; for dev/main split repos
+#     dotfiles_mode: managed_section   # or: override
+#     dotfiles_conflict_precedence: central   # or: local
+#     dotfiles_local_precedence_paths: .wranglerignore,.gitignore
+#     dotfiles_sync_strategy: auto   # or: all, explicit
+#     dotfiles_workstream: auto      # or: container,node,python,static_site,action,generic
+#     dotfiles_force_enable_paths: .dockerignore,.shellcheckrc
+#     dotfiles_force_disable_paths: .wranglerignore
+#     dotfiles_prune_disabled: false # true removes hub-managed disabled dotfiles
 #
 # `dependabot_target_branch` adds a `target-branch:` knob to EVERY
 # enabled `dependabot_*` ecosystem block, so Dependabot PRs land on
@@ -2063,6 +2184,22 @@ _CODEOWNERS_TEMPLATE = """\
 # Marketplace Action repos that follow the dev/main split (CI
 # workflows live on `dev`, Marketplace artifact lives on `main`).
 # Leave empty (or omit the key) for the standard same-branch flow.
+#
+# `dotfiles_mode` controls how the `wranglerignore` service writes
+# `.wranglerignore`:
+#   * `managed_section` (default): append/replace only the hub-managed
+#     marker block and preserve all user-owned lines outside markers.
+#   * `override`: write `.wranglerignore` as a whole-file managed asset.
+#
+# `dotfiles_conflict_precedence` controls conflict behavior for
+# managed-section dotfiles (`.gitignore`, `.dockerignore`,
+# `.editorconfig`, `.gitattributes`, `.wranglerignore`):
+#   * `central` (default): central managed lines win on conflict.
+#   * `local`: local repo lines win on conflict.
+#
+# `dotfiles_local_precedence_paths` optionally forces LOCAL precedence
+# for selected dotfiles even when global precedence is `central`.
+# Comma/space-separated list of managed section dotfile paths.
 #
 # Comments (`#` whole-line and inline-after-value) are stripped. Values
 # may be unquoted, double-quoted, or single-quoted. Nesting, lists, and
@@ -2092,6 +2229,32 @@ _DEFAULT_MANAGED_CONFIG: Dict[str, str] = {
     # using the dev/main split publishing pattern where the
     # workflow files live on `dev` and `main` is a curated artifact.
     "dependabot_target_branch": "",
+    # Controls `wranglerignore` behavior:
+    #   managed_section (default): marker-based additive merge.
+    #   override: whole-file overwrite mode.
+    "dotfiles_mode": "managed_section",
+    # Conflict precedence for managed-section dotfiles.
+    #   central (default): central managed lines win.
+    #   local: local repo lines win.
+    "dotfiles_conflict_precedence": "central",
+    # Optional comma/space-separated list of managed section dotfile
+    # paths that should use local precedence regardless of the global
+    # setting above.
+    "dotfiles_local_precedence_paths": "",
+    # Dotfile selection strategy:
+    #   auto (default): infer needed dotfiles from repo signals/workstream.
+    #   all: sync all managed dotfiles.
+    #   explicit: sync only paths listed in dotfiles_force_enable_paths.
+    "dotfiles_sync_strategy": "auto",
+    # Optional workstream hint for dotfile auto-detection.
+    # Supported: auto, container, node, python, static_site, action, generic.
+    "dotfiles_workstream": "auto",
+    # Comma/space-separated managed dotfile paths to force-enable.
+    "dotfiles_force_enable_paths": "",
+    # Comma/space-separated managed dotfile paths to force-disable.
+    "dotfiles_force_disable_paths": "",
+    # When true, disabled dotfiles are cleaned up after the fact.
+    "dotfiles_prune_disabled": "false",
 }
 
 _KNOWN_CONFIG_KEYS = frozenset(_DEFAULT_MANAGED_CONFIG.keys())
@@ -2120,6 +2283,41 @@ _PLACEHOLDER_RE = re.compile(r"\{\{([A-Z_][A-Z0-9_]*)\}\}")
 # pathological that slips through here will fail loudly on the
 # Dependabot side, not silently.
 _DEPENDABOT_BRANCH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{0,99}$")
+_DOTFILES_MODE_VALUES = frozenset({"managed_section", "override"})
+_DOTFILES_CONFLICT_PRECEDENCE_VALUES = frozenset({"central", "local"})
+_DOTFILES_SYNC_STRATEGY_VALUES = frozenset({"auto", "all", "explicit"})
+_DOTFILES_WORKSTREAM_VALUES = frozenset({
+  "auto",
+  "container",
+  "node",
+  "python",
+  "static_site",
+  "action",
+  "generic",
+})
+_MANAGED_SECTION_DOTFILE_PATHS = frozenset({
+  ".gitignore",
+  ".dockerignore",
+  ".editorconfig",
+  ".gitattributes",
+  ".wranglerignore",
+})
+_MANAGED_WHOLE_DOTFILE_PATHS = frozenset({
+  ".shellcheckrc",
+  ".markdownlint.yaml",
+})
+_ALL_MANAGED_DOTFILE_PATHS = frozenset(
+  set(_MANAGED_SECTION_DOTFILE_PATHS) | set(_MANAGED_WHOLE_DOTFILE_PATHS)
+)
+_DOTFILE_SCAN_SKIP_DIRS = frozenset({
+  ".git",
+  "node_modules",
+  ".venv",
+  "venv",
+  "dist",
+  "build",
+  "coverage",
+})
 
 # Flat-YAML line: `key: value` or `key: "value"` or `key: 'value'`.
 # Anchored to allow leading whitespace (tolerated even though flat YAML
@@ -2205,7 +2403,219 @@ def _load_managed_config(root: str) -> Dict[str, str]:
         )
     merged["dependabot_target_branch"] = dep_branch
 
+    # Validate dotfiles_mode eagerly. Keeps wranglerignore behavior
+    # deterministic and fails fast on typos.
+    dotfiles_mode = merged.get("dotfiles_mode", "").strip().lower()
+    if dotfiles_mode and dotfiles_mode not in _DOTFILES_MODE_VALUES:
+        die(
+            f"{MANAGED_FILES_CONFIG_FILENAME}: 'dotfiles_mode' "
+            f"({dotfiles_mode!r}) is invalid. "
+            f"Supported: {', '.join(sorted(_DOTFILES_MODE_VALUES))}."
+        )
+    merged["dotfiles_mode"] = (
+        dotfiles_mode or _DEFAULT_MANAGED_CONFIG["dotfiles_mode"]
+    )
+
+    # Validate dotfiles conflict-precedence settings. Global precedence
+    # defaults to central; per-path overrides are optional and restricted
+    # to managed-section dotfiles.
+    dotfiles_precedence = (
+      merged.get("dotfiles_conflict_precedence", "").strip().lower()
+    )
+    if (
+      dotfiles_precedence
+      and dotfiles_precedence not in _DOTFILES_CONFLICT_PRECEDENCE_VALUES
+    ):
+      die(
+        f"{MANAGED_FILES_CONFIG_FILENAME}: "
+        f"'dotfiles_conflict_precedence' ({dotfiles_precedence!r}) "
+        f"is invalid. Supported: "
+        f"{', '.join(sorted(_DOTFILES_CONFLICT_PRECEDENCE_VALUES))}."
+      )
+    merged["dotfiles_conflict_precedence"] = (
+      dotfiles_precedence
+      or _DEFAULT_MANAGED_CONFIG["dotfiles_conflict_precedence"]
+    )
+
+    dotfiles_local_paths = _parse_dotfiles_path_list(
+        merged.get("dotfiles_local_precedence_paths", "")
+    )
+    invalid_local_paths = sorted(
+        p for p in dotfiles_local_paths if p not in _MANAGED_SECTION_DOTFILE_PATHS
+    )
+    if invalid_local_paths:
+        die(
+            f"{MANAGED_FILES_CONFIG_FILENAME}: "
+            f"'dotfiles_local_precedence_paths' contains unsupported path(s): "
+            f"{', '.join(invalid_local_paths)}. Supported: "
+            f"{', '.join(sorted(_MANAGED_SECTION_DOTFILE_PATHS))}."
+        )
+    merged["dotfiles_local_precedence_paths"] = " ".join(
+        sorted(dotfiles_local_paths)
+    )
+
+    dotfiles_strategy = merged.get("dotfiles_sync_strategy", "").strip().lower()
+    if dotfiles_strategy and dotfiles_strategy not in _DOTFILES_SYNC_STRATEGY_VALUES:
+      die(
+        f"{MANAGED_FILES_CONFIG_FILENAME}: 'dotfiles_sync_strategy' "
+        f"({dotfiles_strategy!r}) is invalid. Supported: "
+        f"{', '.join(sorted(_DOTFILES_SYNC_STRATEGY_VALUES))}."
+      )
+    merged["dotfiles_sync_strategy"] = (
+      dotfiles_strategy or _DEFAULT_MANAGED_CONFIG["dotfiles_sync_strategy"]
+    )
+
+    dotfiles_workstream = merged.get("dotfiles_workstream", "").strip().lower()
+    if dotfiles_workstream and dotfiles_workstream not in _DOTFILES_WORKSTREAM_VALUES:
+      die(
+        f"{MANAGED_FILES_CONFIG_FILENAME}: 'dotfiles_workstream' "
+        f"({dotfiles_workstream!r}) is invalid. Supported: "
+        f"{', '.join(sorted(_DOTFILES_WORKSTREAM_VALUES))}."
+      )
+    merged["dotfiles_workstream"] = (
+      dotfiles_workstream or _DEFAULT_MANAGED_CONFIG["dotfiles_workstream"]
+    )
+
+    force_enable_paths = _parse_dotfiles_path_list(
+      merged.get("dotfiles_force_enable_paths", "")
+    )
+    invalid_force_enable = sorted(
+      p for p in force_enable_paths if p not in _ALL_MANAGED_DOTFILE_PATHS
+    )
+    if invalid_force_enable:
+      die(
+        f"{MANAGED_FILES_CONFIG_FILENAME}: "
+        f"'dotfiles_force_enable_paths' contains unsupported path(s): "
+        f"{', '.join(invalid_force_enable)}. Supported: "
+        f"{', '.join(sorted(_ALL_MANAGED_DOTFILE_PATHS))}."
+      )
+    merged["dotfiles_force_enable_paths"] = " ".join(sorted(force_enable_paths))
+
+    force_disable_paths = _parse_dotfiles_path_list(
+      merged.get("dotfiles_force_disable_paths", "")
+    )
+    invalid_force_disable = sorted(
+      p for p in force_disable_paths if p not in _ALL_MANAGED_DOTFILE_PATHS
+    )
+    if invalid_force_disable:
+      die(
+        f"{MANAGED_FILES_CONFIG_FILENAME}: "
+        f"'dotfiles_force_disable_paths' contains unsupported path(s): "
+        f"{', '.join(invalid_force_disable)}. Supported: "
+        f"{', '.join(sorted(_ALL_MANAGED_DOTFILE_PATHS))}."
+      )
+    merged["dotfiles_force_disable_paths"] = " ".join(sorted(force_disable_paths))
+
+    merged["dotfiles_prune_disabled"] = _parse_boolish_config(
+      merged.get("dotfiles_prune_disabled", ""),
+      "dotfiles_prune_disabled",
+    )
+
     return merged
+
+
+def _parse_dotfiles_path_list(raw: str) -> List[str]:
+    """Parse comma/space-separated dotfile paths from config."""
+    if not raw:
+        return []
+    parts = [p.strip() for p in re.split(r"[\s,]+", raw) if p.strip()]
+    seen = set()
+    out: List[str] = []
+    for p in parts:
+        if p in seen:
+            continue
+        seen.add(p)
+        out.append(p)
+    return out
+
+
+def _parse_boolish_config(value: str, field_name: str) -> str:
+    """Normalize config booleans to literal `true`/`false` strings."""
+    raw = (value or "").strip().lower()
+    if raw in {"", "false", "0", "no", "off"}:
+        return "false"
+    if raw in {"true", "1", "yes", "on"}:
+        return "true"
+    die(
+        f"{MANAGED_FILES_CONFIG_FILENAME}: '{field_name}' ({value!r}) "
+        f"must be one of: true/false, 1/0, yes/no, on/off."
+    )
+
+
+def _repo_has_any_path(root: str, rel_paths: List[str]) -> bool:
+    """Return True when any relative path exists under repo root."""
+    for rel in rel_paths:
+        if os.path.exists(os.path.join(root, rel)):
+            return True
+    return False
+
+
+def _repo_has_any_extension(root: str, suffixes: Tuple[str, ...]) -> bool:
+    """Cheap recursive file-extension probe with common large-dir skips."""
+    for current_root, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in _DOTFILE_SCAN_SKIP_DIRS]
+        for name in files:
+            if name.lower().endswith(suffixes):
+                return True
+    return False
+
+
+def _auto_needed_dotfiles(root: str, config: Dict[str, str]) -> Set[str]:
+    """Infer needed managed dotfiles from repo/workstream signals."""
+    needed: Set[str] = {".gitignore", ".editorconfig", ".gitattributes"}
+
+    workstream = (config.get("dotfiles_workstream") or "auto").strip().lower()
+    if workstream == "container":
+        needed.update({".dockerignore", ".shellcheckrc", ".markdownlint.yaml"})
+    elif workstream == "static_site":
+        needed.update({".wranglerignore", ".markdownlint.yaml"})
+    elif workstream == "action":
+        needed.update({".shellcheckrc", ".markdownlint.yaml"})
+    elif workstream in {"node", "python"}:
+        needed.add(".markdownlint.yaml")
+
+    if _repo_has_any_path(
+        root,
+        ["Dockerfile", "docker-compose.yml", "docker-compose.yaml", "balena.yml"],
+    ):
+        needed.add(".dockerignore")
+
+    if _repo_has_any_path(root, ["wrangler.toml", "_redirects"]):
+        needed.add(".wranglerignore")
+
+    if _repo_has_any_extension(root, (".sh",)):
+        needed.add(".shellcheckrc")
+
+    if _repo_has_any_extension(root, (".md", ".markdown")):
+        needed.add(".markdownlint.yaml")
+
+    return needed
+
+
+def _enabled_dotfile_paths(root: str, config: Dict[str, str]) -> Set[str]:
+    """Resolve final enabled managed-dotfile path set for this repo."""
+    strategy = (config.get("dotfiles_sync_strategy") or "auto").strip().lower()
+    force_enable = set(
+        _parse_dotfiles_path_list(config.get("dotfiles_force_enable_paths", ""))
+    )
+    force_disable = set(
+        _parse_dotfiles_path_list(config.get("dotfiles_force_disable_paths", ""))
+    )
+
+    if strategy == "all":
+        enabled = set(_ALL_MANAGED_DOTFILE_PATHS)
+    elif strategy == "explicit":
+        enabled = set(force_enable)
+    else:
+        enabled = _auto_needed_dotfiles(root, config)
+
+    enabled.update(force_enable)
+    enabled.difference_update(force_disable)
+    return enabled
+
+
+def _is_true(value: str) -> bool:
+    return (value or "").strip().lower() == "true"
 
 
 def _resolve_repo_full_name(root: str) -> str:
@@ -2411,6 +2821,9 @@ SERVICE_BLOCKS: Dict[str, Dict[str, str]] = {
     "dependabot_pip": {
         ".github/dependabot.yml": _DEPENDABOT_PIP,
     },
+    "wranglerignore": {
+        ".wranglerignore": _WRANGLERIGNORE_CF_PAGES,
+    },
 }
 
 # For fresh-file creation in section mode: any file listed here is
@@ -2430,21 +2843,27 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     "logger": {
         "root/usr/local/bin/log-functions.sh": _LOG_FUNCTIONS_SH,
     },
+  "shellcheckrc": {
+    ".shellcheckrc": _SHELLCHECKRC_DEFAULT,
+  },
+  "markdownlint": {
+    ".markdownlint.yaml": _MARKDOWNLINT_YAML_DEFAULT,
+  },
     "prettier": {
         ".prettierrc.yaml": _PRETTIERRC_YAML,
     },
-    "wranglerignore": {
-      ".wranglerignore": _WRANGLERIGNORE_CF_PAGES,
-    },
+    # Universal launchpad services stay active:
+    # - `bos_launchpad` syncs the per-repo universal kicker
+    # - `bos_launchpad_reference` keeps the hub's canonical reference
     "bos_launchpad": {
-      ".github/workflows/bos-universal-launchpad.yml": _BOS_LAUNCHPAD_RELEASE_YML,
+      ".github/workflows/bos-universal-launchpad-kicker.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_reference": {
-      ".github/workflows/bos-universal-launchpad-caller-reference.yml": _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
+      ".github/workflows/bos-universal-launchpad-kicker-reference.yml": _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
     },
-    "bos_launchpad_gate": {
-        ".github/workflows/bos-launchpad-gate.yml": _BOS_LAUNCHPAD_GATE_YML,
-    },
+    # Deprecated/no-op: retained as known service name so existing
+    # consumer configs don't hard-fail parse-time.
+    "bos_launchpad_gate": {},
 }
 
 # Service pairs (or larger groups) that are semantically mutually
@@ -2837,6 +3256,110 @@ def _escape_replacement(s: str) -> str:
     return s.replace("\\", "\\\\")
 
 
+def _wranglerignore_mode(config: Dict[str, str]) -> str:
+    """Return the effective wranglerignore write mode."""
+    mode = (config.get("dotfiles_mode") or "").strip().lower()
+    return mode if mode in _DOTFILES_MODE_VALUES else "managed_section"
+
+
+def _strip_all_managed_blocks(content: str) -> str:
+    """Drop all hub-managed marker blocks from `content`."""
+    pattern = re.compile(
+        rf"^#\s*>>>\s*{re.escape(MARKER_NAMESPACE)}:[^\n]+>>>.*?\n"
+        rf"(?:.*?\n)*?"
+        rf"^#\s*<<<\s*{re.escape(MARKER_NAMESPACE)}:[^\n]+<<<.*?\n",
+        re.MULTILINE,
+    )
+    return pattern.sub("", content)
+
+
+def _dotfile_patterns(text: str) -> set:
+    """Extract meaningful non-comment patterns from a dotfile text."""
+    out = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        out.add(line)
+    return out
+
+
+def _resolve_dotfile_conflicts_ai_like(
+    body: str, local_unmanaged_content: str, precedence: str
+) -> str:
+    """AI-style conflict resolver for managed section bodies.
+
+    Conflict model: a pattern `x` conflicts with `!x` and vice versa.
+    With local precedence, conflicting managed lines are dropped so local
+    intent wins. With central precedence, managed body is unchanged.
+    """
+    if precedence != "local":
+      return body
+    local = _dotfile_patterns(local_unmanaged_content)
+    if not local:
+      return body
+
+    kept: List[str] = []
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            kept.append(raw)
+            continue
+        opposite = line[1:] if line.startswith("!") else f"!{line}"
+        if opposite in local:
+            continue
+        kept.append(raw)
+
+    result = "\n".join(kept).strip("\n")
+    return (result + "\n") if result else ""
+
+
+def _dotfile_precedence_for_path(rel_path: str, config: Dict[str, str]) -> str:
+    """Resolve precedence for a specific managed section dotfile path."""
+    local_paths = set(
+        _parse_dotfiles_path_list(
+            config.get("dotfiles_local_precedence_paths", "")
+        )
+    )
+    if rel_path in local_paths:
+        return "local"
+    global_pref = (config.get("dotfiles_conflict_precedence") or "").strip().lower()
+    return (
+        global_pref
+        if global_pref in _DOTFILES_CONFLICT_PRECEDENCE_VALUES
+        else _DEFAULT_MANAGED_CONFIG["dotfiles_conflict_precedence"]
+    )
+
+
+def _strip_legacy_whole_file_header(content: str, service: str) -> str:
+    """Strip the old whole-file managed header for `service` when present.
+
+    Used for one-time migration from historical whole-file wranglerignore
+    output to marker-based section mode.
+    """
+    header = _WHOLE_FILE_HEADER_TEMPLATE.format(service=service)
+    if content.startswith(header):
+        return content[len(header):]
+    return content
+
+
+def _migrate_legacy_wranglerignore_if_needed(content: str) -> str:
+    """Normalize legacy whole-file wranglerignore output to additive mode.
+
+    If the file still contains the old auto-generated full body (with
+    `_headers`) from the previous whole-file service implementation,
+    treat it as hub-owned legacy content and start from an empty file so
+    section mode can re-hydrate a marker-managed block cleanly.
+    """
+    candidate = _strip_legacy_whole_file_header(content, "wranglerignore")
+    normalized = candidate.strip()
+    legacy = _WRANGLERIGNORE_CF_PAGES_LEGACY_V1.strip()
+    current = _WRANGLERIGNORE_CF_PAGES.strip()
+    if normalized == legacy or normalized == current:
+        return ""
+    return content
+
+
 class FileChange:
     """Pending change for a single file. Hand-rolled (not a dataclass)
     so this module loads cleanly under Python 3.9 when imported via
@@ -2844,15 +3367,20 @@ class FileChange:
     `dataclasses` interaction with PEP 563 string annotations breaks
     there. GitHub runners use Python 3.10+ where either form works."""
 
-    __slots__ = ("path", "before", "after")
+    __slots__ = ("path", "before", "after", "delete")
 
-    def __init__(self, path: str, before: str, after: str) -> None:
+    def __init__(
+        self, path: str, before: str, after: str, delete: bool = False
+    ) -> None:
         self.path = path
         self.before = before
         self.after = after
+        self.delete = delete
 
     @property
     def changed(self) -> bool:
+        if self.delete:
+            return bool(self.before)
         return self.before != self.after
 
     def __eq__(self, other: object) -> bool:
@@ -2862,10 +3390,14 @@ class FileChange:
             self.path == other.path
             and self.before == other.before
             and self.after == other.after
+            and self.delete == other.delete
         )
 
     def __repr__(self) -> str:
-        return f"FileChange(path={self.path!r}, changed={self.changed})"
+        return (
+            f"FileChange(path={self.path!r}, changed={self.changed}, "
+            f"delete={self.delete})"
+        )
 
 
 def _emit_composite_license_notice(root: str, services: List[str]) -> None:
@@ -2967,6 +3499,11 @@ def sync_files(
     _needs_config = any(
         svc in _TEMPLATED_INIT_SERVICES
         or svc in _TEMPLATED_SECTION_SERVICES
+        or svc == "wranglerignore"
+      or (
+        svc in SERVICE_BLOCKS
+        and any(p in _MANAGED_SECTION_DOTFILE_PATHS for p in SERVICE_BLOCKS[svc])
+      )
         for svc in services
     )
     if _needs_config:
@@ -2998,6 +3535,12 @@ def sync_files(
         _managed_config = dict(_DEFAULT_MANAGED_CONFIG)
         _placeholder_subs = {}
 
+    _wrangler_mode = _wranglerignore_mode(_managed_config)
+    _enabled_dotfiles = _enabled_dotfile_paths(root, _managed_config)
+    _prune_disabled_dotfiles = _is_true(
+      _managed_config.get("dotfiles_prune_disabled", "false")
+    )
+
     # ------- Section mode -------
     # Group by file so we apply all enabled services for a file in one pass
     # and write only once. Preserve service input order so the order of
@@ -3011,6 +3554,8 @@ def sync_files(
 
     all_changes: List[FileChange] = []
     for rel_path, svcs in file_to_services.items():
+      if rel_path in _ALL_MANAGED_DOTFILE_PATHS and rel_path not in _enabled_dotfiles:
+        continue
         abs_path = os.path.join(root, rel_path)
         if os.path.exists(abs_path):
             with open(abs_path, "r", encoding="utf-8") as fh:
@@ -3027,7 +3572,15 @@ def sync_files(
             after = SECTION_FILE_HEADERS[rel_path]
         else:
             after = before
+        if rel_path == ".wranglerignore" and _wrangler_mode == "managed_section":
+            after = _migrate_legacy_wranglerignore_if_needed(after)
+        local_unmanaged_content = _strip_all_managed_blocks(after)
+        dotfile_precedence = _dotfile_precedence_for_path(rel_path, _managed_config)
         for svc in svcs:
+            if svc == "wranglerignore" and _wrangler_mode == "override":
+                # In override mode this service is handled by the whole-file
+                # pass below, so skip marker writes here.
+                continue
             body = SERVICE_BLOCKS[svc][rel_path]
             # Templated section services (currently the `dependabot_*`
             # trio) carry `{{KEY}}` placeholders rendered from
@@ -3041,6 +3594,12 @@ def sync_files(
             # `{{KEY}}` they reference is in `_KNOWN_PLACEHOLDERS`.
             if svc in _TEMPLATED_SECTION_SERVICES:
                 body = _render_placeholders(body, _placeholder_subs)
+            if rel_path in _MANAGED_SECTION_DOTFILE_PATHS:
+                body = _resolve_dotfile_conflicts_ai_like(
+                    body,
+                    local_unmanaged_content,
+                    dotfile_precedence,
+                )
             after = apply_block(after, svc, body)
         all_changes.append(FileChange(path=rel_path, before=before, after=after))
 
@@ -3049,6 +3608,8 @@ def sync_files(
         if svc not in SERVICE_FILES:
             continue
         for rel_path, body in SERVICE_FILES[svc].items():
+            if rel_path in _ALL_MANAGED_DOTFILE_PATHS and rel_path not in _enabled_dotfiles:
+                continue
             abs_path = os.path.join(root, rel_path)
             if os.path.exists(abs_path):
                 with open(abs_path, "r", encoding="utf-8") as fh:
@@ -3059,6 +3620,78 @@ def sync_files(
             all_changes.append(
                 FileChange(path=rel_path, before=before, after=after)
             )
+
+    # ------- Dotfile override mode -------
+    # `wranglerignore` defaults to section mode. If `dotfiles_mode` is
+    # explicitly set to `override`, write the full file body instead.
+    if (
+        "wranglerignore" in services
+        and _wrangler_mode == "override"
+        and ".wranglerignore" in _enabled_dotfiles
+    ):
+        rel_path = ".wranglerignore"
+        abs_path = os.path.join(root, rel_path)
+        if os.path.exists(abs_path):
+            with open(abs_path, "r", encoding="utf-8") as fh:
+                before = fh.read()
+        else:
+            before = ""
+        after = _make_whole_file("wranglerignore", _WRANGLERIGNORE_CF_PAGES)
+        all_changes.append(FileChange(path=rel_path, before=before, after=after))
+
+    # ------- Optional cleanup for disabled dotfiles -------
+    if _prune_disabled_dotfiles:
+        section_service_paths: Dict[str, List[str]] = {}
+        for svc, svc_files in SERVICE_BLOCKS.items():
+            for p in svc_files:
+                if p in _ALL_MANAGED_DOTFILE_PATHS:
+                    section_service_paths.setdefault(p, []).append(svc)
+
+        whole_dotfile_bodies: Dict[str, str] = {}
+        for svc, svc_files in SERVICE_FILES.items():
+            for p, body in svc_files.items():
+                if p in _MANAGED_WHOLE_DOTFILE_PATHS:
+                    whole_dotfile_bodies[p] = _make_whole_file(svc, body)
+
+        for rel_path in sorted(_ALL_MANAGED_DOTFILE_PATHS):
+            if rel_path in _enabled_dotfiles:
+                continue
+            abs_path = os.path.join(root, rel_path)
+            if not os.path.exists(abs_path):
+                continue
+            with open(abs_path, "r", encoding="utf-8") as fh:
+                before = fh.read()
+
+            if rel_path in _MANAGED_SECTION_DOTFILE_PATHS:
+                after = before
+                for svc in section_service_paths.get(rel_path, []):
+                    after = block_pattern(svc).sub("", after)
+                if after == before:
+                    continue
+                if after.strip() == "":
+                    all_changes.append(
+                        FileChange(path=rel_path, before=before, after="", delete=True)
+                    )
+                else:
+                    sys.stderr.write(
+                        f"::notice file={rel_path}::Dotfile sync disabled for this path; "
+                        f"preserving local unmanaged content and removing only hub-managed blocks. "
+                        f"Add path to dotfiles_force_enable_paths to keep hub management.\\n"
+                    )
+                    all_changes.append(FileChange(path=rel_path, before=before, after=after))
+                continue
+
+            canonical = whole_dotfile_bodies.get(rel_path)
+            if canonical and before == canonical:
+                all_changes.append(
+                    FileChange(path=rel_path, before=before, after="", delete=True)
+                )
+            else:
+                sys.stderr.write(
+                    f"::notice file={rel_path}::Dotfile sync disabled for this path, but file appears "
+                    f"locally owned/customized. Preserving file (no delete). Add path to "
+                    f"dotfiles_force_enable_paths if hub should manage it.\\n"
+                )
 
     # ------- Init-if-missing mode -------
     # If the file exists, before == after (no change). If missing,
@@ -3129,15 +3762,16 @@ def sync_files(
 
 
 def render_diff(change: FileChange) -> str:
-    label = change.path if change.before else f"{change.path} (new file)"
-    diff = difflib.unified_diff(
-        change.before.splitlines(keepends=True),
-        change.after.splitlines(keepends=True),
-        fromfile=f"a/{label}",
-        tofile=f"b/{change.path}",
-        n=2,
-    )
-    return "".join(diff)
+  label = change.path if change.before else f"{change.path} (new file)"
+  to_file = "/dev/null" if change.delete else f"b/{change.path}"
+  diff = difflib.unified_diff(
+    change.before.splitlines(keepends=True),
+    ([] if change.delete else change.after.splitlines(keepends=True)),
+    fromfile=f"a/{label}",
+    tofile=to_file,
+    n=2,
+  )
+  return "".join(diff)
 
 
 def write_outputs(pairs: List[Tuple[str, str]]) -> None:
@@ -3191,6 +3825,10 @@ def main() -> int:
     if not dry_run:
         for change in drift:
             abs_path = os.path.join(root, change.path)
+            if change.delete:
+                if os.path.exists(abs_path):
+                    os.remove(abs_path)
+                continue
             os.makedirs(os.path.dirname(abs_path) or ".", exist_ok=True)
             with open(abs_path, "w", encoding="utf-8") as fh:
                 fh.write(change.after)
@@ -3210,4 +3848,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+  sys.exit(main())

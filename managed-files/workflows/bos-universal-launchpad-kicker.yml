@@ -1,10 +1,3 @@
-# Reference caller template for copy/paste into consumer repositories.
-# Source of truth: .github/actions/sync-managed-files/sync.py (`_BOS_LAUNCHPAD_RELEASE_YML`).
-#
-# Safety guard:
-# This workflow is intentionally stored in bos-automation-hub as a
-# reference and is disabled in this repository.
-
 # Blackout Secure Launchpad — universal kicker (hub-managed).
 # Customize via `bos-launchpad-config.json` (repo root), not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
@@ -13,7 +6,7 @@
 # Required secrets:
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
 #   UPSTREAM_TOKEN (optional — only for private upstream repos)
-name: Blackout Secure Launchpad (caller reference)
+name: Blackout Secure Launchpad (kicker)
 run-name: >-
   Blackout Secure Launchpad / universal / ${{
     github.event_name == 'workflow_dispatch'
@@ -37,7 +30,7 @@ on:
       - '.github/upstream/**'
       - 'bos-launchpad-config.json'
       - 'bos-managed-files.yaml'
-      - '.github/workflows/bos-universal-launchpad.yml'
+      - '.github/workflows/bos-universal-launchpad-kicker.yml'
   workflow_dispatch:
     inputs:
       force_run:
@@ -55,9 +48,11 @@ permissions:
 
 jobs:
   parse-config:
-    if: ${{ github.repository != 'blackoutsecure/bos-automation-hub' }}
     name: Parse launchpad config
-    runs-on: ubuntu-latest
+    # Resolve runner from org-shared `vars.DEFAULT_RUNNER` when set,
+    # supporting both bare label and JSON-array formats. Fallback to
+    # `ubuntu-latest` if the variable is not defined in the consumer.
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 2
     outputs:
       cfg: ${{ steps.read.outputs.cfg }}

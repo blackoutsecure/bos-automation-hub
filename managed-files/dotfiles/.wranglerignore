@@ -1,0 +1,10 @@
+# Version Control & Development
+.git
+.github
+.gitignore
+
+# IDE & Editor
+.vscode
+
+# Documentation
+README.md

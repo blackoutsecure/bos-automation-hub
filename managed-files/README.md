@@ -47,8 +47,8 @@ extra disk read per file at sync time, which is negligible.
 > constants as source of truth. Active workflow-template overrides are now
 > enabled for files under `managed-files/workflows/`:
 >
-> * `bos-universal-launchpad.yml`
-> * `bos-universal-launchpad-caller-reference.yml`
+> * `bos-universal-launchpad-kicker.yml`
+> * `bos-universal-launchpad-kicker-reference.yml`
 > * `bos-launchpad-gate.yml`
 > * `bos-launchpad-sync-files.yml`
 > * `sync-managed-files.yml`
@@ -56,6 +56,21 @@ extra disk read per file at sync time, which is negligible.
 > * `lint.node.yml`
 > * `lint.python.yml`
 > * `lint.shell.yml`
+>
+> Active dotfile-template override is also enabled for:
+>
+> * `dotfiles/.wranglerignore`
+> * `dotfiles/.gitignore.common`
+> * `dotfiles/.gitignore.node`
+> * `dotfiles/.gitignore.python`
+> * `dotfiles/.gitattributes`
+> * `dotfiles/.editorconfig`
+> * `dotfiles/.dockerignore.common`
+> * `dotfiles/.dockerignore.balena`
+> * `dotfiles/.dockerignore.node`
+> * `dotfiles/.dockerignore.python`
+> * `dotfiles/.shellcheckrc`
+> * `dotfiles/.markdownlint.yaml`
 >
 > When these files exist, `sync.py` reads them and overrides the inline
 > default bodies.
@@ -113,6 +128,19 @@ managed-files/
 ├── codeowners.txt                         ← from _CODEOWNERS_TEMPLATE
 ├── prettierrc.yaml                        ← from _PRETTIERRC_YAML
 ├── log-functions.sh                       ← from _LOG_FUNCTIONS_SH
+├── dotfiles/
+│   └── .wranglerignore                    ← from _WRANGLERIGNORE_CF_PAGES
+│   └── .gitignore.common                  ← from _GITIGNORE_COMMON
+│   └── .gitignore.node                    ← from _GITIGNORE_NODE
+│   └── .gitignore.python                  ← from _GITIGNORE_PYTHON
+│   └── .gitattributes                     ← from _GITATTRIBUTES_LF
+│   └── .editorconfig                      ← from _EDITORCONFIG_COMMON
+│   └── .dockerignore.common               ← from _DOCKERIGNORE_DOCKER
+│   └── .dockerignore.balena               ← from _DOCKERIGNORE_BALENA
+│   └── .dockerignore.node                 ← from _DOCKERIGNORE_NODE
+│   └── .dockerignore.python               ← from _DOCKERIGNORE_PYTHON
+│   └── .shellcheckrc                      ← from _SHELLCHECKRC_DEFAULT
+│   └── .markdownlint.yaml                 ← from _MARKDOWNLINT_YAML_DEFAULT
 └── workflows/
     ├── bos-launchpad-release.yml          ← from _BOS_LAUNCHPAD_RELEASE_YML
     ├── bos-launchpad-cf-pages.yml         ← from _BOS_LAUNCHPAD_CF_PAGES_YML
