@@ -642,6 +642,23 @@ _MARKDOWNLINT_YAML_DEFAULT = _load_managed_template_or_default(
     _MARKDOWNLINT_YAML_DEFAULT,
 )
 
+_HUMANS_TXT = """\
+/* TEAM */
+Site: Blackout Secure
+Contact: info@blackoutsecure.app
+
+/* SITE */
+Standards: HTML5, CSS3, WCAG 2.1 AA, JSON-LD
+Hosting: GitHub Pages or Cloudflare Pages
+
+/* LAST UPDATED */
+"""
+
+_HUMANS_TXT = _load_managed_template_or_default(
+    "dotfiles/humans.txt",
+    _HUMANS_TXT,
+)
+
 
 # --------------------------------------------------------------------------- #
 # Init-if-missing whole files — starter templates                             #
@@ -2771,6 +2788,9 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
   },
   "markdownlint": {
     ".markdownlint.yaml": _MARKDOWNLINT_YAML_DEFAULT,
+  },
+  "humans": {
+    "humans.txt": _HUMANS_TXT,
   },
     "prettier": {
         ".prettierrc.yaml": _PRETTIERRC_YAML,
