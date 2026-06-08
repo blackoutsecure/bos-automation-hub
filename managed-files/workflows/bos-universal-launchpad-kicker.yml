@@ -190,4 +190,4 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
       scanning_pat:       ${{ secrets.SCANNING_PAT }}
-      REPO_ADMIN_PAT:     ${{ secrets.REPO_ADMIN_PAT }}
+      REPO_ADMIN_PAT:     ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT }}
