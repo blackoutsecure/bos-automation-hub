@@ -568,6 +568,11 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: boolean
         default: false
+      cloudflare_generate_humans_txt:
+        description: 'Generate `/humans.txt` dynamically before deploy.'
+        required: false
+        type: boolean
+        default: false
       cloudflare_security_contact:
         description: '`Contact:` value written to `/.well-known/security.txt`. Required when `cloudflare_generate_security_txt: true`.'
         required: false
@@ -1540,6 +1545,7 @@ jobs:
       generate_sitemap:           ${{ inputs.cloudflare_generate_sitemap }}
       generate_robots:            ${{ inputs.cloudflare_generate_robots }}
       generate_security_txt:      ${{ inputs.cloudflare_generate_security_txt }}
+      generate_humans_txt:        ${{ inputs.cloudflare_generate_humans_txt }}
       security_contact:           ${{ inputs.cloudflare_security_contact }}
       generate_manifest:          ${{ inputs.cloudflare_generate_manifest }}
       manifest_name:              ${{ inputs.cloudflare_manifest_name }}
@@ -1620,6 +1626,7 @@ jobs:
       generate_sitemap:           ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_sitemap }}
       generate_robots:            ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_robots }}
       generate_security_txt:      ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_security_txt }}
+      generate_humans_txt:        ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_humans_txt }}
       security_contact:           ${{ fromJson(needs.parse-config.outputs.cloudflare).security_contact }}
       generate_manifest:          ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_manifest }}
       manifest_name:              ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_name }}
