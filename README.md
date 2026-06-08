@@ -1938,7 +1938,7 @@ in [`sync.py`](.github/actions/sync-managed-files/sync.py):
   created with a top-level scaffold (`version: 2\nupdates:\n`) when
   they don't already exist; existing files are left alone.
 
-* **Whole-file mode** (used by the `logger`, `prettier`,
+* **Whole-file mode** (used by the `logger`, `prettier`, `humans`,
   `bos_launchpad`, `bos_launchpad_sync_files`, and
   `bos_launchpad_gate` services) —
   the target file is overwritten outright with the canonical body,
@@ -1985,6 +1985,7 @@ services are **not** removed — they're simply ignored on this run.
 | `wranglerignore`       | section          | `.wranglerignore`                                | Cloudflare Pages hygiene block in marker-based managed section mode (preserves user lines outside markers). By default does **not** ignore `_headers`. Set `dotfiles_mode: override` in `bos-managed-files.yaml` to force whole-file overwrite behavior. |
 | `shellcheckrc`         | whole-file       | `.shellcheckrc`                                  | Central ShellCheck defaults for repos with shell scripting. Sets `shell=bash`, enables external sources, and disables known GitHub Actions false positives (`SC2016`, `SC1091`). |
 | `markdownlint`         | whole-file       | `.markdownlint.yaml`                             | Central markdownlint defaults tuned for docs-heavy repos: `MD013` off, `MD024.siblings_only`, `MD028/MD033/MD034/MD041` off. |
+| `humans`               | whole-file       | `humans.txt`                                     | Canonical humans.txt file for web projects. Identifies the team and tools. Managed by the hub — consumers may customize after the initial sync if they add per-repo details (GitHub uses humans.txt for team discovery; see [humanstxt.org](https://humanstxt.org/)). |
 | `prettier`             | whole-file       | `.prettierrc.yaml`                               | Canonical Prettier config (semi, single-quote, trailing-comma, 100-char width, LF). YAML-flavored so the file can carry the "Managed by" header comment. |
 | `logger`               | whole-file       | `root/usr/local/bin/log-functions.sh`            | Canonical shared logging library for s6-overlay init / svc scripts. Emits `<RFC3339 UTC> <tag>[<level>]: <msg>`. Supports both `log_info "x"` (function-per-level, `SVC_NAME`) and `log info "x"` (generic dispatcher, `LOG_TAG`) APIs so existing consumers keep working unchanged. Includes `LOG_LEVEL` gating, `log_kv`, and `log_pipe_cmd`. |
 | `bos_launchpad` | whole-file | `.github/workflows/bos-launchpad.yml` | Hub-managed **universal** kicker for release/deploy/sync orchestration. Calls `bos-launchpad-release.yml@main` on a 6-hour cron + `main` push (paths-filtered) + `workflow_dispatch`, sets `use_launchpad_config: true`, and enables integrated sync via `sync_managed_files: true`. Reads per-repo customization from `.bos-launchpad.yaml` at the repo root (`upstream`, `stages`, `docker`, `balena`, `release`, `cloudflare`, `sync_files`, optional `security_scan` and `repo_metadata` blocks). |
