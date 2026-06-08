@@ -92,7 +92,11 @@ runs:
         FAIL_ON_DRIFT: ${{ inputs.fail_on_drift }}
       run: |
         set -euo pipefail
-        die() { echo "ERROR: $*" >&2; exit 1; }
+        die() {
+          echo "::error title=sync-managed-files::$*" >&2
+          echo "ERROR: $*" >&2
+          exit 1
+        }
 
         case "${DRY_RUN}" in
           true|false) ;;
