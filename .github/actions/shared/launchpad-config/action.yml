@@ -115,6 +115,7 @@ runs:
             "generate_sitemap": cloudflare_raw.get("generate_sitemap") is True,
             "generate_robots": cloudflare_raw.get("generate_robots") is True,
             "generate_security_txt": cloudflare_raw.get("generate_security_txt") is True,
+            "generate_humans_txt": cloudflare_raw.get("generate_humans_txt") is True,
             "security_contact": str(cloudflare_raw.get("security_contact") or ""),
             "generate_manifest": cloudflare_raw.get("generate_manifest") is True,
             "manifest_name": str(cloudflare_raw.get("manifest_name") or ""),
