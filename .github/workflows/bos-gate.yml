@@ -179,7 +179,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run kit lint composite
         uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@v0.1.2  # TODO: pin to SHA via Dependabot
         with:
@@ -195,7 +195,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run kit baseline check
         uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@v0.1.2  # TODO: pin to SHA via Dependabot
         with:
@@ -216,8 +216,8 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4  # TODO: pin to SHA via Dependabot
+      - uses: actions/checkout@v6
+      - uses: actions/dependency-review-action@v5  # TODO: pin to SHA via Dependabot
         with:
           fail-on-severity: high
           comment-summary-in-pr: on-failure
@@ -236,7 +236,7 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Run bos-code-scanning-kit
         uses: blackoutsecure/bos-code-scanning-kit@v1  # TODO: pin to SHA via Dependabot
         with:
@@ -265,7 +265,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # Need full history so the composite can diff against base.
           fetch-depth: 0
@@ -285,7 +285,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Validate README header
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/check-readme-header@main  # TODO: pin to SHA after next hub release
         with:

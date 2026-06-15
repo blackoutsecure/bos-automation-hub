@@ -230,7 +230,7 @@ jobs:
     steps:
       - if: inputs.codeql_languages == 'auto'
         name: Checkout (sparse — workflows only)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
           sparse-checkout: .github/workflows
@@ -332,7 +332,7 @@ jobs:
       outcome: ${{ steps.kit.outputs.outcome }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - id: kit
@@ -367,7 +367,7 @@ jobs:
         language: ${{ fromJSON(needs.resolve-codeql-languages.outputs.languages || '[]') }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - name: Initialize CodeQL

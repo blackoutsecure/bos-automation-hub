@@ -128,7 +128,7 @@ jobs:
       # Local-path `uses: ./...` requires the calling workflow to
       # have checked out the repo first. The shared composite is
       # tiny and pure-bash, so no extra setup is needed.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - uses: ./.github/actions/shared/preflight-runner-config
@@ -145,7 +145,7 @@ jobs:
     outputs:
       tag_name: ${{ steps.compute.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           # Need full tag history to find the latest vX.Y.Z.
           ref: dev
@@ -244,7 +244,7 @@ jobs:
             echo "kind=github_token" >> "${GITHUB_OUTPUT}"
             echo "Using GITHUB_TOKEN for push + tag. Ensure main's branch protection allows GitHub Actions to push."
           fi
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           # Check out dev (the source). Worktree below materializes main.
           ref: dev
