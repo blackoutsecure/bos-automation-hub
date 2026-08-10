@@ -282,7 +282,6 @@ jobs:
           fi
 
           DENYLIST=(
-            .github/workflows/bos-gate.yml
             .github/workflows/sync-self.yml
             .github/workflows/release-hub.yml
             .editorconfig
