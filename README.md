@@ -64,7 +64,8 @@ which owns Marketplace validation, stable-branch guarding, and promotion.
 ## Universal sync
 
 [`sync-managed-files.yml`](.github/workflows/sync-managed-files.yml) is the
-lightweight managed-file runtime. Its managed caller is
+single config-aware managed-file backend. It also handles this hub's local
+schedule, config-change, and manual events. Its consumer front door is
 [`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml).
 It runs independently on config changes, schedule, or manual dispatch and
 never traverses the release, security, or Marketplace workflows.
@@ -153,8 +154,12 @@ reusable workflow defaults.
 ## Managed files
 
 [`sync-managed-files.yml`](.github/workflows/sync-managed-files.yml) exposes
-the sync engine as a reusable workflow. Canonical on-disk templates live under
-[`managed-files/`](managed-files/); the service registry in
+one reusable orchestration backend. It resolves explicit caller inputs when
+provided and otherwise reads the `sync_files` block from
+[`bos-launchpad-config.json`](bos-launchpad-config.json). The
+[`sync-managed-files`](.github/actions/sync-managed-files/action.yml) composite
+action remains the file-mutation engine. Canonical on-disk templates live
+under [`managed-files/`](managed-files/); the service registry in
 [`sync.py`](.github/actions/sync-managed-files/sync.py) is authoritative.
 
 Service ownership modes:
@@ -193,11 +198,9 @@ security, and Marketplace workflows.
   `bos_universal_sync` without duplicate sync execution;
 - repositories without delivery still use the same `bos_universal_sync`
   caller;
-- this hub uses
-  [`sync-managed-config.yml`](.github/workflows/sync-managed-config.yml), which
-  reads its service list and commit settings from
-  [`bos-launchpad-config.json`](bos-launchpad-config.json) while executing local
-  actions for pre-promotion dogfooding.
+- this hub runs the same
+  [`sync-managed-files.yml`](.github/workflows/sync-managed-files.yml) backend
+  directly from its own events, so there is no second orchestration workflow.
 
 Removing every consumer workflow would require a separate organization-wide
 GitHub App or PAT-backed controller with write access to all repositories. That

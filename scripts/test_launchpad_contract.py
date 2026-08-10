@@ -135,7 +135,8 @@ def main() -> None:
     assert "github.event.repository.default_branch" in managed_sync_caller
     assert "branches: [main]" not in managed_sync_caller
     assert managed_sync_caller.count("sync-managed-files.yml@main") == 1
-    assert "fromJson(needs.parse-config.outputs.sync).enabled == true" in managed_sync_caller
+    assert "parse-config:" not in managed_sync_caller
+    assert "launchpad-config@main" not in managed_sync_caller
     assert "bos-launchpad-config.json" in managed_sync_caller
     assert "bos-managed-files.yaml" in managed_sync_caller
     assert ".github/workflows/bos-universal-sync-kicker.yml" not in managed_sync_caller
@@ -290,7 +291,6 @@ def main() -> None:
         "lint.yml",
         "openwrt-readsb-wiedehopf-bump.yml",
         "release-hub.yml",
-        "sync-managed-config.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -337,13 +337,19 @@ def main() -> None:
         refs = re.findall(r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)", managed_caller)
         assert refs and set(refs) == {"main"}, refs
 
-    sync_config = (ROOT / ".github/workflows/sync-managed-config.yml").read_text()
+    sync_backend = (ROOT / ".github/workflows/sync-managed-files.yml").read_text()
     hub_config = json.loads((ROOT / "bos-launchpad-config.json").read_text())
     assert hub_config["sync_files"]["services"] == ["common", "lf_line_endings"]
-    assert "join(fromJson(needs.parse-config.outputs.sync).services" in sync_config
-    assert "uses: ./.github/actions/sync-managed-files" in sync_config
-    assert "uses: ./.github/actions/shared/commit-and-push" in sync_config
-    assert "bos-automation-hub/.github/workflows/sync-managed-files.yml@main" not in sync_config
+    assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
+    assert "  workflow_call:" in sync_backend
+    assert "  schedule:" in sync_backend
+    assert "  workflow_dispatch:" in sync_backend
+    assert "actions/shared/launchpad-config@main" in sync_backend
+    assert "actions/sync-managed-files@main" in sync_backend
+    assert "actions/shared/commit-and-push@main" in sync_backend
+    assert managed_sync_caller.count("sync-managed-files.yml@main") == 1
+    assert "launchpad-config@main" not in managed_sync_caller
+    assert "parse-config:" not in managed_sync_caller
 
     assert_markdown_links_exist(ROOT / "README.md")
     assert_markdown_links_exist(ROOT / "managed-files/README.md")

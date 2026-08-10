@@ -23,9 +23,10 @@ so the files in this directory are the normal authoring and review surface.
   owns Marketplace validation, trusted stable-branch guarding, name checks,
   and manual promotion/releases.
 - [`bos-universal-sync-kicker.yml`](workflows/bos-universal-sync-kicker.yml)
-  is the independent scheduled/manual managed-file caller. It reads the
-  `sync_files` block and calls the lightweight sync reusable directly, so
-  repository maintenance never starts the delivery workflow.
+  is the independent scheduled/manual managed-file caller. It contains only
+  event routing and calls the config-aware sync backend, which reads the
+  `sync_files` block. Repository maintenance never starts the delivery
+  workflow.
 
 These workflows are whole-file managed. Consumer repositories must not edit
 them directly.
