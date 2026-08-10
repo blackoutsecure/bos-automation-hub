@@ -33,7 +33,8 @@ inputs:
       Section: `common`, `docker`, `balena`, `node`, `python`,
       `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
       `dependabot_pip`. Whole-file: `logger`, `prettier`,
-      `bos_launchpad`, `bos_launchpad_reference`,
+      `bos_launchpad`, `bos_launchpad_reference` (hub-only copy/paste
+      reference under `managed-files/examples/`),
       `bos_launchpad_sync_files`, `bos_launchpad_gate`.
       Init-if-missing: `gha_sync_drift_check`,
       `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most

@@ -48,13 +48,18 @@ extra disk read per file at sync time, which is negligible.
 > enabled for files under `managed-files/workflows/`:
 >
 > * `bos-universal-launchpad-kicker.yml`
-> * `bos-universal-launchpad-kicker-reference.yml`
 > * `bos-launchpad-gate.yml`
 > * `bos-launchpad-sync-files.yml`
 > * `sync-drift-check.yml`
 > * `lint.node.yml`
 > * `lint.python.yml`
 > * `lint.shell.yml`
+>
+> The `bos_launchpad_reference` service derives its hub-only copy/paste
+> example from the universal launchpad template and writes it under
+> `managed-files/examples/`. It intentionally does not target
+> `.github/workflows/`, because GitHub's default Actions token cannot create
+> or update workflow files during self-sync.
 >
 > Active dotfile-template override is also enabled for:
 >

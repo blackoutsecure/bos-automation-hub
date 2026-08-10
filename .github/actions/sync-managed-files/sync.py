@@ -1525,9 +1525,11 @@ _BOS_LAUNCHPAD_SYNC_FILES_YML = _load_managed_template_or_default(
 )
 
 
-# Canonical copy/paste caller reference kept in the hub workflows folder.
+# Canonical copy/paste caller reference kept with the hub's managed examples.
 # It is derived from the same launchpad template the hub syncs into
-# consumers, with a repository guard so it never executes in the hub.
+# consumers, with a repository guard as defense in depth if copied back into
+# the hub. Keeping it outside `.github/workflows` also lets self-sync update it
+# with the default GITHUB_TOKEN, which cannot create or modify workflow files.
 _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = (
   "# Reference caller template for copy/paste into consumer repositories.\n"
   "# Source of truth: .github/actions/sync-managed-files/sync.py"
@@ -2799,7 +2801,7 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
       ".github/workflows/bos-universal-launchpad-kicker.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
     "bos_launchpad_reference": {
-      ".github/workflows/bos-universal-launchpad-kicker-reference.yml": _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
+      "managed-files/examples/bos-universal-launchpad-kicker-reference.yml": _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
     },
     "bos_launchpad_gate": {
       ".github/workflows/bos-launchpad-gate.yml": _BOS_LAUNCHPAD_GATE_YML,
