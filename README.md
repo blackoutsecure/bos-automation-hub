@@ -90,7 +90,11 @@ mutate branches; Marketplace promotion deliberately removes disallowed files;
 hub promotion must publish reusable workflows that Marketplace promotion
 forbids. Their common publication stage is already consolidated in
 [`github-release.yml`](.github/workflows/github-release.yml), while runner
-validation and release-context logic live in shared actions.
+validation, release-tag resolution, and release-context logic live in shared
+actions. Hub and Marketplace promotion both use
+[`resolve-release-tag`](.github/actions/shared/resolve-release-tag/action.yml),
+with distinct first-release defaults (`v0.0.1` for the hub and `v0.1.0` for a
+Marketplace action).
 
 The Universal Launchpad retains a release-blocking scan. Scheduled and manual
 releases need a fresh assessment even when no PR triggered the universal
@@ -306,10 +310,10 @@ contract does not belong in Universal:
 ## Shared actions
 
 Reusable implementation components live under
-[` .github/actions/`](.github/actions/) and include release-context resolution,
-Docker tag, build-argument, and manifest handling, Docker Scout scanning,
-Balena rendering and publishing, Cloudflare project/zone helpers, config
-normalization, and safe commit/push behavior.
+[`.github/actions/`](.github/actions/) and include release-context and release-tag
+resolution, Docker tag, build-argument, and manifest handling, Docker Scout
+scanning, Balena rendering and publishing, Cloudflare project/zone helpers,
+config normalization, and safe commit/push behavior.
 
 Workflows should reuse these composites when behavior crosses more than one
 workflow. Workflow-specific orchestration remains in the owning workflow.

@@ -150,69 +150,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - id: compute
-        env:
-          INPUT_TAG_NAME: ${{ inputs.tag_name }}
-          INPUT_BUMP:     ${{ inputs.bump }}
-        run: |
-          set -euo pipefail
-
-          TAG="$(printf '%s' "${INPUT_TAG_NAME}" | tr -d '[:space:]')"
-          BUMP="${INPUT_BUMP:-none}"
-
-          if [ -z "${TAG}" ] && [ "${BUMP}" = "none" ]; then
-            echo "::error::Either tag_name or bump (patch/minor/major) must be provided."
-            exit 1
-          fi
-
-          if [ -n "${TAG}" ]; then
-            BUMP="none"
-            echo "Using explicit tag_name: ${TAG}"
-          else
-            git fetch --tags --quiet || true
-            LATEST="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' \
-              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-              | sort -V \
-              | tail -n1 || true)"
-            if [ -z "${LATEST}" ]; then
-              LATEST="v0.0.0"
-              echo "No prior tags; seeding from v0.0.0."
-            else
-              echo "Latest tag: ${LATEST}"
-            fi
-            VERSION="${LATEST#v}"
-            MAJOR="${VERSION%%.*}"
-            REST="${VERSION#*.}"
-            MINOR="${REST%%.*}"
-            PATCH="${REST#*.}"
-            case "${BUMP}" in
-              patch) PATCH=$((PATCH + 1)) ;;
-              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-              *)     echo "::error::Unknown bump mode '${BUMP}'."; exit 1 ;;
-            esac
-            TAG="v${MAJOR}.${MINOR}.${PATCH}"
-            echo "Computed tag (bump=${BUMP}): ${TAG}"
-          fi
-
-          # SemVer hard-validate (matches the kit's promote composite).
-          if ! [[ "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]]; then
-            echo "::error::Tag '${TAG}' is not SemVer (vX.Y.Z[-suffix])."
-            exit 1
-          fi
-          if git rev-parse --verify --quiet "refs/tags/${TAG}" >/dev/null; then
-            echo "::error::Tag ${TAG} already exists. Pick a fresh tag."
-            exit 1
-          fi
-
-          echo "tag_name=${TAG}" >> "${GITHUB_OUTPUT}"
-          {
-            echo "## Tag resolution"
-            echo ""
-            echo "| Field    | Value |"
-            echo "|----------|-------|"
-            echo "| tag_name | \`${TAG}\` |"
-            echo "| bump     | \`${BUMP}\` |"
-          } >> "${GITHUB_STEP_SUMMARY}"
+        uses: ./.github/actions/shared/resolve-release-tag
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          bump: ${{ inputs.bump }}
+          first_tag: v0.0.1
 
   promote:
     name: Promote default branch → main (runtime allowlist)

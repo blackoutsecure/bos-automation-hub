@@ -267,6 +267,11 @@ def main() -> None:
     assert "release-promote.yml@main" in marketplace_kicker
     assert "release-promote.yml" not in artifact_release
     assert ".github/workflows/release.yml@main" not in marketplace_promote
+    assert marketplace_promote.count(
+        "uses: blackoutsecure/bos-automation-hub/"
+        ".github/actions/shared/resolve-release-tag@main"
+    ) == 1
+    assert "LATEST=\"$(git tag --list" not in marketplace_promote
     publisher_call = (
         "uses: blackoutsecure/bos-automation-hub/"
         ".github/workflows/github-release.yml@main"
@@ -303,6 +308,10 @@ def main() -> None:
     assert "refs/heads/dev" not in release_hub
     assert "release-promote.yml@main" not in release_hub
     assert "uses: ./.github/workflows/github-release.yml" in release_hub
+    assert release_hub.count(
+        "uses: ./.github/actions/shared/resolve-release-tag"
+    ) == 1
+    assert "LATEST=\"$(git tag --list" not in release_hub
 
     balena_block = (
         ROOT / ".github/workflows/balena-block-publish.yml"
