@@ -161,16 +161,13 @@ jobs:
           TAG="$(printf '%s' "${INPUT_TAG_NAME}" | tr -d '[:space:]')"
           BUMP="${INPUT_BUMP:-none}"
 
-          if [ -n "${TAG}" ] && [ "${BUMP}" != "none" ]; then
-            echo "::error::Provide EITHER tag_name OR bump, not both (got tag_name='${TAG}' bump='${BUMP}')."
-            exit 1
-          fi
           if [ -z "${TAG}" ] && [ "${BUMP}" = "none" ]; then
             echo "::error::Either tag_name or bump (patch/minor/major) must be provided."
             exit 1
           fi
 
           if [ -n "${TAG}" ]; then
+            BUMP="none"
             echo "Using explicit tag_name: ${TAG}"
           else
             git fetch --tags --quiet || true
@@ -276,7 +273,6 @@ jobs:
           echo "target parent: ${TARGET_PARENT:-(none; main does not exist)}"
           echo "tag:           ${TAG_NAME}"
           echo "source_sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "target_sha=${TARGET_PARENT}" >> "${GITHUB_OUTPUT}"
 
           MAJOR_TAG=""
           if [ "${UPDATE_MAJOR_TAG}" = "true" ]; then
@@ -284,6 +280,18 @@ jobs:
             MAJOR_TAG="$(printf '%s' "${TAG_NAME}" | sed -E 's/^(v[0-9]+)\..*/\1/')"
             echo "floating major tag: ${MAJOR_TAG}"
           fi
+
+          DENYLIST=(
+            .github/workflows/bos-gate.yml
+            .github/workflows/sync-self.yml
+            .github/workflows/release-hub.yml
+            .editorconfig
+            .yamllint.yml
+            actionlint
+            linux
+            macos
+            scripts
+          )
 
           # --- Materialize the curated `main` tree in a worktree --------
           # Same general shape as bos-marketplace-kit's promote composite
@@ -315,18 +323,15 @@ jobs:
             # `--ignore-unmatch` tolerates entries not present on dev
             # (so removing a file from dev doesn't break the next
             # promote).
-            git rm -rf --quiet --ignore-unmatch -- \
-              .github/workflows/hub-gate.yml \
-              .github/workflows/sync-self.yml \
-              .github/workflows/release-hub.yml \
-              .editorconfig \
-              .yamllint.yml \
-              actionlint \
-              linux \
-              macos \
-              scripts \
-              || true
+            git rm -rf --quiet --ignore-unmatch -- "${DENYLIST[@]}" || true
             git add -A
+
+            DENIED_PATHS="$(git ls-files -- "${DENYLIST[@]}" || true)"
+            if [ -n "${DENIED_PATHS}" ]; then
+              echo "::error::Curated main tree still contains denied paths:"
+              printf '%s\n' "${DENIED_PATHS}"
+              exit 1
+            fi
           )
 
           git config user.name  'github-actions[bot]'
@@ -344,6 +349,7 @@ jobs:
           # so the GitHub Release still publishes.
           if ( cd "${WORKTREE_DIR}" && git diff --cached --quiet ); then
             TARGET_SHA="$( cd "${WORKTREE_DIR}" && git rev-parse HEAD )"
+            echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
             echo "::notice::Curated tree already matches main (${TARGET_SHA}); tag-only promote."
             echo "promoted=false" >> "${GITHUB_OUTPUT}"
 
@@ -386,6 +392,7 @@ jobs:
           if [ "${DRY_RUN}" = "true" ]; then
             echo "::notice::dry_run=true — staged diff (not committing):"
             ( cd "${WORKTREE_DIR}" && git diff --cached --stat )
+            echo "target_sha=${TARGET_PARENT}" >> "${GITHUB_OUTPUT}"
             echo "promoted=false" >> "${GITHUB_OUTPUT}"
             {
               echo "## Promote (dry run)"
@@ -415,6 +422,7 @@ jobs:
               "refs/tags/${TAG_NAME}"
           )
           TARGET_SHA="$( cd "${WORKTREE_DIR}" && git rev-parse HEAD )"
+          echo "target_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
           echo "promoted=true" >> "${GITHUB_OUTPUT}"
 
           if [ -n "${MAJOR_TAG}" ]; then

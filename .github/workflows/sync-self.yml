@@ -14,22 +14,6 @@ on:
   schedule:
     - cron: '11 14 * * 1'   # Monday 14:11 UTC — stagger off :00
   workflow_dispatch:
-  push:
-    # Self-sync is anchored to the promoted canonical branch.
-    branches: [main]
-    paths:
-      - '.github/workflows/sync-self.yml'
-      - '.github/workflows/sync-managed-files.yml'
-      # When the canonical blocks themselves change, re-sync immediately
-      # so the hub's own dotfiles never lag behind the content it ships.
-      - '.github/actions/sync-managed-files/sync.py'
-      # Re-sync when managed-file source templates change in known
-      # canonical template folders.
-      - 'managed-files/README.md'
-      - 'managed-files/community-health/**'
-      - 'managed-files/github-meta/**'
-      - 'managed-files/org-profile/**'
-      - 'managed-files/workflows/**'
 
 permissions:
   contents: read
