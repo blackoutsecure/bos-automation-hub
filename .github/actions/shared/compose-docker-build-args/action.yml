@@ -1,0 +1,99 @@
+# Shared by release matrix builds and PR Scout builds.
+name: Compose Docker build arguments
+description: Merge version, OCI metadata, and caller-provided Docker build arguments.
+
+inputs:
+  image_version:
+    description: Value paired with version_build_arg when that argument name is set.
+    required: false
+    default: ''
+  version_build_arg:
+    description: Optional Docker build argument name that receives image_version.
+    required: false
+    default: ''
+  inject_oci:
+    description: Add BUILD_DATE, VCS_REF, and VCS_URL arguments.
+    required: false
+    default: 'true'
+  build_date:
+    description: OCI build timestamp used when inject_oci is true.
+    required: false
+    default: ''
+  vcs_ref:
+    description: OCI source revision used when inject_oci is true.
+    required: false
+    default: ''
+  vcs_url:
+    description: OCI source URL used when inject_oci is true.
+    required: false
+    default: ''
+  user_build_args:
+    description: Optional newline-separated caller build arguments appended last.
+    required: false
+    default: ''
+
+outputs:
+  build_args:
+    description: Newline-separated arguments for docker/build-push-action.
+    value: ${{ steps.compose.outputs.build_args }}
+
+runs:
+  using: composite
+  steps:
+    - id: compose
+      shell: bash
+      env:
+        IMAGE_VERSION: ${{ inputs.image_version }}
+        VERSION_BUILD_ARG: ${{ inputs.version_build_arg }}
+        INJECT_OCI: ${{ inputs.inject_oci }}
+        BUILD_DATE: ${{ inputs.build_date }}
+        VCS_REF: ${{ inputs.vcs_ref }}
+        VCS_URL: ${{ inputs.vcs_url }}
+        USER_BUILD_ARGS: ${{ inputs.user_build_args }}
+      run: |
+        set -euo pipefail
+        die() { echo "ERROR: $*" >&2; exit 1; }
+
+        case "${INJECT_OCI}" in
+          true|false) ;;
+          *) die "inject_oci must be 'true' or 'false' (got '${INJECT_OCI}')" ;;
+        esac
+
+        if [ -n "${VERSION_BUILD_ARG}" ]; then
+          [[ "${VERSION_BUILD_ARG}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+            || die "version_build_arg must be a valid Docker ARG name"
+          [ -n "${IMAGE_VERSION}" ] \
+            || die "image_version is required when version_build_arg is set"
+        fi
+
+        if [ "${INJECT_OCI}" = "true" ]; then
+          [ -n "${BUILD_DATE}" ] || die "build_date is required when inject_oci is true"
+          [ -n "${VCS_REF}" ] || die "vcs_ref is required when inject_oci is true"
+          [ -n "${VCS_URL}" ] || die "vcs_url is required when inject_oci is true"
+        fi
+
+        build_args=""
+        append() {
+          if [ -n "${build_args}" ]; then
+            build_args+=$'\n'
+          fi
+          build_args+="$1"
+        }
+
+        [ -n "${VERSION_BUILD_ARG}" ] && append "${VERSION_BUILD_ARG}=${IMAGE_VERSION}"
+        if [ "${INJECT_OCI}" = "true" ]; then
+          append "BUILD_DATE=${BUILD_DATE}"
+          append "VCS_REF=${VCS_REF}"
+          append "VCS_URL=${VCS_URL}"
+        fi
+        [ -n "${USER_BUILD_ARGS}" ] && append "${USER_BUILD_ARGS}"
+
+        delimiter="bos_build_args_${RANDOM}_${RANDOM}"
+        while grep -Fxq "${delimiter}" <<< "${build_args}"; do
+          delimiter="bos_build_args_${RANDOM}_${RANDOM}"
+        done
+        {
+          echo "build_args<<${delimiter}"
+          printf '%s\n' "${build_args}"
+          echo "${delimiter}"
+        } >> "${GITHUB_OUTPUT}"

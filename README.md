@@ -307,9 +307,9 @@ contract does not belong in Universal:
 
 Reusable implementation components live under
 [` .github/actions/`](.github/actions/) and include release-context resolution,
-Docker tag and manifest handling, Docker Scout scanning, Balena rendering and
-publishing, Cloudflare project/zone helpers, config normalization, and safe
-commit/push behavior.
+Docker tag, build-argument, and manifest handling, Docker Scout scanning,
+Balena rendering and publishing, Cloudflare project/zone helpers, config
+normalization, and safe commit/push behavior.
 
 Workflows should reuse these composites when behavior crosses more than one
 workflow. Workflow-specific orchestration remains in the owning workflow.

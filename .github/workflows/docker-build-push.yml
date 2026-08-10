@@ -632,24 +632,15 @@ jobs:
 
       - name: Compose build args
         id: args
-        env:
-          USER_BUILD_ARGS: ${{ inputs.build_args }}
-          VERSION_BUILD_ARG: ${{ inputs.version_build_arg }}
-          INJECT_OCI: ${{ inputs.inject_oci_build_args }}
-          VCS_URL: ${{ github.server_url }}/${{ github.repository }}
-        run: |
-          set -euo pipefail
-          {
-            echo "build_args<<__EOF__"
-            [ -n "${VERSION_BUILD_ARG}" ] && echo "${VERSION_BUILD_ARG}=${IMAGE_VERSION}"
-            if [ "${INJECT_OCI}" = "true" ]; then
-              echo "BUILD_DATE=${BUILD_DATE}"
-              echo "VCS_REF=${GITHUB_SHA}"
-              echo "VCS_URL=${VCS_URL}"
-            fi
-            [ -n "${USER_BUILD_ARGS}" ] && printf '%s\n' "${USER_BUILD_ARGS}"
-            echo "__EOF__"
-          } >> "${GITHUB_OUTPUT}"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/compose-docker-build-args@main
+        with:
+          image_version: ${{ env.IMAGE_VERSION }}
+          version_build_arg: ${{ inputs.version_build_arg }}
+          inject_oci: ${{ inputs.inject_oci_build_args }}
+          build_date: ${{ env.BUILD_DATE }}
+          vcs_ref: ${{ github.sha }}
+          vcs_url: ${{ github.server_url }}/${{ github.repository }}
+          user_build_args: ${{ inputs.build_args }}
 
       - name: Resolve platform
         id: platform
@@ -991,26 +982,15 @@ jobs:
 
       - name: Compose build args
         id: args
-        env:
-          USER_BUILD_ARGS: ${{ inputs.build_args }}
-          VERSION_BUILD_ARG: ${{ inputs.version_build_arg }}
-          INJECT_OCI: ${{ inputs.inject_oci_build_args }}
-          IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
-          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
-          VCS_URL: ${{ github.server_url }}/${{ github.repository }}
-        run: |
-          set -euo pipefail
-          {
-            echo "build_args<<__EOF__"
-            [ -n "${VERSION_BUILD_ARG}" ] && echo "${VERSION_BUILD_ARG}=${IMAGE_VERSION}"
-            if [ "${INJECT_OCI}" = "true" ]; then
-              echo "BUILD_DATE=${BUILD_DATE}"
-              echo "VCS_REF=${GITHUB_SHA}"
-              echo "VCS_URL=${VCS_URL}"
-            fi
-            [ -n "${USER_BUILD_ARGS}" ] && printf '%s\n' "${USER_BUILD_ARGS}"
-            echo "__EOF__"
-          } >> "${GITHUB_OUTPUT}"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/compose-docker-build-args@main
+        with:
+          image_version: ${{ needs.setup.outputs.image_version }}
+          version_build_arg: ${{ inputs.version_build_arg }}
+          inject_oci: ${{ inputs.inject_oci_build_args }}
+          build_date: ${{ needs.setup.outputs.build_date }}
+          vcs_ref: ${{ github.sha }}
+          vcs_url: ${{ github.server_url }}/${{ github.repository }}
+          user_build_args: ${{ inputs.build_args }}
 
       - name: Build amd64 and load locally
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0

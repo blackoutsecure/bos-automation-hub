@@ -328,6 +328,16 @@ def main() -> None:
     assert "sync-balena-yml:" in balena_block
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in balena_fleet
 
+    docker_workflow = (
+        ROOT / ".github/workflows/docker-build-push.yml"
+    ).read_text()
+    compose_build_args = (
+        "uses: blackoutsecure/bos-automation-hub/"
+        ".github/actions/shared/compose-docker-build-args@main"
+    )
+    assert docker_workflow.count(compose_build_args) == 2
+    assert "echo \"build_args<<__EOF__\"" not in docker_workflow
+
     for managed_caller in (
         kicker,
         security_kicker,
