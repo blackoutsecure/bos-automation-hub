@@ -1,22 +1,21 @@
-# Hub-internal release: promote `dev` -> `main` (CURATED via denylist)
+# Hub-internal release: promote the default branch to `main` (runtime allowlist)
 # + tag + publish GitHub Release.
 #
 # This is the hub's OWN release workflow. It is NOT the same shape as
-# the Marketplace Action repos' release.yml because the hub is not a
+# the Marketplace Action repos' release-promote.yml because the hub is not a
 # Marketplace Action — its consumer surface IS reusable workflows
 # under `.github/workflows/`, which the hub's published
-# `release-promote.yml` composite hard-blocks from any allowlist.
+# `release-promote.yml` workflow hard-blocks from any allowlist.
 #
 # Model:
-#   * `dev` is the working branch (default).
+#   * The repository default branch is the working source (`dev` today).
 #   * `main` is the promoted / stable branch consumers ref via
 #     `blackoutsecure/bos-automation-hub/.github/{workflows,actions}/X@main`
 #     (and via `@vX.Y.Z` / `@vX` SemVer pins).
-#   * Promotion replaces `main`'s tree with `dev`'s tree MINUS the
-#     hub-internal denylist (see promote step). main carries ONLY the
-#     consumer-touch-surface; hub-internal files (the gate caller,
-#     self-sync, this release workflow, maintainer tooling, linters)
-#     do NOT ship to main. The promote commit's parent is the
+#   * Promotion replaces `main`'s tree with a runtime allowlist derived
+#     from the default branch: shared actions, managed templates, core docs/license,
+#     and workflows declaring `workflow_call`. Event-only workflows and
+#     maintainer tooling do NOT ship to main. The promote commit's parent is the
 #     previous `main` HEAD, so `main`'s history stays linear and
 #     downstream consumers see a normal fast-forward push.
 #
@@ -29,7 +28,7 @@
 #                                `patch`). Refuse if both are given
 #                                or the tag already exists.
 #   3. promote                 — materialize `main`'s next tree in a
-#                                worktree (dev's tree minus denylist),
+#                                worktree (default-branch runtime allowlist),
 #                                commit on top of current `main`,
 #                                atomic-push the new commit + tag,
 #                                optionally move the floating major
@@ -39,14 +38,13 @@
 #                                publish the GitHub Release.
 #
 # Trigger: `workflow_dispatch` ONLY. This workflow file is itself in
-# the denylist, so it lives ONLY on `dev`. Operators dispatch against
-# the `dev` ref.
+# the runtime allowlist, so it lives ONLY on the development branch.
 #
 # Token model: prefers `secrets.RELEASE_PAT` for the push + tag
 # (admin role / bypass for protected `main`). Falls back to
 # `GITHUB_TOKEN` when no PAT is wired — in which case `main`'s
 # branch protection must allow GitHub Actions to push.
-name: Release · promote dev → main (curated) + tag + publish
+name: Hub runtime release · promote default branch → main
 
 "on":
   workflow_dispatch:
@@ -128,7 +126,7 @@ jobs:
       # Local-path `uses: ./...` requires the calling workflow to
       # have checked out the repo first. The shared composite is
       # tiny and pure-bash, so no extra setup is needed.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/shared/preflight-runner-config
@@ -145,10 +143,10 @@ jobs:
     outputs:
       tag_name: ${{ steps.compute.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Need full tag history to find the latest vX.Y.Z.
-          ref: dev
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
       - id: compute
@@ -217,7 +215,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   promote:
-    name: Promote dev → main (curated; denylist)
+    name: Promote default branch → main (runtime allowlist)
     needs: [preflight-runner-config, compute-tag]
     runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 5
@@ -241,10 +239,10 @@ jobs:
             echo "kind=github_token" >> "${GITHUB_OUTPUT}"
             echo "Using GITHUB_TOKEN for push + tag. Ensure main's branch protection allows GitHub Actions to push."
           fi
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Check out dev (the source). Worktree below materializes main.
-          ref: dev
+          # Check out the development/default source branch.
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           token: ${{ steps.token.outputs.kind == 'pat' && secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           # Persist creds so subsequent `git push` reuses the resolved token.
@@ -254,22 +252,29 @@ jobs:
           TAG_NAME:         ${{ needs.compute-tag.outputs.tag_name }}
           UPDATE_MAJOR_TAG: ${{ inputs.update_major_tag }}
           DRY_RUN:          ${{ inputs.dry_run }}
+          SOURCE_BRANCH:    ${{ github.event.repository.default_branch }}
+          TARGET_BRANCH:    main
         run: |
           set -euo pipefail
 
-          git fetch origin dev main --tags --quiet || \
-            git fetch origin dev --tags --quiet
+          if [[ "${SOURCE_BRANCH}" == "${TARGET_BRANCH}" ]]; then
+            echo "::error::Source and target branches must differ (${SOURCE_BRANCH})."
+            exit 1
+          fi
 
-          SOURCE_SHA="$(git rev-parse origin/dev)"
-          if git rev-parse --verify --quiet origin/main >/dev/null; then
+          git fetch origin "${SOURCE_BRANCH}" "${TARGET_BRANCH}" --tags --quiet || \
+            git fetch origin "${SOURCE_BRANCH}" --tags --quiet
+
+          SOURCE_SHA="$(git rev-parse "origin/${SOURCE_BRANCH}")"
+          if git rev-parse --verify --quiet "origin/${TARGET_BRANCH}" >/dev/null; then
             TARGET_EXISTS=true
-            TARGET_PARENT="$(git rev-parse origin/main)"
+            TARGET_PARENT="$(git rev-parse "origin/${TARGET_BRANCH}")"
           else
             TARGET_EXISTS=false
             TARGET_PARENT=""
           fi
 
-          echo "source (dev):  ${SOURCE_SHA}"
+          echo "source (${SOURCE_BRANCH}): ${SOURCE_SHA}"
           echo "target parent: ${TARGET_PARENT:-(none; main does not exist)}"
           echo "tag:           ${TAG_NAME}"
           echo "source_sha=${SOURCE_SHA}" >> "${GITHUB_OUTPUT}"
@@ -281,54 +286,54 @@ jobs:
             echo "floating major tag: ${MAJOR_TAG}"
           fi
 
-          DENYLIST=(
-            .github/workflows/sync-self.yml
-            .github/workflows/release-hub.yml
-            .editorconfig
-            .yamllint.yml
-            actionlint
-            linux
-            macos
-            scripts
+          PUBLISH_PATHS=(
+            .github/actions
+            managed-files
+            LICENSE
+            README.md
           )
 
+          # Every reusable workflow is part of the public runtime surface.
+          # Event-only workflows are dev tooling and remain unpublished.
+          mapfile -t REUSABLE_WORKFLOWS < <(
+            grep -lE '^  workflow_call:' .github/workflows/*.yml | sort
+          )
+          if (( ${#REUSABLE_WORKFLOWS[@]} == 0 )); then
+            echo "::error::No reusable workflows found; refusing to publish an empty runtime."
+            exit 1
+          fi
+          PUBLISH_PATHS+=("${REUSABLE_WORKFLOWS[@]}")
+
+          echo "Publishing runtime paths:"
+          printf '  %s\n' "${PUBLISH_PATHS[@]}"
+
           # --- Materialize the curated `main` tree in a worktree --------
-          # Same general shape as bos-marketplace-kit's promote composite
-          # (worktree at target -> wipe -> bring source -> commit + atomic
-          # push), inverted from allowlist to denylist semantics: most
-          # files are consumer-facing and ride to main; we strip ONLY the
-          # hub-internal set listed below.
+          # Same general shape as bos-marketplace-kit's promote composite:
+          # wipe the target tree, bring across only the runtime allowlist,
+          # then commit and atomically push the result.
           WORKTREE_DIR="$(mktemp -d -t hub-promote-XXXXXXXX)"
           # shellcheck disable=SC2064
           trap "git worktree remove --force '${WORKTREE_DIR}' 2>/dev/null || true; rm -rf '${WORKTREE_DIR}'" EXIT
 
           if [ "${TARGET_EXISTS}" = "true" ]; then
-            git worktree add --force -B main "${WORKTREE_DIR}" refs/remotes/origin/main
+            git worktree add --force -B "${TARGET_BRANCH}" "${WORKTREE_DIR}" "refs/remotes/origin/${TARGET_BRANCH}"
           else
-            git worktree add --force -B main "${WORKTREE_DIR}" "${SOURCE_SHA}"
+            git worktree add --force -B "${TARGET_BRANCH}" "${WORKTREE_DIR}" "${SOURCE_SHA}"
           fi
 
           (
             cd "${WORKTREE_DIR}"
             # Wipe the staged target tree (handles renames + removed files
-            # on dev that would otherwise persist on main).
+            # on the source branch that would otherwise persist on the target).
             if [ -n "$(git ls-files)" ]; then
               git ls-files -z | xargs -0 git rm -f -q --
             fi
-            # Bring across dev's full tree...
-            git checkout "${SOURCE_SHA}" -- .
-            # ...then strip the hub-internal denylist. Update this list
-            # when adding new hub-only files that must NOT ship to main.
-            # `--ignore-unmatch` tolerates entries not present on dev
-            # (so removing a file from dev doesn't break the next
-            # promote).
-            git rm -rf --quiet --ignore-unmatch -- "${DENYLIST[@]}" || true
+            git checkout "${SOURCE_SHA}" -- "${PUBLISH_PATHS[@]}"
             git add -A
 
-            DENIED_PATHS="$(git ls-files -- "${DENYLIST[@]}" || true)"
-            if [ -n "${DENIED_PATHS}" ]; then
-              echo "::error::Curated main tree still contains denied paths:"
-              printf '%s\n' "${DENIED_PATHS}"
+            mapfile -t PUBLISHED_WORKFLOWS < <(git ls-files '.github/workflows/*.yml')
+            if (( ${#PUBLISHED_WORKFLOWS[@]} != ${#REUSABLE_WORKFLOWS[@]} )); then
+              echo "::error::Published workflow count does not match reusable workflow count."
               exit 1
             fi
           )
@@ -339,8 +344,8 @@ jobs:
           # Keep the commit subject single-line + scannable. Provenance
           # is in the subject (tag + source SHA); the full denylist
           # rationale lives in `.github/workflows/release-hub.yml` on
-          # dev so we don't re-explain it on every release.
-          COMMIT_MSG="release ${TAG_NAME}: promote dev (${SOURCE_SHA}) → main (curated)"
+          # the source branch so we don't re-explain it on every release.
+          COMMIT_MSG="release ${TAG_NAME}: promote ${SOURCE_BRANCH} (${SOURCE_SHA}) to ${TARGET_BRANCH}"
 
           # --- No-op detection (curated tree already matches main) ------
           # Even when there's nothing to commit, an operator-dispatched
@@ -359,7 +364,7 @@ jobs:
                 echo ""
                 echo "| Field        | Value |"
                 echo "|--------------|-------|"
-                echo "| source (dev) | \`${SOURCE_SHA}\` |"
+                echo "| source (${SOURCE_BRANCH}) | \`${SOURCE_SHA}\` |"
                 echo "| target_sha   | \`${TARGET_SHA}\` |"
                 echo "| tag          | \`${TAG_NAME}\` |"
               } >> "${GITHUB_STEP_SUMMARY}"
@@ -380,7 +385,7 @@ jobs:
               echo ""
               echo "| Field        | Value |"
               echo "|--------------|-------|"
-              echo "| source (dev) | \`${SOURCE_SHA}\` |"
+              echo "| source (${SOURCE_BRANCH}) | \`${SOURCE_SHA}\` |"
               echo "| target_sha   | \`${TARGET_SHA}\` |"
               echo "| tag          | \`${TAG_NAME}\` |"
               echo "| major_tag    | \`${MAJOR_TAG:-(none)}\` |"
@@ -398,7 +403,7 @@ jobs:
               echo ""
               echo "| Field        | Value |"
               echo "|--------------|-------|"
-              echo "| source (dev) | \`${SOURCE_SHA}\` |"
+              echo "| source (${SOURCE_BRANCH}) | \`${SOURCE_SHA}\` |"
               echo "| main parent  | \`${TARGET_PARENT:-(new)}\` |"
               echo "| tag          | \`${TAG_NAME}\` |"
               echo ""
@@ -417,7 +422,7 @@ jobs:
             git commit -m "${COMMIT_MSG}"
             git tag -a "${TAG_NAME}" -m "${COMMIT_MSG}"
             git push --atomic origin \
-              "HEAD:refs/heads/main" \
+              "HEAD:refs/heads/${TARGET_BRANCH}" \
               "refs/tags/${TAG_NAME}"
           )
           TARGET_SHA="$( cd "${WORKTREE_DIR}" && git rev-parse HEAD )"
@@ -437,7 +442,7 @@ jobs:
             echo ""
             echo "| Field        | Value |"
             echo "|--------------|-------|"
-            echo "| source (dev) | \`${SOURCE_SHA}\` |"
+            echo "| source (${SOURCE_BRANCH}) | \`${SOURCE_SHA}\` |"
             echo "| main parent  | \`${TARGET_PARENT:-(new)}\` |"
             echo "| main HEAD    | \`${TARGET_SHA}\` |"
             echo "| tag          | \`${TAG_NAME}\` |"
@@ -457,6 +462,6 @@ jobs:
       tag_name:       ${{ needs.compute-tag.outputs.tag_name }}
       draft:          ${{ inputs.release_draft }}
       previous_tag:   ${{ inputs.previous_tag }}
-      source_branch:  dev
+      source_branch:  ${{ github.event.repository.default_branch }}
       ai_changelog:   ${{ inputs.ai_changelog }}
       target_commitish: main

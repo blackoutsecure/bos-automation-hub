@@ -16,7 +16,7 @@
 # It is intended to be called from a thin caller workflow in a product repo
 # (see the "Quick start" section of this repo's README) and is **not**
 # intended to be triggered directly on this repo.
-name: Release pipeline (reusable meta-workflow)
+name: Artifact release (reusable)
 
 "on":
   workflow_call:

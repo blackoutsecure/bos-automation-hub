@@ -210,7 +210,7 @@ runs:
             "balena": stages.get("balena") is True,
             "github_release": stages.get("github_release") is True,
             "cloudflare_pages": cloudflare_enabled,
-            "sync_managed_files": bool(sync_services),
+            "managed_files_sync": bool(sync_services),
         }
         enabled_stages = ", ".join([key for key, value in stage_flags.items() if value]) or "(none)"
         cf_site = (cloudflare_raw.get("site_url") or "").strip() or "(unset)"

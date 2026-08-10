@@ -37,19 +37,15 @@ on:
           `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
           `dependabot_pip`. Whole-file: `logger`, `prettier`,
           `bos_launchpad`,
-          `bos_launchpad_sync_files` (delivers the meta-kicker that
+          `bos_universal_sync` (delivers the dedicated kicker that
           calls THIS reusable on a schedule, reading its `services:`
-          list from `.bos-launchpad.yaml`'s `sync_files:` block),
-          `bos_launchpad_gate`.
-          Init-if-missing: `gha_sync_drift_check`,
-          `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
-          one `gha_lint_*` per repo — they all target the same
-          `.github/workflows/lint.yml`), `bos_launchpad_config`
+          list from `bos-launchpad-config.json`'s `sync_files:` block),
+          `bos_universal_security`, `bos_universal_marketplace`.
+          Init-if-missing: `gha_sync_drift_check`, `bos_launchpad_config`
           (`bos-launchpad-config.json`), `license` (multi-license;
           picks from `_LICENSE_REGISTRY` by `license_type:` in
           `bos-managed-files.yaml`, supports apache-2.0 / mit /
-          bsd-3-clause / isc), `license_apache2` (deprecated alias
-          that always emits Apache 2.0; mutex with `license`),
+          bsd-3-clause / isc),
           `notice_apache2` (Apache 2.0 NOTICE; requires
           `license_type: apache-2.0` when used with `license`),
           `codeowners` (`.github/CODEOWNERS` with a catch-all rule).
@@ -191,7 +187,7 @@ jobs:
           esac
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # `persist-credentials: true` so commit-and-push can use the
           # default `GITHUB_TOKEN`. The workflow only needs `contents:

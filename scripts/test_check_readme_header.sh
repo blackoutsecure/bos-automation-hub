@@ -111,7 +111,7 @@ run_case dk-pass-synth 0 '
 [![GitHub Stars](https://img.shields.io/github/stars/blackoutsecure/docker-x?style=flat-square&color=E7931D&logo=github)](https://github.com/blackoutsecure/docker-x/stargazers)
 [![Docker Pulls](https://img.shields.io/docker/pulls/blackoutsecure/x?style=flat-square&color=E7931D&logo=docker&logoColor=FFFFFF)](https://hub.docker.com/r/blackoutsecure/x)
 [![GitHub Release](https://img.shields.io/github/release/blackoutsecure/docker-x.svg?style=flat-square&color=E7931D&logo=github&logoColor=FFFFFF)](https://github.com/blackoutsecure/docker-x/releases)
-[![Blackout Secure Launchpad](https://img.shields.io/github/actions/workflow/status/blackoutsecure/docker-x/bos-launchpad-release.yml?style=flat-square&label=blackout%20secure%20launchpad&color=E7931D)](https://github.com/blackoutsecure/docker-x/actions/workflows/bos-launchpad-release.yml)
+[![Blackout Secure Launchpad](https://img.shields.io/github/actions/workflow/status/blackoutsecure/docker-x/bos-universal-launchpad-kicker.yml?style=flat-square&label=blackout%20secure%20launchpad&color=E7931D)](https://github.com/blackoutsecure/docker-x/actions/workflows/bos-universal-launchpad-kicker.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](https://www.gnu.org/licenses/gpl-3.0)
 [![Made by BlackoutSecure](https://img.shields.io/badge/made%20by-BlackoutSecure-1f1f1f?style=flat-square)](https://github.com/blackoutsecure)
 EOF
@@ -168,7 +168,7 @@ run_case dk-fail-color 1 '
 [![GitHub Stars](https://img.shields.io/github/stars/blackoutsecure/docker-x?style=flat-square&color=blue&logo=github)](https://github.com/blackoutsecure/docker-x/stargazers)
 [![Docker Pulls](https://img.shields.io/docker/pulls/blackoutsecure/x?style=flat-square&color=E7931D&logo=docker&logoColor=FFFFFF)](https://hub.docker.com/r/blackoutsecure/x)
 [![GitHub Release](https://img.shields.io/github/release/blackoutsecure/docker-x.svg?style=flat-square&color=E7931D&logo=github&logoColor=FFFFFF)](https://github.com/blackoutsecure/docker-x/releases)
-[![Blackout Secure Launchpad](https://img.shields.io/github/actions/workflow/status/blackoutsecure/docker-x/bos-launchpad-release.yml?style=flat-square&label=blackout%20secure%20launchpad&color=E7931D)](https://github.com/blackoutsecure/docker-x/actions/workflows/bos-launchpad-release.yml)
+[![Blackout Secure Launchpad](https://img.shields.io/github/actions/workflow/status/blackoutsecure/docker-x/bos-universal-launchpad-kicker.yml?style=flat-square&label=blackout%20secure%20launchpad&color=E7931D)](https://github.com/blackoutsecure/docker-x/actions/workflows/bos-universal-launchpad-kicker.yml)
 [![Made by BlackoutSecure](https://img.shields.io/badge/made%20by-BlackoutSecure-1f1f1f?style=flat-square)](https://github.com/blackoutsecure)
 EOF
 '

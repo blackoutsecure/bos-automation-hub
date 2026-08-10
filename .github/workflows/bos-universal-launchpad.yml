@@ -1,8 +1,11 @@
 # Blackout Secure Launchpad — automated release / deploy meta-workflow.
 #
-# Single front-door for every deploy topology this org runs. Composes the
-# stage-level reusable workflows into one end-to-end loop so consumer repos
-# can drive a full pipeline from a thin ~15-line caller:
+# Single consumer front door for every deploy topology this org runs. Product
+# repositories install only the managed caller and config; they do not copy or
+# call each stage workflow. This workflow deliberately composes stage-level
+# reusable workflows so permissions, outputs, matrices, and standalone release
+# contracts remain independently testable without widening this already large
+# orchestration surface:
 #
 #   1. monitor-upstream-release.yml   — poll upstream version, commit a
 #                                       tracking file, emit `changed` flag.
@@ -18,8 +21,8 @@
 #                                       optional post-deploy edge purge).
 #                                       Independent of the monitor/release
 #                                       path; can run on its own on every push.
-#   0. security-scan.yml                   — opt-in security scanning stage shared
-#                                       with `bos-launchpad-marketplace.yml`.
+#   0. security-scan.yml              — opt-in security scanning stage shared
+#                                       with the pre-merge gate.
 #                                       Wraps `bos-code-scanning-kit@v1`
 #                                       (posture + scanners) AND
 #                                       `github/codeql-action` (matrix).
@@ -34,7 +37,7 @@
 #                                       to keep the legacy advisory model
 #                                       (scan runs in parallel, deploy never
 #                                       waits). Default policy mirrors the
-#                                       Marketplace launchpad (`fail_on: fail`).
+#                                       pre-merge gate (`fail_on: fail`).
 #
 # Two canonical use cases:
 #
@@ -48,13 +51,14 @@
 #      The cloudflare-pages job runs straight off the caller event.
 #
 # Mixing is supported (e.g. tracked container release **and** companion
-# docs site deploy in the same run) — every stage is independently togglable.#
+# docs site deploy in the same run) - every stage is independently togglable.
 # Stage toggle policy:
 #   Every stage toggle (`docker`, `balena`, `github_release`,
 #   `cloudflare_pages`) defaults to `false`. Callers MUST explicitly opt
 #   into each capability they want to use. This is a forward-compatibility
 #   guarantee: when we add a new stage to this workflow later (a 4th, 5th,
-#   \u2026), existing kickstarted callers continue to run exactly the stages\n#   they originally asked for \u2014 nothing more, nothing less.#
+#   etc.), existing kickstarted callers continue to run exactly the stages
+#   they originally asked for - nothing more, nothing less.
 # Trigger model: this workflow is intended to be called from a thin caller
 # in a product repo (typically a 6h cron for upstream-tracked releases, or
 # `push: branches: [main]` for static sites). It is **not** intended to be
@@ -771,23 +775,6 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         required: false
         type: boolean
         default: false
-      sync_managed_files:
-        description: >-
-          When `true`, also run the hub's `sync-managed-files.yml`
-          reusable using the `sync_files:` block from the caller repo's
-          `bos-launchpad-config.json`. Intended for the universal
-          `bos-launchpad.yml` kicker.
-        required: false
-        type: boolean
-        default: false
-      sync_mode:
-        description: >-
-          Optional override for the integrated sync stage's mode.
-          Empty (default) uses `bos-launchpad-config.json` `sync_files.mode`
-          or falls back to `commit`.
-        required: false
-        type: string
-        default: ''
 
       # ----- Release pipeline: GitHub Release stage ------------------------
       release_template_path:
@@ -868,7 +855,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       #   The nested job 'security_scan' is requesting
       #   'actions: read, security-events: write', but is only allowed
       #   'actions: none, security-events: none'.
-      # NOTE: all existing `bos-launchpad-release.yml` callers already grant
+      # NOTE: managed `bos-universal-launchpad-kicker.yml` callers grant
       # `actions: write` (superset of `read`) for the nested monitor
       # job's `gh workflow run` calls, and `security-events: write` for
       # Docker Scout SARIF upload — so this requirement happens to be
@@ -1211,15 +1198,6 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       cloudflare_ai_bindings:
         description: 'JSON array of Workers AI binding names present on the project after the deploy stage (empty `[]` when none requested).'
         value: ${{ jobs.cloudflare-pages-config.outputs.ai_bindings || jobs.cloudflare-pages.outputs.ai_bindings }}
-      sync_changed:
-        description: '`true` when the integrated sync-managed-files stage changed at least one file.'
-        value: ${{ jobs.sync-managed-files.outputs.changed }}
-      sync_changed_files:
-        description: 'Newline-separated list of files changed by the integrated sync-managed-files stage.'
-        value: ${{ jobs.sync-managed-files.outputs.changed_files }}
-      sync_commit_sha:
-        description: 'Commit SHA created by the integrated sync-managed-files stage, when one was created.'
-        value: ${{ jobs.sync-managed-files.outputs.commit_sha }}
 
 permissions:
   contents: read
@@ -1234,16 +1212,15 @@ concurrency:
 jobs:
   parse-config:
     name: Parse launchpad config
-    if: inputs.use_launchpad_config || inputs.sync_managed_files
+    if: inputs.use_launchpad_config
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
       cfg: ${{ steps.config.outputs.cfg }}
       cloudflare: ${{ steps.config.outputs.cloudflare }}
-      sync: ${{ steps.config.outputs.sync }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Load launchpad config
@@ -1664,27 +1641,6 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
 
-  sync-managed-files:
-    name: Sync managed files
-    needs: [parse-config]
-    if: >-
-      !cancelled()
-      && inputs.sync_managed_files
-      && needs.parse-config.result == 'success'
-      && fromJson(needs.parse-config.outputs.sync).enabled == true
-    permissions:
-      contents: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
-    with:
-      services: ${{ join(fromJson(needs.parse-config.outputs.sync).services, ' ') }}
-      mode: ${{ inputs.sync_mode || fromJson(needs.parse-config.outputs.sync).mode || 'commit' }}
-      commit_message: ${{ fromJson(needs.parse-config.outputs.sync).commit_message }}
-      git_user_name: ${{ fromJson(needs.parse-config.outputs.sync).git_user_name }}
-      git_user_email: ${{ fromJson(needs.parse-config.outputs.sync).git_user_email }}
-      push_retries: ${{ fromJson(needs.parse-config.outputs.sync).push_retries }}
-      runs_on: ${{ fromJson(needs.parse-config.outputs.sync).runs_on }}
-      timeout_minutes: ${{ fromJson(needs.parse-config.outputs.sync).timeout_minutes }}
-
   # ---------------------------------------------------------------------------
   # Stage 4 — Repo About-box sync (opt-in, independent of the deploy path).
   #
@@ -1727,7 +1683,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout (caller repo — README used as AI / fallback source)
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 

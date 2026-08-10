@@ -74,7 +74,7 @@ inputs:
       stays aligned with what the action would have done. Bump
       together with Renovate updates on that action.
     required: false
-    default: 'v25.1.7'
+    default: 'v24.1.4'
 
 outputs:
   release_id:
@@ -149,12 +149,13 @@ runs:
           fail "input 'fleet' '${FLEET}' does not match ${FLEET_RE}"
         fi
 
-        # `vX.Y.Z` or `vX.Y.Z-suffix`. Renovate-managed; this is
+        # `vX.Y.Z` or `vX.Y.Z-suffix`. Kept aligned with the CLI pin in
+        # balena-io/deploy-to-balena-action; this is
         # belt-and-braces so a typo (e.g. missing `v`) fails fast
         # instead of 404ing on the release-asset download.
         VERSION_RE='^v[0-9]+\.[0-9]+\.[0-9]+([.+-][A-Za-z0-9._-]+)?$'
         if ! [[ "${BALENA_CLI_VERSION}" =~ ${VERSION_RE} ]]; then
-          fail "input 'balena_cli_version' '${BALENA_CLI_VERSION}' must match ${VERSION_RE} (e.g. v25.1.7)"
+          fail "input 'balena_cli_version' '${BALENA_CLI_VERSION}' must match ${VERSION_RE} (e.g. v24.1.4)"
         fi
 
         # `source` is forwarded literally to `balena push --source` so
@@ -248,7 +249,7 @@ runs:
 
         # `balena login` declares `--token` as a *boolean flag* AND a
         # separate hidden *positional argument* (see
-        # https://github.com/balena-io/balena-cli/blob/v25.1.7/src/commands/login/index.ts
+        # https://github.com/balena-io/balena-cli/blob/v24.1.4/src/commands/login/index.ts
         # — `Args.string({hidden:true})` + `Flags.boolean({char:'t'})`).
         # The token VALUE must be passed as the positional, not piped
         # on stdin: piping causes the CLI to fall through to

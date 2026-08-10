@@ -105,13 +105,13 @@ name: Balena Fleet Deploy (reusable)
       runs_on:
         description: >-
           Optional runner override for the deploy job. When empty (the
-          default), resolves from the org-shared `vars.RUNNER_X64` (the
-          deploy job is amd64-pinned because `deploy-to-balena-action`
-          is amd64-only). Accepts either a bare label (e.g. `ubuntu-latest`)
+          default), resolves from the org-shared `vars.DEFAULT_RUNNER`.
+          The shared publisher installs the native balena CLI on x64 or
+          ARM64 runners. Accepts either a bare label (e.g. `ubuntu-latest`)
           or a JSON-array string of labels (e.g. `["self-hosted","Linux","X64"]`);
           both shapes are parsed at runtime via `fromJSON` so GHA sees
           a real label list rather than a single literal string. No silent
-          fallback: `vars.RUNNER_X64` is validated by the
+          fallback: `vars.DEFAULT_RUNNER` is validated by the
           `preflight-runner-config` job (see README.md "Runner
           configuration") so a job that reaches this stage is
           guaranteed to evaluate against a valid label set.
@@ -140,9 +140,8 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Preflight — validate `vars.DEFAULT_RUNNER` (for the plan job) AND
-  # `vars.RUNNER_X64` (for the deploy job; `deploy-to-balena-action` is
-  # amd64-only). See release.yml for full rationale.
+  # Preflight — validate `vars.DEFAULT_RUNNER` for planning and deploys.
+  # The shared publisher installs the native CLI for x64 or ARM64.
   # ---------------------------------------------------------------------------
   preflight-runner-config:
     name: Preflight (runner config)
@@ -157,7 +156,6 @@ jobs:
           default_runner: ${{ vars.DEFAULT_RUNNER }}
           runner_x64: ${{ vars.RUNNER_X64 }}
           runner_arm64: ${{ vars.RUNNER_ARM64 }}
-          require_runner_x64: 'true'
 
   plan:
     name: Plan
@@ -349,12 +347,9 @@ jobs:
     name: Deploy ${{ matrix.name }} (${{ matrix.fleet }})
     needs: [preflight-runner-config, plan]
     if: needs.plan.outputs.count != '0'
-    # `deploy-to-balena-action` is amd64-only; this job is pinned to
-    # `vars.RUNNER_X64` (validated by `preflight-runner-config`) rather
-    # than `vars.DEFAULT_RUNNER` so an arm64 default never wins. Callers
-    # can still pass `inputs.runs_on` for a per-call override (e.g. a
-    # dedicated amd64 self-hosted pool).
-    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.RUNNER_X64, '[') && (inputs.runs_on || vars.RUNNER_X64) || format('"{0}"', inputs.runs_on || vars.RUNNER_X64)) }}
+    # The shared publisher installs the native CLI for x64 or ARM64.
+    # Callers can still pass `inputs.runs_on` for a per-call override.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER)) }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     strategy:
       fail-fast: false
@@ -365,7 +360,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

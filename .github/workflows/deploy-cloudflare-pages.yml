@@ -575,7 +575,7 @@ jobs:
       ai_bindings: ${{ steps.ai_bindings.outputs.bindings || '[]' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: ${{ inputs.checkout_fetch_depth }}
           persist-credentials: false
@@ -587,7 +587,7 @@ jobs:
       # workflow is runner-agnostic. Idempotent on GitHub-hosted runners.
       # Also covers `prebuild_command` callers that run `npm ci`.
       - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'   # current LTS; wrangler 4 supports 18/20/22
 
@@ -973,7 +973,7 @@ jobs:
 
       - name: Generate sitemap
         if: inputs.generate_sitemap
-        uses: blackoutsecure/bos-sitemap-generator@5ec7fbce9a419a47c2e7d58bcb0ae28c02c84cda # v1.0.1
+        uses: blackoutsecure/bos-sitemap-generator@fee1be2a6770cd2ee4b6424ccb67ab1ff6bf554a # v1.0.2
         with:
           site_url: ${{ inputs.site_url }}
           public_dir: ${{ inputs.deploy_dir }}

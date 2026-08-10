@@ -208,13 +208,13 @@ name: Balena Block Publish (reusable)
       runs_on:
         description: >-
           Optional runner override for the publish job. When empty (the
-          default), resolves from the org-shared `vars.RUNNER_X64` (the
-          publish job is amd64-pinned because `deploy-to-balena-action`
-          is amd64-only). Accepts either a bare label (e.g. `ubuntu-latest`)
+          default), resolves from the org-shared `vars.DEFAULT_RUNNER`.
+          The shared publisher installs the native balena CLI on x64 or
+          ARM64 runners. Accepts either a bare label (e.g. `ubuntu-latest`)
           or a JSON-array string of labels (e.g. `["self-hosted","Linux","X64"]`);
           both shapes are parsed at runtime via `fromJSON` so GHA sees
           a real label list rather than a single literal string. No silent
-          fallback: `vars.RUNNER_X64` is validated by the
+          fallback: `vars.DEFAULT_RUNNER` is validated by the
           `preflight-runner-config` job (see README.md "Runner
           configuration") so a job that reaches this stage is
           guaranteed to evaluate against a valid label set.
@@ -248,9 +248,8 @@ concurrency:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Preflight — validate `vars.DEFAULT_RUNNER` (setup, sync-balena-yml) AND
-  # `vars.RUNNER_X64` (publish job; `deploy-to-balena-action` is amd64-only).
-  # See release.yml for full rationale.
+  # Preflight — validate `vars.DEFAULT_RUNNER` for setup, synchronization,
+  # and publishing. The shared publisher supports x64 and ARM64.
   # ---------------------------------------------------------------------------
   preflight-runner-config:
     name: Preflight (runner config)
@@ -265,7 +264,6 @@ jobs:
           default_runner: ${{ vars.DEFAULT_RUNNER }}
           runner_x64: ${{ vars.RUNNER_X64 }}
           runner_arm64: ${{ vars.RUNNER_ARM64 }}
-          require_runner_x64: 'true'
 
   setup:
     name: Setup
@@ -332,7 +330,7 @@ jobs:
 
       - name: Checkout caller repo
         if: inputs.auto_resolve_version
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -397,7 +395,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout default branch
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -457,11 +455,9 @@ jobs:
       && needs.setup.result == 'success'
       && needs.setup.outputs.publish == 'true'
       && (needs.sync-balena-yml.result == 'success' || needs.sync-balena-yml.result == 'skipped')
-    # `deploy-to-balena-action` is amd64-only; this job is pinned to
-    # `vars.RUNNER_X64` (validated by `preflight-runner-config`) rather
-    # than `vars.DEFAULT_RUNNER` so an arm64 default never wins. Callers
-    # can still pass `inputs.runs_on` for a per-call override.
-    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.RUNNER_X64, '[') && (inputs.runs_on || vars.RUNNER_X64) || format('"{0}"', inputs.runs_on || vars.RUNNER_X64)) }}
+    # The shared publisher installs the native CLI for x64 or ARM64.
+    # Callers can still pass `inputs.runs_on` for a per-call override.
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER, '[') && (inputs.runs_on || vars.DEFAULT_RUNNER) || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 60
     outputs:
       release_id: ${{ steps.deploy.outputs.release_id }}
@@ -473,7 +469,7 @@ jobs:
       cache_hit:  ${{ steps.deploy.outputs.cache_hit }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.sync-balena-yml.result == 'success' && github.event.repository.default_branch || github.sha }}
           persist-credentials: false
