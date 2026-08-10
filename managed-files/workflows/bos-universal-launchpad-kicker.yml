@@ -95,7 +95,7 @@ jobs:
             exit 0
           fi
 
-          mapfile -t matches < <(git ls-tree -r --name-only origin/main | grep -E '^\.github/workflows/|^\.github/dependabot\.yml$|^\.editorconfig$|^\.gitattributes$|^\.markdownlint\.yaml$|^\.prettierrc\.yaml$|^bos-launchpad-config\.json$|^bos-managed-files\.yaml$' || true)
+          mapfile -t matches < <(git ls-tree -r --name-only origin/main | grep -E '^\.github/workflows/|^\.editorconfig$|^\.gitattributes$|^\.markdownlint\.yaml$|^\.prettierrc\.yaml$|^bos-launchpad-config\.json$|^bos-managed-files\.yaml$' || true)
 
           if (( ${#matches[@]} > 0 )); then
             echo "::error::Managed/unneeded files found on main while sync_managed_files=false"
@@ -179,6 +179,71 @@ jobs:
       companion_image_name:               ${{ fromJson(needs.parse-config.outputs.cfg).companion_docker.image_name || '' }}
       companion_build_target:             ${{ fromJson(needs.parse-config.outputs.cfg).companion_docker.build_target || '' }}
       companion_docker_short_description: ${{ fromJson(needs.parse-config.outputs.cfg).companion_docker.short_description || '' }}
+
+      # ----- Cloudflare Pages stage -----
+      cloudflare_pages:                     ${{ fromJson(needs.parse-config.outputs.cfg).stages.cloudflare_pages == true }}
+      cloudflare_project_name:              ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.project_name || '' }}
+      cloudflare_deployment_environment:    ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.deployment_environment || '' }}
+      cloudflare_site_url:                  ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.site_url || '' }}
+      cloudflare_public_dir:                ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.public_dir || '.' }}
+      cloudflare_deploy_dir:                ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.deploy_dir || './dist' }}
+      cloudflare_clean_deploy_dir:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.clean_deploy_dir != false }}
+      cloudflare_copy_files: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.copy_files || '' }}
+      cloudflare_copy_dirs: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.copy_dirs || '' }}
+      cloudflare_prebuild_command:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.prebuild_command || '' }}
+      cloudflare_working_directory:         ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.working_directory || '' }}
+      cloudflare_branch:                    ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.branch || '' }}
+      cloudflare_commit_message:            ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.commit_message || '' }}
+      cloudflare_wrangler_version:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.wrangler_version || '' }}
+      cloudflare_extra_wrangler_args:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.extra_wrangler_args || '' }}
+      cloudflare_ai_bindings:               ${{ toJson(fromJson(needs.parse-config.outputs.cfg).cloudflare.ai_bindings || fromJson('[]')) }}
+      cloudflare_deploy_artifact_name:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.deploy_artifact_name || '' }}
+      cloudflare_deploy:                    ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.deploy || '' }}
+      cloudflare_runs_on:                   ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.runs_on || '' }}
+      cloudflare_checkout_fetch_depth:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.checkout_fetch_depth || 0 }}
+      cloudflare_purge_cache:               ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.purge_cache != false }}
+
+      # ----- Cloudflare generators -----
+      cloudflare_generate_sitemap:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_sitemap == true }}
+      cloudflare_generate_robots:           ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_robots == true }}
+      cloudflare_generate_security_txt:     ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_security_txt == true }}
+      cloudflare_generate_humans_txt:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_humans_txt == true }}
+      cloudflare_security_contact:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.security_contact || '' }}
+      cloudflare_generate_manifest:         ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_manifest == true }}
+      cloudflare_manifest_name:             ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_name || '' }}
+      cloudflare_manifest_short_name:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_short_name || '' }}
+      cloudflare_manifest_description:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_description || '' }}
+      cloudflare_manifest_orientation:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_orientation || '' }}
+      cloudflare_manifest_theme_color:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_theme_color || '' }}
+      cloudflare_manifest_background_color: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_background_color || '' }}
+      cloudflare_manifest_lang:             ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_lang || '' }}
+      cloudflare_manifest_dir:              ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_dir || '' }}
+      cloudflare_manifest_categories:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_categories || '' }}
+      cloudflare_manifest_icons_dir:        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_icons_dir || '' }}
+      cloudflare_generate_redirects:        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_redirects == true }}
+      cloudflare_redirects_custom_rules: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects_custom_rules || '' }}
+      cloudflare_redirects_replace_existing: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.redirects_replace_existing == true }}
+
+      # ----- Cloudflare headers generator -----
+      cloudflare_generate_headers:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_headers == true }}
+      cloudflare_headers_presets:           ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers_presets || 'security,cache' }}
+      cloudflare_headers_csp:               ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers_csp || '' }}
+      cloudflare_headers_hsts_max_age:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers_hsts_max_age || '63072000' }}
+      cloudflare_headers_permissions_policy: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers_permissions_policy || 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()' }}
+      cloudflare_headers_cache_html_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers_cache_html_control || 'public, max-age=0, must-revalidate' }}
+      cloudflare_headers_cache_assets_pattern: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers_cache_assets_pattern || '/assets/*' }}
+      cloudflare_headers_cache_assets_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers_cache_assets_control || 'public, max-age=31536000, immutable' }}
+      cloudflare_generate_common_content_headers: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_common_content_headers != false }}
+      cloudflare_common_security_txt_cache_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.common_security_txt_cache_control || 'public, max-age=86400' }}
+      cloudflare_common_robots_txt_cache_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.common_robots_txt_cache_control || 'public, max-age=86400' }}
+      cloudflare_common_sitemap_xml_cache_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.common_sitemap_xml_cache_control || 'public, max-age=86400' }}
+      cloudflare_common_humans_txt_cache_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.common_humans_txt_cache_control || 'public, max-age=86400' }}
+      cloudflare_headers_custom_rules: |-
+        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers_custom_rules || '' }}
+      cloudflare_headers_replace_existing:  ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers_replace_existing == true }}
 
       # ----- GitHub Release stage -----
       release_template_path:  ${{ fromJson(needs.parse-config.outputs.cfg).release.template_path || '' }}

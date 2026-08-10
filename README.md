@@ -1779,12 +1779,13 @@ via the `cloudflare_deploy_artifact_name` input:
 
 - [examples/bos-launchpad-cf-pages.with-build-artifact.example.yml](examples/bos-launchpad-cf-pages.with-build-artifact.example.yml)
 
-The current read-only universal kicker reference is managed directly by
-`sync-managed-files` at
-[`managed-files/examples/bos-universal-launchpad-kicker-reference.yml`](managed-files/examples/bos-universal-launchpad-kicker-reference.yml).
-Do not hand-edit or install it as a workflow; the canonical source is the
-`_BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML` constant in
-`.github/actions/sync-managed-files/sync.py`.
+Enable the `bos_launchpad` managed-files service to install and continuously
+sync `.github/workflows/bos-universal-launchpad-kicker.yml` in a consumer
+repository. Customize behavior only through `bos-launchpad-config.json`; the
+kicker remains identical across repositories and delegates implementation to
+the hub's reusable workflows. The optional `bos_launchpad_config` service
+creates a starter config only when missing and never overwrites repo-specific
+settings on later syncs.
 
 Full schema reference for `.bos-launchpad.yaml` is in the
 [schema section](#bos-launchpadyaml-schema-used-by-the-bos_launchpad_-services)

@@ -33,13 +33,13 @@ inputs:
       Section: `common`, `docker`, `balena`, `node`, `python`,
       `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
       `dependabot_pip`. Whole-file: `logger`, `prettier`,
-      `bos_launchpad`, `bos_launchpad_reference` (hub-only copy/paste
-      reference under `managed-files/examples/`),
-      `bos_launchpad_sync_files`, `bos_launchpad_gate`.
+      `bos_launchpad`, `bos_launchpad_sync_files`,
+      `bos_launchpad_gate`.
       Init-if-missing: `gha_sync_drift_check`,
       `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
       one `gha_lint_*` per repo — all three target the same
-      `.github/workflows/lint.yml`), `license` (multi-license; picks
+      `.github/workflows/lint.yml`), `bos_launchpad_config`
+      (`bos-launchpad-config.json`), `license` (multi-license; picks
       from `_LICENSE_REGISTRY` by `license_type:` in
       `bos-managed-files.yaml`, supports apache-2.0 / mit /
       bsd-3-clause / isc), `license_apache2` (deprecated alias

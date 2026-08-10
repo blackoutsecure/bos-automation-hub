@@ -76,7 +76,7 @@ MARKER_NOTE = (
     "do not edit between markers."
 )
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _MANAGED_FILES_ROOT = _REPO_ROOT / "managed-files"
 
 
@@ -1525,37 +1525,6 @@ _BOS_LAUNCHPAD_SYNC_FILES_YML = _load_managed_template_or_default(
 )
 
 
-# Canonical copy/paste caller reference kept with the hub's managed examples.
-# It is derived from the same launchpad template the hub syncs into
-# consumers, with a repository guard as defense in depth if copied back into
-# the hub. Keeping it outside `.github/workflows` also lets self-sync update it
-# with the default GITHUB_TOKEN, which cannot create or modify workflow files.
-_BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = (
-  "# Reference caller template for copy/paste into consumer repositories.\n"
-  "# Source of truth: .github/actions/sync-managed-files/sync.py"
-  " (`_BOS_LAUNCHPAD_RELEASE_YML`).\n"
-  "#\n"
-  "# Safety guard:\n"
-  "# This workflow is intentionally stored in bos-automation-hub as a\n"
-  "# reference and is disabled in this repository.\n\n"
-  + _BOS_LAUNCHPAD_RELEASE_YML.replace(
-    "name: Blackout Secure Launchpad (kicker)",
-    "name: Blackout Secure Launchpad (caller reference)",
-    1,
-  ).replace(
-    "  parse-config:\n",
-    "  parse-config:\n"
-    "    if: ${{ github.repository != 'blackoutsecure/bos-automation-hub' }}\n",
-    1,
-  )
-)
-
-_BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = _load_managed_template_or_default(
-  "workflows/bos-universal-launchpad-kicker-reference.yml",
-  _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
-)
-
-
 # The hub does NOT enable `bos_launchpad_gate` on itself — `hub-gate.yml`
 # at `.github/workflows/hub-gate.yml` uses a local `./` ref to
 # `bos-gate.yml` so a broken gate definition can be fixed inside the
@@ -2800,8 +2769,8 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     "bos_launchpad": {
       ".github/workflows/bos-universal-launchpad-kicker.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
-    "bos_launchpad_reference": {
-      "managed-files/examples/bos-universal-launchpad-kicker-reference.yml": _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
+    "bos_launchpad_sync_files": {
+      ".github/workflows/bos-launchpad-sync-files.yml": _BOS_LAUNCHPAD_SYNC_FILES_YML,
     },
     "bos_launchpad_gate": {
       ".github/workflows/bos-launchpad-gate.yml": _BOS_LAUNCHPAD_GATE_YML,

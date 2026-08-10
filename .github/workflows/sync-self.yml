@@ -31,7 +31,6 @@ jobs:
       services: |
         common
         lf_line_endings
-        bos_launchpad_reference
       # `python` intentionally not enabled — the hub has no Dockerfile
       # and no pytest/mypy/ruff tooling, so it would only create an
       # orphan `.dockerignore` plus a redundant `.gitignore` block.
