@@ -144,6 +144,35 @@ for operator-driven promotion, and this hub uses
 promotion. A generic release kicker would either duplicate those front doors
 or need enough branching logic to blur their trust boundaries.
 
+### Dev to production
+
+For this hub, the production path is a manual dispatch of
+[`release-hub.yml`](.github/workflows/release-hub.yml) from `dev`. It computes
+or accepts a SemVer tag, builds the runtime allowlist, promotes that allowlist
+to `main`, pushes the tag, and publishes the GitHub Release. Consumers then
+use the promoted runtime from `@main` (or a version tag).
+
+For a Marketplace Action consumer, the production path is a manual
+`operation: release` dispatch of the managed
+[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml)
+from the source branch. It validates trusted configuration, calls
+[`release-promote.yml`](.github/workflows/release-promote.yml) to promote the
+allowlist to the stable branch, and publishes the GitHub Release.
+
+For a product repository using Universal Launchpad, the launchpad owns the
+artifact path: it calls [`release.yml`](.github/workflows/release.yml), which
+publishes the configured Docker, Balena, and GitHub Release artifacts for an
+already-approved version. It does not promote a `dev` branch to `main`.
+
+There is deliberately no cross-workflow dependency requiring a Marketplace
+release to wait for `release-hub.yml`. The hub release publishes this hub's
+runtime; Marketplace promotion publishes a consumer Action's curated source
+tree. Making one wait on the other would couple independent repositories,
+create an unnecessary release deadlock, and would not prove that the
+consumer's own validation passed. The Marketplace kicker already validates the
+consumer before its release job; use protected environments or required
+checks when an additional human approval gate is needed.
+
 The Universal Launchpad retains a release-blocking scan. Scheduled and manual
 releases need a fresh assessment even when no PR triggered the universal
 security kicker. This is defense in depth at a different trust boundary, not a
