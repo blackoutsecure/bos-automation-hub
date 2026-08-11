@@ -324,7 +324,7 @@ contract does not belong in Universal:
 
 | Specialized workflow | Boundary |
 | --- | --- |
-| [`marketplace-action-ci.yml`](.github/workflows/marketplace-action-ci.yml) | Marketplace validation nested by the pre-merge gate. |
+| [`bos-universal-marketplace.yml`](.github/workflows/bos-universal-marketplace.yml) | Marketplace validation nested by the Marketplace kicker. |
 | [`marketplace-repo-guard.yml`](.github/workflows/marketplace-repo-guard.yml) | Trusted-target enforcement for workflow-free Marketplace branches. |
 | [`release-promote.yml`](.github/workflows/release-promote.yml) | Allowlisted Marketplace branch promotion. |
 | [`balena-fleet-deploy.yml`](.github/workflows/balena-fleet-deploy.yml) | Per-fleet deployment matrix, distinct from block publication. |

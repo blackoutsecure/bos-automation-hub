@@ -112,7 +112,7 @@ jobs:
       )
     permissions:
       contents: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/marketplace-action-ci.yml@dev
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-marketplace.yml@dev
     with:
       action_yml_path: ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.action_yml_path || 'action.yml' }}
       fail_on_warning: ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.fail_on_warning == true }}
@@ -134,7 +134,7 @@ jobs:
       )
     permissions:
       contents: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/marketplace-action-ci.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-marketplace.yml@main
     with:
       action_yml_path: ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.action_yml_path || 'action.yml' }}
       fail_on_warning: ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.fail_on_warning == true }}

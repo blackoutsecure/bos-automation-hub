@@ -12,7 +12,7 @@
 #
 # Together those three reusable workflows form the consumer-facing
 # Marketplace Action stack. `bos-universal-security.yml` nests this PR CI workflow so its
-# result participates in `gate / Gate summary`, while the managed
+# result participates in the aggregated `Security summary` job, while the managed
 # `bos-universal-marketplace-kicker.yml` also protects and promotes the stable
 # branch through event-scoped jobs.
 #   * fast `check` feedback on every PR (manifest validity, missing
@@ -35,7 +35,7 @@
 # this workflow for pull requests, development-branch pushes, and optional
 # one-shot manual checks. Generic lint and security run independently through
 # `bos-universal-security-kicker.yml`.
-name: Marketplace action CI (reusable)
+name: Blackout Secure universal Marketplace (reusable)
 
 "on":
   workflow_call:
@@ -323,7 +323,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: marketplace-action-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: bos-universal-marketplace-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

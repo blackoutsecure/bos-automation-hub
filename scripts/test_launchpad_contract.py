@@ -234,6 +234,7 @@ def main() -> None:
     assert "kit_version:" not in gate_workflow
     assert "code_scanning_kit_version:" not in gate_workflow
     assert "marketplace-action-ci.yml@main" not in gate_workflow
+    assert "bos-universal-marketplace.yml@main" not in gate_workflow
     assert "enable_marketplace_ci:" not in gate_workflow
     assert "enable_baseline:" not in gate_workflow
     assert "if: ${{ !inputs.enable_lint }}" in gate_workflow
@@ -297,7 +298,7 @@ def main() -> None:
     assert not (
         ROOT / "managed-files/workflows/bos-launchpad-marketplace.yml"
     ).exists()
-    assert marketplace_kicker.count("marketplace-action-ci.yml@main") == 1
+    assert marketplace_kicker.count("bos-universal-marketplace.yml@main") == 1
     assert marketplace_kicker.count("marketplace-repo-guard.yml@main") == 1
     assert marketplace_kicker.count("release-promote.yml@main") == 1
     assert "outputs.cfg" in marketplace_kicker
