@@ -36,11 +36,14 @@ def workflow_input_names(body: str) -> set[str]:
 
 
 def caller_input_names(body: str, workflow_name: str) -> set[str]:
-    call = body.split(
-        "    uses: blackoutsecure/bos-automation-hub/"
-        f".github/workflows/{workflow_name}@main\n",
-        1,
-    )[1]
+    call_pattern = re.compile(
+        r"^    uses: (?:\./|blackoutsecure/bos-automation-hub/)"
+        rf"\.github/workflows/{re.escape(workflow_name)}(?:@main)?$",
+        re.MULTILINE,
+    )
+    match = call_pattern.search(body)
+    assert match is not None, workflow_name
+    call = body[match.end() :]
     inputs = call.split("    with:\n", 1)[1].split("    secrets:\n", 1)[0]
     return set(re.findall(r"^      ([a-z][a-z0-9_]+):", inputs, re.MULTILINE))
 
@@ -207,11 +210,17 @@ def main() -> None:
     security_kicker = (
         ROOT / "managed-files/workflows/bos-universal-security-kicker.yml"
     ).read_text()
+    hub_security = (ROOT / ".github/workflows/security.yml").read_text()
     gate_declared = workflow_input_names(gate_workflow)
     gate_forwarded = caller_input_names(security_kicker, "bos-gate.yml")
     assert gate_declared == gate_forwarded, {
         "missing": sorted(gate_declared - gate_forwarded),
         "unknown": sorted(gate_forwarded - gate_declared),
+    }
+    hub_gate_forwarded = caller_input_names(hub_security, "bos-gate.yml")
+    assert gate_declared == hub_gate_forwarded, {
+        "missing": sorted(gate_declared - hub_gate_forwarded),
+        "unknown": sorted(hub_gate_forwarded - gate_declared),
     }
     assert "name: Blackout Secure universal security (reusable)" in gate_workflow
     assert "name: security" in security_kicker
@@ -371,6 +380,7 @@ def main() -> None:
         "lint.yml",
         "openwrt-readsb-wiedehopf-bump.yml",
         "release-hub.yml",
+        "security.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -433,6 +443,21 @@ def main() -> None:
 
     sync_backend = (ROOT / ".github/workflows/sync-managed-files.yml").read_text()
     hub_config = json.loads((ROOT / "bos-launchpad-config.json").read_text())
+    assert hub_config["gate"] == {
+        "enable_lint": False,
+        "enable_node_lint": False,
+        "node_version": "20",
+        "enable_python_lint": False,
+        "python_version": "3.11",
+        "enable_shell_lint": False,
+        "enable_dependency_review": True,
+        "enable_code_scan": True,
+        "enable_pinned_actions_check": True,
+        "enable_pr_title_check": True,
+        "pr_title_types": "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert",
+        "enable_readme_header_check": True,
+        "readme_header_profile": "generic",
+    }
     assert hub_config["sync_files"]["services"] == [
         "common",
         "lf_line_endings",
@@ -441,6 +466,12 @@ def main() -> None:
         "shellcheckrc",
     ]
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
+    assert "uses: ./.github/workflows/bos-gate.yml" in hub_security
+    assert (
+        "uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@main"
+        not in hub_security
+    )
+    assert "bos_universal_security" not in hub_config["sync_files"]["services"]
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" in sync_backend
     assert "  workflow_dispatch:" in sync_backend
