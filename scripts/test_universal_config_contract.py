@@ -287,24 +287,15 @@ def main() -> None:
     security_kicker = (
         ROOT / "managed-files/workflows/bos-universal-security-kicker.yml"
     ).read_text()
-    hub_security = (
-        ROOT / ".github/workflows/bos-universal-security-kicker.yml"
-    ).read_text()
     gate_declared = workflow_input_names(gate_workflow)
-    gate_forwarded = caller_input_names(security_kicker, "bos-universal-security.yml")
-    assert gate_declared == gate_forwarded, {
-        "missing": sorted(gate_declared - gate_forwarded),
-        "unknown": sorted(gate_forwarded - gate_declared),
-    }
-    # The hub enables `bos_universal_security` on itself like any consumer —
-    # the synced copy must be the managed template verbatim, header aside.
-    hub_security_header = (
-        "# Managed by https://github.com/blackoutsecure/bos-automation-hub —\n"
-        "# do not edit. To modify, update the `bos_universal_security` service in\n"
-        "# .github/actions/sync-managed-files/sync.py.\n"
-        "#\n"
-    )
-    assert hub_security == hub_security_header + security_kicker
+    security_job = security_kicker.split(
+        "    uses: blackoutsecure/bos-automation-hub/.github/workflows/"
+        "bos-universal-security.yml@dev\n",
+        1,
+    )[1]
+    assert "      config_authoritative: true\n" in security_job
+    assert "  workflow_dispatch:" in gate_workflow
+    assert not (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
     assert "name: Blackout Secure universal security (reusable)" in gate_workflow
     assert "name: security" in security_kicker
     assert "name: Security summary" in gate_workflow
@@ -314,7 +305,8 @@ def main() -> None:
     assert "bos-universal-marketplace.yml@main" not in gate_workflow
     assert "enable_marketplace_ci:" not in gate_workflow
     assert "enable_baseline:" not in gate_workflow
-    assert "if: ${{ !inputs.enable_lint }}" in gate_workflow
+    assert "needs.resolve-config.outputs.gate" in gate_workflow
+    assert "actions/shared/universal-config@main" in gate_workflow
 
     readme = (ROOT / "README.md").read_text()
     readme_header_action = (
@@ -464,7 +456,6 @@ def main() -> None:
         "lint.yml",
         "openwrt-readsb-wiedehopf-bump.yml",
         "release-hub.yml",
-        "bos-universal-security-kicker.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -523,7 +514,6 @@ def main() -> None:
         (security_kicker, {"main", "dev"}),
         (marketplace_kicker, {"main", "dev"}),
         (managed_sync_caller, {"main", "dev"}),
-        (hub_security, {"main", "dev"}),
     ):
         refs = re.findall(r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)", managed_caller)
         assert refs and set(refs) == expected_refs, refs
@@ -556,7 +546,6 @@ def main() -> None:
         "markdownlint",
         "shellcheckrc",
         "bos_universal_config",
-        "bos_universal_security",
         "bos_universal_sync",
     ]
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()

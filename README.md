@@ -61,6 +61,15 @@ re-pin branch protection whenever a gate moved between groups:
   posture audit), and pinned-action enforcement;
 - **Compliance:** README-header and PR-title checks.
 
+The hub itself runs
+[`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)
+directly. Use **Actions → Blackout Secure universal security (reusable) → Run
+workflow** on `dev` for a manual scan; it loads the current `security` section
+from `bos-universal-config.json`, just like the sync backend. The managed
+[`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml)
+is retained for consumer repositories, but the hub does not install a local
+kicker for this workflow.
+
 Marketplace-specific validation is intentionally excluded. Marketplace Action
 repositories add the managed
 [`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml),
