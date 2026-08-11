@@ -71,19 +71,7 @@ jobs:
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
         with:
           allow_missing: 'false'
-      - name: Require Marketplace enablement
-        env:
-          CONFIG: ${{ steps.config.outputs.cfg }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          marketplace = json.loads(os.environ['CONFIG']).get('marketplace', {})
-          if marketplace.get('enabled') is not True:
-              sys.exit('marketplace.enabled must be true')
-          PY
+          require_marketplace_enabled: 'true'
       # `uses:` refs cannot be dynamic, so resolve which hub branch this
       # run targets here and pick the matching static-ref job below.
       - name: Resolve target hub ref

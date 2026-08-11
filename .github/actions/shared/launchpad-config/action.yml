@@ -10,6 +10,10 @@ inputs:
     description: Emit {} when config file is missing instead of failing.
     required: false
     default: 'false'
+  require_marketplace_enabled:
+    description: Fail unless `marketplace.enabled` is `true` in the parsed config.
+    required: false
+    default: 'false'
 
 outputs:
   cfg:
@@ -31,6 +35,7 @@ runs:
       env:
         CONFIG_PATH: ${{ inputs.config_path }}
         ALLOW_MISSING: ${{ inputs.allow_missing }}
+        REQUIRE_MARKETPLACE_ENABLED: ${{ inputs.require_marketplace_enabled }}
       run: |
         set -euo pipefail
         python3 - <<'PY'
@@ -40,6 +45,7 @@ runs:
 
         config_path = os.environ.get("CONFIG_PATH") or "bos-launchpad-config.json"
         allow_missing = (os.environ.get("ALLOW_MISSING") or "false").lower() == "true"
+        require_marketplace_enabled = (os.environ.get("REQUIRE_MARKETPLACE_ENABLED") or "false").lower() == "true"
         output_path = os.environ["GITHUB_OUTPUT"]
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
 
@@ -124,6 +130,10 @@ runs:
                 marketplace_raw.get(path_field), path_field
             )
         cfg["marketplace"] = marketplace
+
+        if require_marketplace_enabled and marketplace.get("enabled") is not True:
+            error(f"::error file={config_path}::marketplace.enabled must be true")
+            sys.exit(1)
 
         cloudflare = {
             "enabled": stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name")),
