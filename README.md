@@ -1,5 +1,7 @@
 # Blackout Secure Automation Hub
 
+[![Made by BlackoutSecure](https://img.shields.io/badge/made%20by-BlackoutSecure-1f1f1f)](https://github.com/blackoutsecure)
+
 Central reusable GitHub Actions workflows, shared composite actions, and
 managed repository files for Blackout Secure projects.
 

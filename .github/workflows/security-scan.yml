@@ -335,7 +335,7 @@ jobs:
           persist-credentials: false
       - id: kit
         name: Run BOS Code Scanning Kit
-        uses: blackoutsecure/bos-code-scanning-kit@v1
+        uses: blackoutsecure/bos-code-scanning-kit@f0ec5bef0a90918e75b8ab59092c0234558737f4 # v1
         with:
           github_token: ${{ (inputs.use_advanced_pat && secrets.scanning_pat != '') && secrets.scanning_pat || github.token }}
           enable_posture: ${{ inputs.enable_posture }}

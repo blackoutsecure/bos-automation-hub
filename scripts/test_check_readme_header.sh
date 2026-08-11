@@ -11,7 +11,7 @@
 #   bash scripts/test_check_readme_header.sh
 #
 # Requires: bash, python3 + PyYAML (for action.yml step extraction),
-# shellcheck (optional; lints the embedded script when present).
+# ShellCheck (optional; lints the embedded script when present).
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 set -euo pipefail
 

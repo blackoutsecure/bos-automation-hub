@@ -546,7 +546,6 @@ def main() -> None:
         "markdownlint",
         "shellcheckrc",
         "bos_universal_config",
-        "bos_universal_sync",
     ]
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend

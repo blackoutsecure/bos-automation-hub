@@ -100,12 +100,15 @@ runs:
             ver="${ref#*@}"
             if [ "$base" = "$ref" ]; then
               # No `@` at all — illegal anywhere except local refs which we already handled.
-              printf '%s:%s: %s — missing `@<sha>` suffix\n' "$path" "$lineno" "$ref" >> "$offenders_file"
+              printf "%s:%s: %s — missing \`@<sha>\` suffix\n" "$path" "$lineno" "$ref" >> "$offenders_file"
               continue
             fi
             # owner/repo[/path] is everything before the first slash after the @
             # (we already split). Use the FIRST two segments for the allow-list key.
             owner_repo="$(printf '%s\n' "$base" | awk -F/ 'NF>=2 {print $1"/"$2}')"
+            if [ -n "${GITHUB_REPOSITORY:-}" ] && [ "$owner_repo" = "${GITHUB_REPOSITORY}" ]; then
+              continue
+            fi
             if grep -Fxq -- "$owner_repo" "$allow_file" 2>/dev/null; then
               # Allow-listed — tag pin permitted.
               continue
@@ -114,7 +117,7 @@ runs:
             if printf '%s' "$ver" | grep -Eq '^[0-9a-f]{40}$'; then
               continue
             fi
-            printf '%s:%s: %s — version `%s` is not a 40-char SHA\n' \
+            printf "%s:%s: %s — version \`%s\` is not a 40-char SHA\n" \
               "$path" "$lineno" "$ref" "$ver" >> "$offenders_file"
           done
 
@@ -128,4 +131,4 @@ runs:
           exit 1
         fi
 
-        echo "All `uses:` references are SHA-pinned (or local / docker / allow-listed)."
+        echo "All \`uses:\` references are SHA-pinned (or local / docker / allow-listed)."

@@ -442,7 +442,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run bos-code-scanning-kit
-        uses: blackoutsecure/bos-code-scanning-kit@v1  # TODO: pin to SHA via Dependabot
+        uses: blackoutsecure/bos-code-scanning-kit@f0ec5bef0a90918e75b8ab59092c0234558737f4 # v1
         with:
           github_token: ${{ secrets.scanning_pat || secrets.GITHUB_TOKEN }}
           fail_on: fail
