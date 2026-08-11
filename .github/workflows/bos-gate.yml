@@ -181,7 +181,7 @@ jobs:
       - name: Run kit lint composite
         uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
         with:
-          fail_on_warning: 'false'
+          severity: fail
 
   node-lint:
     if: ${{ inputs.enable_node_lint }}
