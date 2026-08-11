@@ -15,10 +15,8 @@
 #
 # Hosted in the hub so a single bump of the `@v1` kit pin (or the
 # `github/codeql-action` SHA pins) here propagates to every caller that
-# opts in. Both launchpads — the Marketplace publishing launchpad
-# (`bos-launchpad-marketplace.yml`) AND the container / site delivery
-# launchpad (`bos-universal-launchpad.yml`) — plus direct callers all
-# consume this one wrapper.
+# opts in. The pre-merge gate, Universal delivery launchpad, and direct
+# callers share this wrapper.
 #
 # Caller hosting model: SARIF gets uploaded to the CALLER repo's Security
 # tab — `actions/checkout` clones the caller repo, then the kit / CodeQL
@@ -230,7 +228,7 @@ jobs:
     steps:
       - if: inputs.codeql_languages == 'auto'
         name: Checkout (sparse — workflows only)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: .github/workflows
@@ -332,7 +330,7 @@ jobs:
       outcome: ${{ steps.kit.outputs.outcome }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: kit
@@ -367,7 +365,7 @@ jobs:
         language: ${{ fromJSON(needs.resolve-codeql-languages.outputs.languages || '[]') }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Initialize CodeQL

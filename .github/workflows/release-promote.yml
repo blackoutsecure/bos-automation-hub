@@ -23,21 +23,17 @@
 # Action. This workflow is the ergonomic layer (toggles for
 # Dependabot / metadata auto-sync, GitHub Release chaining) around
 # it.
-# Trigger model: this workflow is intended to be called from the hub
-# meta-workflow [`bos-launchpad-marketplace.yml`](./bos-launchpad-marketplace.yml),
-# which is itself called from a thin caller on the SOURCE branch
-# (typically `dev`) — see
-# [`examples/bos-launchpad-marketplace.example.yaml`](../../examples/bos-launchpad-marketplace.example.yaml).
-# Triggers normally include `workflow_dispatch` (operator types the
-# version) and may include `push: tags: ['v*']` when the operator
-# prefers to tag on dev first.
+# Trigger model: the managed `bos-universal-marketplace-kicker.yml` caller invokes
+# this workflow manually from the source/default branch (typically `dev`).
+# Keeping promotion operator-driven prevents a normal source-branch push
+# from mutating the curated stable Marketplace branch.
 #
 # Hard constraints enforced by the underlying composite:
 #   * `.github/workflows/**` paths in the allowlist are rejected.
 #   * Existing tags cannot be overwritten.
 #   * `source_branch` and `target_branch` must differ.
 #   * Tag must match SemVer (`vX.Y.Z[-suffix]`).
-name: Release promote (reusable)
+name: Marketplace promotion release (reusable)
 
 "on":
   workflow_call:
@@ -325,104 +321,21 @@ jobs:
       previous_tag:       ${{ steps.resolve_tag.outputs.previous_tag }}
     steps:
       - name: Checkout source_branch
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_branch }}
-          # Full history is required so the worktree-based promotion
-          # can fetch + checkout arbitrary refs. As a side-effect,
-          # `fetch-depth: 0` also fetches all tags — which the
-          # `Resolve tag` step below relies on to compute the
-          # auto-bumped next tag when `tag_name` is empty.
+          # Full history is required for promotion and tag resolution.
           fetch-depth: 0
           # We re-push via the same checkout — persist the bot token.
           persist-credentials: true
 
-      # Resolve the effective tag for this release.
-      #
-      # `inputs.tag_name` is intentionally OPTIONAL on the caller's
-      # workflow_dispatch input schema, because the same dispatch
-      # form is shared with `mode: name-check` (which doesn't take a
-      # tag) and GitHub Actions has no way to mark an input as
-      # "required iff mode == release". So the empty-string case has
-      # to be handled at runtime, here — and rather than failing the
-      # operator out, we auto-resolve to the next-patch bump of the
-      # latest stable SemVer tag (or `v0.1.0` for a never-released
-      # repo).
-      #
-      # Algorithm:
-      #   1. If `inputs.tag_name` is non-empty, pass through verbatim
-      #      — the `promote` composite enforces SemVer shape, so we
-      #      don't duplicate that regex here.
-      #   2. Else, find the highest tag matching the strict stable
-      #      pattern `^v?[0-9]+\.[0-9]+\.[0-9]+$` (pre-release tags
-      #      like `v1.2.3-rc1` are intentionally excluded from
-      #      "latest" — pre-releases should not auto-promote to the
-      #      next stable; the operator types those explicitly).
-      #   3. Bump the patch component by 1. Preserve the leading `v`
-      #      prefix from the source tag (the typical convention) or
-      #      add one if the tag was bare.
-      #   4. If no stable tags exist at all, default to `v0.1.0` —
-      #      the canonical "first release" SemVer per
-      #      https://semver.org/#how-should-i-deal-with-revisions-in-the-0yz-initial-development-phase.
-      #
-      # Overrides: operators wanting a minor/major bump (or any
-      # pre-release suffix) MUST type the full target tag into the
-      # `tag_name` dispatch field. Auto-resolve is intentionally
-      # patch-only — it's the safest "I forgot to type the tag"
-      # fallback and never accidentally cuts a breaking-change
-      # release.
       - name: Resolve tag
         id: resolve_tag
-        env:
-          TAG_NAME_INPUT: ${{ inputs.tag_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -n "${TAG_NAME_INPUT}" ]; then
-            RESOLVED="${TAG_NAME_INPUT}"
-            echo "Using operator-supplied tag_name: ${RESOLVED}"
-            echo "auto_resolved=false" >> "${GITHUB_OUTPUT}"
-            echo "previous_tag=" >> "${GITHUB_OUTPUT}"
-          else
-            # Find the highest stable SemVer tag. `sort -V` handles
-            # SemVer ordering correctly for the strict X.Y.Z shape.
-            LATEST="$(git tag --list \
-              | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
-              | sort -V \
-              | tail -n1 || true)"
-
-            if [ -z "${LATEST}" ]; then
-              RESOLVED='v0.1.0'
-              echo "No stable SemVer tags found on this repo; defaulting to ${RESOLVED} (first release)."
-              echo "auto_resolved=true" >> "${GITHUB_OUTPUT}"
-              echo "previous_tag=" >> "${GITHUB_OUTPUT}"
-            else
-              # Preserve the source tag's `v` prefix (or lack thereof).
-              case "${LATEST}" in
-                v*) PREFIX='v'; CORE="${LATEST#v}" ;;
-                *)  PREFIX='v'; CORE="${LATEST}" ;;  # always normalize to v-prefixed
-              esac
-              MAJOR="${CORE%%.*}"
-              REST="${CORE#*.}"
-              MINOR="${REST%%.*}"
-              PATCH="${REST#*.}"
-              # Defensive: confirm components are pure integers.
-              case "${MAJOR}${MINOR}${PATCH}" in
-                ''|*[!0-9]*)
-                  echo "::error title=Tag parse failed::Could not parse '${LATEST}' as X.Y.Z (got MAJOR='${MAJOR}' MINOR='${MINOR}' PATCH='${PATCH}'). Re-dispatch with an explicit tag_name." >&2
-                  exit 1
-                  ;;
-              esac
-              PATCH_NEW=$((PATCH + 1))
-              RESOLVED="${PREFIX}${MAJOR}.${MINOR}.${PATCH_NEW}"
-              echo "No tag_name supplied; auto-resolved to ${RESOLVED} (patch-bump from latest stable tag ${LATEST})."
-              echo "auto_resolved=true" >> "${GITHUB_OUTPUT}"
-              echo "previous_tag=${LATEST}" >> "${GITHUB_OUTPUT}"
-            fi
-          fi
-
-          echo "tag_name=${RESOLVED}" >> "${GITHUB_OUTPUT}"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-release-tag@main
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          bump: patch
+          first_tag: v0.1.0
 
       - name: Resolve extra allowlist (toggles + operator paths)
         id: extras
@@ -501,7 +414,7 @@ jobs:
         # step above (operator-supplied verbatim OR auto-bumped
         # next-patch) — never `inputs.tag_name` directly, because
         # that can be empty.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@84f66acf43b5f2a6a59faaf5df4d109fad511fa4 # v0.1.4
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
         with:
           source_branch:         ${{ inputs.source_branch }}
           target_branch:         ${{ inputs.target_branch }}

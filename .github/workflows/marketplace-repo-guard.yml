@@ -17,19 +17,17 @@
 #     before reviewers waste cycles, instead of discovering it at the
 #     merge button.
 #
-# Trigger model: called from the hub meta-workflow
-# [`bos-launchpad-marketplace.yml`](./bos-launchpad-marketplace.yml),
-# which is itself called from a thin caller on the **source branch**
-# (`dev`) that fires on `pull_request_target` for PRs targeting the
-# default branch — see
-# [`examples/bos-launchpad-marketplace.example.yaml`](../../examples/bos-launchpad-marketplace.example.yaml).
+# Trigger model: called from the managed `bos-universal-marketplace-kicker.yml`
+# workflow on the **source/default branch** (typically `dev`). That caller
+# fires on `pull_request_target` for PRs targeting the stable Marketplace
+# branch.
 # `pull_request_target` (not `pull_request`) is required because the
 # workflow file lives on the source branch (`dev`); PR-base reads
 # would otherwise look for the workflow on the PR's BASE branch, which
 # (correctly) has no workflows.
 #
 # Security note on `pull_request_target`: this workflow runs in the
-# context of the BASE branch with read+write tokens. We do NOT check
+# context of the trusted default branch with read-only permissions. We do NOT check
 # out the PR head into an execution context — only its SHA is read for
 # `git diff`. No code from the PR is executed.
 #
@@ -163,7 +161,7 @@ jobs:
           echo "Resolved checkout ref: ${REF}"
 
       - name: Checkout (base ref, full history)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ steps.ref.outputs.ref }}
           # Full history is needed so the diff base + head are both
@@ -179,7 +177,7 @@ jobs:
         # `bos-marketplace-kit` Action. SHA-pinned per the hub's
         # GHA pin policy (org/repo@<sha> # vX.Y.Z). Dependabot bumps
         # both halves in lockstep.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/guard@8cb53a2c81712c47b61af1031a1db69058bc5be3 # v0.1.2
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/guard@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
         with:
           pr_base_sha:        ${{ inputs.pr_base_sha }}
           pr_head_sha:        ${{ inputs.pr_head_sha }}

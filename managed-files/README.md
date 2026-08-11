@@ -1,255 +1,90 @@
-# `managed-files/` — canonical source-of-truth for hub-managed files
+# Managed files
 
-This directory is the **target home** for canonical content of every file
-the hub pushes into consumer repos via the
-[`sync-managed-files`](../.github/actions/sync-managed-files/) action.
+This directory contains canonical files loaded by
+[`sync-managed-files`](../.github/actions/sync-managed-files/). Consumer
+repositories select services in their sync configuration; repository-specific
+launchpad behavior belongs in `bos-launchpad-config.json`.
 
-The folder name matches the rest of the vocabulary:
+## Active templates
 
-| Surface                                        | Name                         |
-| ---------------------------------------------- | ---------------------------- |
-| Composite action                               | `sync-managed-files`         |
-| Reusable workflow                              | `sync-managed-files.yml`     |
-| Per-consumer config (lives in consumer repo)   | `bos-managed-files.yaml`     |
-| Source-of-truth content (lives here, in hub)   | `managed-files/` ← this dir  |
+Canonical workflow and dotfile templates live under [`workflows/`](workflows/)
+and [`dotfiles/`](dotfiles/). `sync.py` loads these files with inline fallbacks,
+so the files in this directory are the normal authoring and review surface.
 
-## Why this folder exists
+- [`bos-universal-launchpad-kicker.yml`](workflows/bos-universal-launchpad-kicker.yml)
+  is the managed release/deploy caller. It reads `bos-launchpad-config.json`
+  and calls the promoted hub runtime on `@main`.
+- [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
+  is the managed PR and merge-queue caller for shared lint, dependency review,
+  code scanning, and repository policy. Pin `security / Security summary` in
+  branch protection.
+- [`bos-universal-marketplace-kicker.yml`](workflows/bos-universal-marketplace-kicker.yml)
+  is installed only in Marketplace Action repositories. One event-routed file
+  owns Marketplace validation, trusted stable-branch guarding, name checks,
+  and manual promotion/releases.
+- [`bos-universal-sync-kicker.yml`](workflows/bos-universal-sync-kicker.yml)
+  is the independent scheduled/manual managed-file caller. It contains only
+  event routing and calls the config-aware sync backend, which reads the
+  `sync_files` block. Repository maintenance never starts the delivery
+  workflow.
 
-Today every file body the hub distributes — LICENSE text, NOTICE template,
-CODEOWNERS default, `log-functions.sh`, `.prettierrc.yaml`, the launchpad
-kicker workflows, the init-if-missing starter workflows — lives **inline
-as Python string constants** inside
-[`sync.py`](../.github/actions/sync-managed-files/sync.py)
-(`_LICENSE_APACHE2`, `_NOTICE_TEMPLATE`, `_BOS_LAUNCHPAD_RELEASE_YML`, …).
+These workflows are whole-file managed. Consumer repositories must not edit
+them directly.
 
-That made bootstrapping fast but has downsides as the action grew past
-2 000 lines:
+Enable `bos_universal_sync` alongside whichever other managed callers the
+repository needs. GitHub still requires one event-trigger workflow per
+repository; `bos-launchpad-config.json` controls sync behavior but cannot
+itself trigger a reusable workflow.
 
-- **Reviewability.** A 200-line YAML diff inside a Python triple-quoted
-  string is reviewed as a Python diff, not a YAML diff. Reviewers lose
-  syntax highlighting, IDE schema validation, and `git blame` granularity
-  on the workflow content itself.
-- **Linting.** The embedded YAML cannot be linted by `yamllint` /
-  `actionlint` in place — only after `sync.py` has written it to a
-  consumer repo. Drift between "what sync.py emits" and "what the linters
-  validate downstream" is only caught after the fact.
-- **Maintainability.** Editing the Apache-2.0 text means scrolling past
-  200 lines of legalese in the middle of action code. Editing a launchpad
-  workflow means navigating triple-quoted Python strings instead of
-  opening a `.yml` file.
+## Ownership modes
 
-Moving these bodies onto disk fixes all three. The trade-off is one
-extra disk read per file at sync time, which is negligible.
+The sync engine supports three ownership modes:
 
-## Authority — read carefully
+- **Section:** replaces only content between managed markers.
+- **Whole-file:** continuously overwrites the complete target file.
+  Consumers install these thin managed callers, not the hub's stage-level
+  reusable workflows. The callers invoke the promoted Universal and pre-merge
+  gate entry points at `@main`; the hub keeps their internal stage composition
+  centralized and independently testable.
+- **Init-if-missing:** creates a starter file once and never overwrites it.
 
-> **Current status:** most templates still use `sync.py`'s inline `_*`
-> constants as source of truth. Active workflow-template overrides are now
-> enabled for files under `managed-files/workflows/`:
->
-> * `bos-universal-launchpad-kicker.yml`
-> * `bos-launchpad-gate.yml`
-> * `bos-launchpad-sync-files.yml`
-> * `sync-drift-check.yml`
-> * `lint.node.yml`
-> * `lint.python.yml`
-> * `lint.shell.yml`
->
-> The `bos_launchpad_reference` service derives its hub-only copy/paste
-> example from the universal launchpad template and writes it under
-> `managed-files/examples/`. It intentionally does not target
-> `.github/workflows/`, because GitHub's default Actions token cannot create
-> or update workflow files during self-sync.
->
-> Active dotfile-template override is also enabled for:
->
-> * `dotfiles/.wranglerignore`
-> * `dotfiles/.gitignore.common`
-> * `dotfiles/.gitignore.node`
-> * `dotfiles/.gitignore.python`
-> * `dotfiles/.gitattributes`
-> * `dotfiles/.editorconfig`
-> * `dotfiles/.dockerignore.common`
-> * `dotfiles/.dockerignore.balena`
-> * `dotfiles/.dockerignore.node`
-> * `dotfiles/.dockerignore.python`
-> * `dotfiles/.shellcheckrc`
-> * `dotfiles/.markdownlint.yaml`
->
-> When these files exist, `sync.py` reads them and overrides the inline
-> default bodies.
+The service registry in
+[`sync.py`](../.github/actions/sync-managed-files/sync.py) is authoritative for
+which files each service owns.
 
-This remains deliberate. Migration is a separate, reviewable change per
-file — not a big-bang flip.
+## Organization defaults
 
-## Naming convention (when content lands here)
+[`community-health/`](community-health/), [`github-meta/`](github-meta/), and
+[`org-profile/`](org-profile/) are canonical sources for the dedicated
+`blackoutsecure/.github` repository. Enable the whole-file `org_defaults`
+service there and set this in `bos-managed-files.yaml`:
 
-Each file's relative path under `managed-files/` mirrors the path it
-will be written to in the **consumer** repo, with two exceptions:
-
-1. **Multi-variant content** uses a subdirectory keyed by the variant
-   discriminator. The four SPDX licenses become
-   `managed-files/licenses/apache-2.0.txt`,
-   `managed-files/licenses/mit.txt`, etc. — `sync.py`'s
-   `_LICENSE_REGISTRY` lookup becomes a `licenses/<spdx-id>.txt` file
-   read.
-2. **Templated files** (those containing `{{KEY}}` placeholders
-   substituted from `bos-managed-files.yaml` at sync time) keep their
-   `{{KEY}}` syntax verbatim on disk. The placeholder substitution is
-   `sync.py`'s job at sync time, not authoring time.
-
-Current + planned layout:
-
-```text
-managed-files/
-├── README.md                              ← you are here
-│
-│   # === LANDED (extracted, not yet wired into sync.py) ===
-│
-├── community-health/                      ← org-wide defaults (inherit-able from .github org repo)
-│   ├── CODE_OF_CONDUCT.md
-│   ├── CONTRIBUTING.md
-│   ├── SECURITY.md
-│   ├── SUPPORT.md
-│   └── FUNDING.yml
-├── github-meta/                           ← org-default `.github/` content
-│   ├── PULL_REQUEST_TEMPLATE.md
-│   └── ISSUE_TEMPLATE/
-│       ├── bug_report.md
-│       ├── feature_request.md
-│       └── config.yml
-├── org-profile/                           ← org public profile page
-│   └── README.md                          ← target: blackoutsecure/.github profile/README.md
-│
-│   # === PLANNED (still inline in sync.py as `_*` string constants) ===
-│
-├── licenses/
-│   ├── apache-2.0.txt                     ← from _LICENSE_APACHE2
-│   ├── mit.txt                            ← from _LICENSE_MIT
-│   ├── bsd-3-clause.txt                   ← from _LICENSE_BSD_3_CLAUSE
-│   └── isc.txt                            ← from _LICENSE_ISC
-├── notice.apache2.txt                     ← from _NOTICE_TEMPLATE
-├── codeowners.txt                         ← from _CODEOWNERS_TEMPLATE
-├── prettierrc.yaml                        ← from _PRETTIERRC_YAML
-├── log-functions.sh                       ← from _LOG_FUNCTIONS_SH
-├── dotfiles/
-│   └── .wranglerignore                    ← from _WRANGLERIGNORE_CF_PAGES
-│   └── .gitignore.common                  ← from _GITIGNORE_COMMON
-│   └── .gitignore.node                    ← from _GITIGNORE_NODE
-│   └── .gitignore.python                  ← from _GITIGNORE_PYTHON
-│   └── .gitattributes                     ← from _GITATTRIBUTES_LF
-│   └── .editorconfig                      ← from _EDITORCONFIG_COMMON
-│   └── .dockerignore.common               ← from _DOCKERIGNORE_DOCKER
-│   └── .dockerignore.balena               ← from _DOCKERIGNORE_BALENA
-│   └── .dockerignore.node                 ← from _DOCKERIGNORE_NODE
-│   └── .dockerignore.python               ← from _DOCKERIGNORE_PYTHON
-│   └── .shellcheckrc                      ← from _SHELLCHECKRC_DEFAULT
-│   └── .markdownlint.yaml                 ← from _MARKDOWNLINT_YAML_DEFAULT
-└── workflows/
-    ├── bos-launchpad-release.yml          ← from _BOS_LAUNCHPAD_RELEASE_YML
-    ├── bos-launchpad-cf-pages.yml         ← from _BOS_LAUNCHPAD_CF_PAGES_YML
-    ├── bos-launchpad-sync-files.yml       ← from _BOS_LAUNCHPAD_SYNC_FILES_YML
-    ├── bos-launchpad-org-default.yml      ← (NEW) kicker for the `.github` org repo (TBD)
-    ├── sync-drift-check.yml               ← from _GHA_SYNC_DRIFT_CHECK_YML
-    ├── lint.node.yml                      ← from _GHA_LINT_NODE_YML
-    ├── lint.python.yml                    ← from _GHA_LINT_PYTHON_YML
-    └── lint.shell.yml                     ← from _GHA_LINT_SHELL_YML
+```yaml
+target_repo_role: org-default-repo
 ```
 
-## Per-consumer scope — `target_repo_role`
+The role check prevents these files, especially `profile/README.md`, from
+being copied into normal product repositories. Product repositories use the
+default `target_repo_role: consumer` and inherit community-health files and
+templates from GitHub's organization repository.
 
-Not every consumer receives every file. The `.github` **org repo** needs
-files no other consumer should ever get (its own `profile/README.md`,
-its own top-level `CODE_OF_CONDUCT.md`/`CONTRIBUTING.md`/`SECURITY.md`).
-Normal consumers must NOT receive `profile/README.md` — that would put
-an org-landing-page profile inside every project repo.
+The organization-default targets are the repository root files
+`CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `SUPPORT.md`;
+`.github/FUNDING.yml`; `.github/PULL_REQUEST_TEMPLATE.md`;
+`.github/ISSUE_TEMPLATE/*`; and `profile/README.md`.
 
-**Proposed (not yet implemented):** add a `target_repo_role:` key to
-`bos-managed-files.yaml` with values:
+## Branch policy
 
-| Value              | Meaning                                                 | Receives                                                       |
-| ------------------ | ------------------------------------------------------- | -------------------------------------------------------------- |
-| `consumer` (default) | A normal project repo                                  | Today's services only — none of the org-default-only content   |
-| `org-default-repo` | The `blackoutsecure/.github` org repo itself           | `community-health/*`, `github-meta/*`, `org-profile/README.md` |
+`dev` is the hub development branch. Consumer-facing managed callers use
+`@main`, which is the promoted stable runtime. GitHub Actions does not allow
+expressions in `uses:` references, so this separation is intentionally static:
 
-The role gates which services in `SERVICE_FILES` / `SERVICE_INIT_FILES`
-fire. Wiring lives in `sync.py` and is deliberately deferred until the
-content-extraction migration above is also designed — they share
-plumbing.
+- hub-only validation uses local `./.github/actions/...` references;
+- managed consumer callers use
+  `blackoutsecure/bos-automation-hub/...@main`;
+- runtime branch decisions inside actions use the caller repository's
+  `github.event.repository.default_branch` where appropriate.
 
-## Migration roadmap (proposed, not started)
-
-A safe migration of a given file requires three pieces moving together:
-
-1. **Extract** the Python string constant into a file under
-   `managed-files/` matching the layout above.
-2. **Re-point** `sync.py` to load the body via
-   `pathlib.Path(__file__).parents[3] / "managed-files" / <path>` (or an
-   equivalent helper) at module-import time, replacing the literal.
-3. **Guard** the move with a drift check — until *all* constants are
-   migrated, run a check that asserts every extracted file's contents
-   match the live `_*` constant. This catches the failure mode where
-   someone edits one and not the other during the migration window.
-
-Recommended migration order (simplest first; lowest blast radius):
-
-| Order | File(s)                       | Why first                                                |
-| ----- | ----------------------------- | -------------------------------------------------------- |
-| 0     | `community-health/*`,         | Already extracted — pure static markdown, no placeholders, |
-|       | `github-meta/*`,              | single consumer (`.github` org repo) via `target_repo_role`. |
-|       | `org-profile/README.md`       | Lowest blast radius of all — only one consumer.          |
-| 1     | `licenses/*.txt`              | Static text, no placeholders for Apache-2.0; one-to-one  |
-|       |                               | registry mapping; lowest reviewer ambiguity              |
-| 2     | `notice.apache2.txt`,         | Static-ish templates with `{{KEY}}` placeholders only —  |
-|       | `codeowners.txt`              | placeholder substitution already lives in sync.py        |
-| 3     | `prettierrc.yaml`,            | Whole-file overwrites, single consumer service each      |
-|       | `log-functions.sh`            |                                                          |
-| 4     | `workflows/bos-launchpad-*`   | The launchpad kickers — bigger, but identical structure  |
-|       |                               | so they batch well; existing kicker-examples drift check |
-|       |                               | already verifies their content                           |
-| 5     | `workflows/sync-*`,           | Init-if-missing starters — exercised less, write-once    |
-|       | `workflows/lint.*`            | semantics make accidental regressions easier to spot     |
-
-Each step is its own PR with its own drift-check survival. Do not batch.
-
-### Status of step 0 (community-health / github-meta / org-profile)
-
-The content is **on disk** (the new `community-health/`, `github-meta/`,
-`org-profile/` directories you see today). What is NOT done:
-
-- `sync.py` has no `target_repo_role` plumbing yet.
-- No service registry entries point at these files.
-- No kicker workflow exists to push them to `blackoutsecure/.github`.
-
-This is intentional. The content moved first so it could be reviewed
-in isolation. Wiring is the next PR — and lands together with the
-first `_*` constant extraction so both share the same `_load_template()`
-helper + drift-check.
-
-## What does NOT belong here
-
-- **Per-consumer overrides.** Consumers express choices in
-  `bos-managed-files.yaml` (e.g. `license_type: mit`); the rendered
-  output uses whichever variant from this folder. Don't add
-  consumer-specific content here.
-- **GitHub Actions workflows the hub itself runs.** Those live in
-  [`../.github/workflows/`](../.github/workflows/) — they are not synced
-  outward.
-- **Example consumer files.** Those live in
-  [`../examples/`](../examples/) — they are illustrative, not synced.
-- **Linter configs.** Lint defaults for consumers ship from
-  [`bos-marketplace-kit`'s `.github/actions/lint` composite](https://github.com/blackoutsecure/bos-marketplace-kit/tree/main/.github/actions/lint/configs)
-  with inherit-by-default semantics. Don't duplicate them here.
-
-## Reading order for newcomers
-
-1. This README.
-2. [`../.github/actions/sync-managed-files/action.yml`](../.github/actions/sync-managed-files/action.yml)
-   — the composite that invokes sync.py.
-3. [`../.github/actions/sync-managed-files/sync.py`](../.github/actions/sync-managed-files/sync.py)
-   — search for `_LICENSE_APACHE2`, `_NOTICE_TEMPLATE`,
-   `_BOS_LAUNCHPAD_RELEASE_YML` etc. to see the current source-of-truth
-   constants this folder will eventually replace.
-4. [`../scripts/sync-kicker-examples-from-sync.py`](../scripts/sync-kicker-examples-from-sync.py)
-   — the drift-check pattern that should be extended to also guard
-   `managed-files/` once migration starts.
+The hub promotion workflow publishes shared actions, this directory, core
+documentation/license files, and workflows declaring `workflow_call`. Event-only
+hub maintenance workflows remain on `dev`.

@@ -469,7 +469,7 @@ jobs:
 
       - name: Checkout caller repo
         if: inputs.auto_resolve_version
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -606,7 +606,7 @@ jobs:
       BUILD_DATE: ${{ needs.setup.outputs.build_date }}
       IMAGE_REF: ${{ needs.setup.outputs.image }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -614,7 +614,7 @@ jobs:
 
       - name: Generate image labels
         id: meta
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
         with:
           images: ${{ env.IMAGE_REF }}
           labels: |
@@ -625,31 +625,22 @@ jobs:
 
       - name: Docker Hub login
         if: env.PUSH == 'true'
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Compose build args
         id: args
-        env:
-          USER_BUILD_ARGS: ${{ inputs.build_args }}
-          VERSION_BUILD_ARG: ${{ inputs.version_build_arg }}
-          INJECT_OCI: ${{ inputs.inject_oci_build_args }}
-          VCS_URL: ${{ github.server_url }}/${{ github.repository }}
-        run: |
-          set -euo pipefail
-          {
-            echo "build_args<<__EOF__"
-            [ -n "${VERSION_BUILD_ARG}" ] && echo "${VERSION_BUILD_ARG}=${IMAGE_VERSION}"
-            if [ "${INJECT_OCI}" = "true" ]; then
-              echo "BUILD_DATE=${BUILD_DATE}"
-              echo "VCS_REF=${GITHUB_SHA}"
-              echo "VCS_URL=${VCS_URL}"
-            fi
-            [ -n "${USER_BUILD_ARGS}" ] && printf '%s\n' "${USER_BUILD_ARGS}"
-            echo "__EOF__"
-          } >> "${GITHUB_OUTPUT}"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/compose-docker-build-args@main
+        with:
+          image_version: ${{ env.IMAGE_VERSION }}
+          version_build_arg: ${{ inputs.version_build_arg }}
+          inject_oci: ${{ inputs.inject_oci_build_args }}
+          build_date: ${{ env.BUILD_DATE }}
+          vcs_ref: ${{ github.sha }}
+          vcs_url: ${{ github.server_url }}/${{ github.repository }}
+          user_build_args: ${{ inputs.build_args }}
 
       - name: Resolve platform
         id: platform
@@ -662,7 +653,7 @@ jobs:
 
       - name: Build${{ env.PUSH == 'true' && ' and push by digest' || ' (validation only)' }}
         id: build
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: ${{ inputs.build_context }}
           file: ${{ inputs.dockerfile }}
@@ -795,7 +786,7 @@ jobs:
     steps:
       - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -940,7 +931,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -983,7 +974,7 @@ jobs:
       # name the local image by. Never pushed.
       SCAN_TAG: scan-${{ github.sha }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -991,29 +982,18 @@ jobs:
 
       - name: Compose build args
         id: args
-        env:
-          USER_BUILD_ARGS: ${{ inputs.build_args }}
-          VERSION_BUILD_ARG: ${{ inputs.version_build_arg }}
-          INJECT_OCI: ${{ inputs.inject_oci_build_args }}
-          IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
-          BUILD_DATE: ${{ needs.setup.outputs.build_date }}
-          VCS_URL: ${{ github.server_url }}/${{ github.repository }}
-        run: |
-          set -euo pipefail
-          {
-            echo "build_args<<__EOF__"
-            [ -n "${VERSION_BUILD_ARG}" ] && echo "${VERSION_BUILD_ARG}=${IMAGE_VERSION}"
-            if [ "${INJECT_OCI}" = "true" ]; then
-              echo "BUILD_DATE=${BUILD_DATE}"
-              echo "VCS_REF=${GITHUB_SHA}"
-              echo "VCS_URL=${VCS_URL}"
-            fi
-            [ -n "${USER_BUILD_ARGS}" ] && printf '%s\n' "${USER_BUILD_ARGS}"
-            echo "__EOF__"
-          } >> "${GITHUB_OUTPUT}"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/compose-docker-build-args@main
+        with:
+          image_version: ${{ needs.setup.outputs.image_version }}
+          version_build_arg: ${{ inputs.version_build_arg }}
+          inject_oci: ${{ inputs.inject_oci_build_args }}
+          build_date: ${{ needs.setup.outputs.build_date }}
+          vcs_ref: ${{ github.sha }}
+          vcs_url: ${{ github.server_url }}/${{ github.repository }}
+          user_build_args: ${{ inputs.build_args }}
 
       - name: Build amd64 and load locally
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: ${{ inputs.build_context }}
           file: ${{ inputs.dockerfile }}
@@ -1103,7 +1083,7 @@ jobs:
       IMAGE_REF: ${{ needs.setup.outputs.image }}
       IMAGE_VERSION: ${{ needs.setup.outputs.image_version }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

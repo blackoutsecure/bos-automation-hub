@@ -46,9 +46,8 @@ Rules
 * For section mode, nothing outside the marker pair is ever read or
   written.
 * A single file path may not be registered under more than one mode.
-  Within SERVICE_FILES, multiple services MAY claim the same path
-  (e.g. the two `bos_launchpad_*` kickers); within SERVICE_INIT_FILES
-  the same is true (e.g. the three `gha_lint_*` variants). In both
+  Within SERVICE_FILES or SERVICE_INIT_FILES, multiple services MAY
+  claim the same path. In both
   cases at most one of the co-targeting services may be enabled per
   repo — enforced at parse time by `parse_services()`.
 
@@ -76,7 +75,7 @@ MARKER_NOTE = (
     "do not edit between markers."
 )
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _MANAGED_FILES_ROOT = _REPO_ROOT / "managed-files"
 
 
@@ -615,8 +614,8 @@ external-sources=true
 """
 
 _SHELLCHECKRC_DEFAULT = _load_managed_template_or_default(
-    "dotfiles/.shellcheckrc",
-    _SHELLCHECKRC_DEFAULT,
+  "dotfiles/.shellcheckrc",
+  _SHELLCHECKRC_DEFAULT,
 )
 
 _MARKDOWNLINT_YAML_DEFAULT = """\
@@ -638,8 +637,8 @@ MD041: false
 """
 
 _MARKDOWNLINT_YAML_DEFAULT = _load_managed_template_or_default(
-    "dotfiles/.markdownlint.yaml",
-    _MARKDOWNLINT_YAML_DEFAULT,
+  "dotfiles/.markdownlint.yaml",
+  _MARKDOWNLINT_YAML_DEFAULT,
 )
 
 _HUMANS_TXT = """\
@@ -669,10 +668,7 @@ _HUMANS_TXT = _load_managed_template_or_default(
 # so each repo is free to customize after init. The header injected by
 # `_make_init_file()` says so explicitly.
 #
-# Naming: `gha_*` for `.github/workflows/*.yml` files. Per-language
-# lint variants (`gha_lint_node`, `gha_lint_python`, `gha_lint_shell`)
-# all target the same `.github/workflows/lint.yml`, so at most ONE may
-# be enabled per repo (enforced at parse time by `parse_services()`).
+# Naming: `gha_*` for `.github/workflows/*.yml` files.
 
 _GHA_SYNC_DRIFT_CHECK_YML = """\
 # PR-time drift check. Runs the bos-automation-hub
@@ -719,329 +715,52 @@ jobs:
         # Mirror the list in `.github/workflows/sync-managed-files.yml`.
 """
 
-_GHA_LINT_NODE_YML = """\
-# Lint for a Node-based GitHub Action repo. Runs:
-#   - actionlint (workflow + composite action YAML)
-#   - eslint    (npm run lint, if defined)
-#   - prettier  (npm run format -- --check, if defined)
-#
-# This is a starter template — the hub writes it only when missing and
-# will never overwrite it. Adjust scripts/Node version to taste.
-
-name: Lint
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - '**/*.js'
-      - '**/*.json'
-      - '**/*.md'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.eslintrc*'
-      - 'eslint.config.*'
-      - '.prettierrc*'
-      - '.github/workflows/lint.yml'
-  pull_request:
-    paths:
-      - '**/*.js'
-      - '**/*.json'
-      - '**/*.md'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.eslintrc*'
-      - 'eslint.config.*'
-      - '.prettierrc*'
-      - '.github/workflows/lint.yml'
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: lint-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  actionlint:
-    name: actionlint
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Run actionlint
-        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
-        with:
-          matcher: true
-          fail-on-error: true
-          shellcheck: true
-
-  node-lint:
-    name: eslint + prettier
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v6.0.0
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - name: ESLint
-        run: |
-          if npm run | grep -qE '^  lint$'; then
-            npm run lint -- --max-warnings=0 || npm run lint
-          else
-            echo "::notice::no 'lint' script in package.json — skipping eslint"
-          fi
-      - name: Prettier
-        run: |
-          if npm run | grep -qE '^  format$'; then
-            npx prettier --check "**/*.{js,json,md,yml,yaml}" \\
-              --ignore-path .gitignore || \\
-            echo "::warning::prettier reported drift; run 'npm run format' locally to fix"
-          else
-            echo "::notice::no 'format' script in package.json — skipping prettier"
-          fi
-"""
-
-_GHA_LINT_PYTHON_YML = """\
-# Lint for a Python-based GitHub Action repo. Runs:
-#   - actionlint (workflow + composite action YAML)
-#   - ruff      (linter; reads pyproject.toml [tool.ruff])
-#   - pytest    (unit tests under test/)
-#
-# This is a starter template — the hub writes it only when missing and
-# will never overwrite it. Adjust Python version / extra steps to taste.
-
-name: Lint
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - '**/*.py'
-      - 'pyproject.toml'
-      - 'requirements*.txt'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - '.github/workflows/lint.yml'
-  pull_request:
-    paths:
-      - '**/*.py'
-      - 'pyproject.toml'
-      - 'requirements*.txt'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - '.github/workflows/lint.yml'
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: lint-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  actionlint:
-    name: actionlint
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Run actionlint
-        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
-        with:
-          matcher: true
-          fail-on-error: true
-          shellcheck: true
-
-  python-lint:
-    name: ruff + pytest
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6.0.0
-        with:
-          python-version: '3.11'
-          cache: pip
-      - name: Install dev deps
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements-dev.txt ]; then
-            pip install -r requirements-dev.txt
-          else
-            pip install ruff pytest
-          fi
-      - name: Ruff
-        run: ruff check .
-      - name: Pytest
-        run: |
-          if [ -d test ] || [ -d tests ]; then
-            pytest -q
-          else
-            echo "::notice::no test/ or tests/ directory — skipping pytest"
-          fi
-"""
-
-_GHA_LINT_SHELL_YML = """\
-# Lint for a shell/bash-based GitHub Action repo. Runs:
-#   - actionlint (workflow + composite action YAML, with shellcheck)
-#   - shellcheck (top-level *.sh files outside .github/)
-#   - bats       (any test/**/*.bats files, if present)
-#
-# This is a starter template — the hub writes it only when missing and
-# will never overwrite it. Adjust paths to taste.
-
-name: Lint
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - '**/*.sh'
-      - '**/*.bats'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - 'action.yml'
-      - '.github/workflows/lint.yml'
-  pull_request:
-    paths:
-      - '**/*.sh'
-      - '**/*.bats'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - 'action.yml'
-      - '.github/workflows/lint.yml'
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: lint-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  actionlint:
-    name: actionlint
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Run actionlint
-        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8 # v2.1.2
-        with:
-          matcher: true
-          fail-on-error: true
-          shellcheck: true
-
-  shellcheck:
-    name: shellcheck + bats
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Install shellcheck + bats
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck bats
-      - name: ShellCheck
-        run: |
-          # Lint every *.sh outside .github/ (raven-actions/actionlint
-          # already covers workflow run-blocks via its own shellcheck).
-          mapfile -t files < <(find . -path ./.github -prune -o -type f -name '*.sh' -print)
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "::notice::no *.sh files outside .github/ — skipping shellcheck"
-            exit 0
-          fi
-          shellcheck "${files[@]}"
-      - name: Bats
-        run: |
-          if find test tests -type f -name '*.bats' 2>/dev/null | grep -q .; then
-            bats $(find test tests -type f -name '*.bats' 2>/dev/null)
-          else
-            echo "::notice::no *.bats files under test/ or tests/ — skipping bats"
-          fi
-"""
-
 # Managed-files overrides for init workflow starter templates.
 _GHA_SYNC_DRIFT_CHECK_YML = _load_managed_template_or_default(
   "workflows/sync-drift-check.yml",
   _GHA_SYNC_DRIFT_CHECK_YML,
 )
-_GHA_LINT_NODE_YML = _load_managed_template_or_default(
-  "workflows/lint.node.yml",
-  _GHA_LINT_NODE_YML,
-)
-_GHA_LINT_PYTHON_YML = _load_managed_template_or_default(
-  "workflows/lint.python.yml",
-  _GHA_LINT_PYTHON_YML,
-)
-_GHA_LINT_SHELL_YML = _load_managed_template_or_default(
-  "workflows/lint.shell.yml",
-  _GHA_LINT_SHELL_YML,
-)
+
+# Organization-wide defaults are synchronized only to the dedicated
+# `blackoutsecure/.github` repository. Product repositories inherit these
+# files from GitHub and must not receive local copies.
+_ORG_DEFAULT_FILES = {
+  "CODE_OF_CONDUCT.md": _load_managed_template_or_default(
+    "community-health/CODE_OF_CONDUCT.md", ""
+  ),
+  "CONTRIBUTING.md": _load_managed_template_or_default(
+    "community-health/CONTRIBUTING.md", ""
+  ),
+  ".github/FUNDING.yml": _load_managed_template_or_default(
+    "community-health/FUNDING.yml", ""
+  ),
+  "SECURITY.md": _load_managed_template_or_default(
+    "community-health/SECURITY.md", ""
+  ),
+  "SUPPORT.md": _load_managed_template_or_default(
+    "community-health/SUPPORT.md", ""
+  ),
+  ".github/PULL_REQUEST_TEMPLATE.md": _load_managed_template_or_default(
+    "github-meta/PULL_REQUEST_TEMPLATE.md", ""
+  ),
+  ".github/ISSUE_TEMPLATE/bug_report.md": _load_managed_template_or_default(
+    "github-meta/ISSUE_TEMPLATE/bug_report.md", ""
+  ),
+  ".github/ISSUE_TEMPLATE/config.yml": _load_managed_template_or_default(
+    "github-meta/ISSUE_TEMPLATE/config.yml", ""
+  ),
+  ".github/ISSUE_TEMPLATE/feature_request.md": _load_managed_template_or_default(
+    "github-meta/ISSUE_TEMPLATE/feature_request.md", ""
+  ),
+  "profile/README.md": _load_managed_template_or_default(
+    "org-profile/README.md", ""
+  ),
+}
 
 
 # --------------------------------------------------------------------------- #
 # bos-launchpad kicker workflows                                              #
 # --------------------------------------------------------------------------- #
-#
-# Two whole-file kicker workflows that write to DISTINCT paths
-# (`.github/workflows/bos-universal-launchpad-kicker.yml` for container release,
-# `.github/workflows/bos-launchpad-cf-pages.yml` for static-site CF
-# Pages) but are still MUTUALLY EXCLUSIVE per consumer repo — enforced
-# at parse time via `_SEMANTIC_MUTEX_GROUPS` because the path-collision
-# check no longer catches the combo. A repo should pick exactly one
-# delivery flavor; running both side-by-side would queue two unrelated
-# pipelines on every `main` push.
-#
-# Both kickers delegate to the SAME hub reusable
-# (`bos-universal-launchpad-kicker.yml` — the launchpad handles both modes via
-# inputs) and read per-repo customization from a consumer-owned
-# `bos-launchpad-config.json` data file at the repo root. The kicker
-# parses that JSON to a job output and the downstream
-# `release:` / `cloudflare:` job consumes it via
-# `fromJson(needs.parse-config.outputs.cfg).<path>` for each launchpad
-# input. The data file is NOT hub-managed — consumers own it.
-#
-# Why two kickers instead of one mega-kicker:
-#   * GHA `on:` triggers are static and cannot come from a data file.
-#     One kicker = one trigger set; the cron-driven container release
-#     and the push-driven static site need distinct trigger shapes.
-#   * `secrets:` forwarding is static. Each kicker forwards only the
-#     secrets its flow actually needs (DOCKERHUB_* + BALENA_* for
-#     release, CLOUDFLARE_* for cf-pages).
-#   * Concurrency group keys differ so a release on `main` doesn't
-#     queue behind a static-site push and vice versa.
-#
-# The `runner` (blackoutmode/runner) repo is INTENTIONALLY out of scope:
-# it has a hand-authored preflight job that has to gate the launchpad
-# call. Hand-author its caller; don't enable either kicker service
-# for that repo.
-#
-# Schema for `bos-launchpad-config.json` is documented in the hub README
-# under the `bos_launchpad` service section.
 
 _BOS_LAUNCHPAD_RELEASE_YML = """\
 # Blackout Secure Launchpad — universal kicker (hub-managed).
@@ -1083,11 +802,6 @@ on:
         description: 'Force: run pipeline even if upstream unchanged'
         type: boolean
         default: false
-      sync_mode:
-        description: 'Sync mode for integrated managed-files stage'
-        type: choice
-        options: [commit, check]
-        default: commit
 
 permissions:
   contents: read
@@ -1104,7 +818,7 @@ jobs:
       cfg: ${{ steps.config.outputs.cfg }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Load launchpad config
@@ -1198,8 +912,6 @@ jobs:
 
       # ----- Universal kicker wiring -----
       use_launchpad_config: true
-      sync_managed_files: true
-      sync_mode: ${{ github.event_name == 'workflow_dispatch' && inputs.sync_mode || '' }}
 
       # ----- Optional stages configured from data file -----
       enable_security_scan:         ${{ fromJson(needs.parse-config.outputs.cfg).security_scan.enable == true }}
@@ -1240,148 +952,6 @@ jobs:
 """
 
 
-_BOS_LAUNCHPAD_CF_PAGES_YML = """\
-# Blackout Secure Launchpad — Cloudflare Pages kicker (hub-managed).
-#
-# Calls `bos-universal-launchpad.yml` in blackoutsecure/bos-automation-hub. Reads
-# per-repo customization from `bos-launchpad-config.json` at the repo root.
-#
-# CUSTOMIZE via `bos-launchpad-config.json` — NOT this file. The hub
-# overwrites this workflow in place on every sync; hand-edits are
-# lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
-#
-# Required secrets:
-#   CLOUDFLARE_API_TOKEN — Account → Cloudflare Pages → Edit, plus
-#     Zone → Cache Purge → Purge and Zone → Zone → Read when
-#     `cloudflare.purge_cache: true` (the default). Zone:Read also
-#     lets the purge step auto-resolve the zone ID from the site URL.
-#   CLOUDFLARE_ACCOUNT_ID — optional; auto-resolved via `GET /accounts`
-#   CLOUDFLARE_ZONE_ID    — optional; auto-resolved from site URL
-#   CLOUDFLARE_PAGES_ADMIN_TOKEN — optional; only used when
-#     `cloudflare.ai_bindings` is set. Falls back to CLOUDFLARE_API_TOKEN.
-name: Blackout Secure Launchpad
-run-name: >-
-  Blackout Secure Launchpad / Cloudflare Pages / ${{
-    github.event_name == 'workflow_dispatch'
-      && (inputs.force_run && 'manual force' || 'manual')
-      || 'push'
-  }}
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      force_run:
-        description: 'Force: deploy even when the auto gate would skip'
-        type: boolean
-        default: false
-
-# No top-level `concurrency:` — the hub workflow owns per-project
-# Cloudflare Pages serialization; both sides would deadlock.
-permissions:
-  contents: read
-
-jobs:
-  parse-config:
-    name: Parse launchpad config
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      cfg: ${{ steps.config.outputs.cfg }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Load launchpad config
-        id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
-
-  launchpad:
-    name: Cloudflare Pages
-    needs: parse-config
-    permissions:
-      # GHA validates nested reusable-workflow permissions STATICALLY
-      # at workflow-call time, so the full superset declared by leaf
-      # jobs in the launchpad (monitor, release, github-release,
-      # cloudflare-pages) must be granted here even though only the
-      # cloudflare-pages stage runs at runtime.
-      contents:        write
-      actions:         write
-      pull-requests:   write
-      security-events: write
-      models:          read    # nested release.yml -> github-release.yml AI changelog
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-launchpad.yml@main
-    with:
-      # ----- Cloudflare Pages stage -----
-      cloudflare_pages:                     ${{ fromJson(needs.parse-config.outputs.cfg).stages.cloudflare_pages != false }}
-      cloudflare_project_name:              ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.project_name || '' }}
-      cloudflare_deployment_environment:    ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.deployment_environment || '' }}
-      cloudflare_site_url:                  ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.site_url || '' }}
-      cloudflare_public_dir:                ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.public_dir || '.' }}
-      cloudflare_deploy_dir:                ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.deploy_dir || './dist' }}
-      cloudflare_clean_deploy_dir:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.clean_deploy_dir != false }}
-      # `|-` chomps the trailing newline so multi-line caller values
-      # (one path per line) stay byte-stable through the kicker →
-      # launchpad → deploy-cloudflare-pages chain.
-      cloudflare_copy_files: |-
-        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.copy_files || '' }}
-      cloudflare_copy_dirs: |-
-        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.copy_dirs || '' }}
-      cloudflare_prebuild_command:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.prebuild_command || '' }}
-      cloudflare_working_directory:         ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.working_directory || '' }}
-      cloudflare_branch:                    ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.branch || '' }}
-      cloudflare_commit_message:            ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.commit_message || '' }}
-      cloudflare_wrangler_version:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.wrangler_version || '' }}
-      cloudflare_extra_wrangler_args:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.extra_wrangler_args || '' }}
-      # Workers AI bindings: JSON array of binding names (e.g. `["AI"]`).
-      # Reconciled on the project right before deploy so the deployment
-      # inherits the binding. Empty `[]` skips AI handling entirely.
-      cloudflare_ai_bindings:               ${{ toJson(fromJson(needs.parse-config.outputs.cfg).cloudflare.ai_bindings || fromJson('[]')) }}
-      # Force gating: manual dispatch + `force_run` checkbox forces a
-      # deploy past the hub's "only on default-branch pushes" default.
-      cloudflare_deploy:                    ${{ github.event_name == 'workflow_dispatch' && inputs.force_run && 'true' || '' }}
-      cloudflare_runs_on:                   ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.runs_on || '' }}
-      cloudflare_checkout_fetch_depth:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.checkout_fetch_depth || 0 }}
-      cloudflare_purge_cache:               ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.purge_cache != false }}
-
-      # ----- Generators -----
-      cloudflare_generate_sitemap:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_sitemap == true }}
-      cloudflare_generate_robots:           ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_robots == true }}
-      cloudflare_generate_security_txt:     ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_security_txt == true }}
-      cloudflare_security_contact:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.security_contact || '' }}
-      cloudflare_generate_manifest:         ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_manifest == true }}
-      cloudflare_manifest_name:             ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_name || '' }}
-      cloudflare_manifest_short_name:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_short_name || '' }}
-      cloudflare_manifest_description:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_description || '' }}
-      cloudflare_manifest_orientation:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_orientation || '' }}
-      cloudflare_manifest_theme_color:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_theme_color || '' }}
-      cloudflare_manifest_background_color: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_background_color || '' }}
-      cloudflare_manifest_lang:             ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_lang || '' }}
-      cloudflare_manifest_dir:              ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_dir || '' }}
-      cloudflare_manifest_categories:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_categories || '' }}
-      cloudflare_manifest_icons_dir:        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_icons_dir || '' }}
-
-      # ----- _headers generator (hub-local composite action) -----
-      cloudflare_generate_headers:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.generate == true }}
-      cloudflare_headers_presets:           ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.presets || 'security,cache' }}
-      cloudflare_headers_csp:               ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.csp || '' }}
-      cloudflare_headers_hsts_max_age:      ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.hsts_max_age || '63072000' }}
-      cloudflare_headers_permissions_policy: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.permissions_policy || 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()' }}
-      cloudflare_headers_cache_html_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.cache_html_control || 'public, max-age=0, must-revalidate' }}
-      cloudflare_headers_cache_assets_pattern: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.cache_assets_pattern || '/assets/*' }}
-      cloudflare_headers_cache_assets_control: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.cache_assets_control || 'public, max-age=31536000, immutable' }}
-      cloudflare_headers_custom_rules: |-
-        ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.custom_rules || '' }}
-      cloudflare_headers_replace_existing:  ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.headers.replace_existing == true }}
-    secrets:
-      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_PAGES_ADMIN_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
-"""
-
 # Managed-files override: when present, treat this on-disk template as
 # canonical for the universal launchpad kicker body.
 _BOS_LAUNCHPAD_RELEASE_YML = _load_managed_template_or_default(
@@ -1390,282 +960,36 @@ _BOS_LAUNCHPAD_RELEASE_YML = _load_managed_template_or_default(
 )
 
 
-_BOS_LAUNCHPAD_SYNC_FILES_YML = """\
-# Blackout Secure Launchpad — sync-managed-files kicker (hub-managed).
-#
-# Calls `sync-managed-files.yml` in blackoutsecure/bos-automation-hub.
-# Reads per-repo customization from `bos-launchpad-config.json` at the repo
-# root (the `sync_files:` block).
-#
-# CUSTOMIZE via `bos-launchpad-config.json` — NOT this file. The hub
-# overwrites this workflow in place on every sync; hand-edits are
-# lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
-#
-# This kicker REPLACES the hand-authored `sync-managed-files.yml`
-# caller pattern. Once `bos_launchpad_sync_files` is enabled, retire
-# any pre-existing `.github/workflows/sync-managed-files.yml` caller
-# in the consumer repo to avoid two scheduled workflows racing on
-# `git push`. The hub's reusable still lives at
-# `.github/workflows/sync-managed-files.yml` — only the *caller*
-# pattern moves to this kicker.
-name: Blackout Secure Launchpad (sync managed files)
-run-name: >-
-  Blackout Secure Launchpad / sync managed files / ${{
-    github.event_name == 'workflow_dispatch'
-      && format('manual ({0})', inputs.mode)
-      || github.event_name == 'schedule'
-      && 'scheduled'
-      || 'push'
-  }}
-
-on:
-  schedule:
-    # Weekly Monday 14:29 UTC. The hub's reusable normalizes / commits
-    # any drift since the last run; consumers don't need staggered
-    # minutes the way 1-min jobs do — GHA's scheduled-run jitter
-    # absorbs cross-repo collisions for short pipelines.
-    - cron: '29 14 * * 1'
-  push:
-    branches: [main]
-    # Push-trigger only on data-file edits — the workflow file itself
-    # is hub-managed, and source dotfile edits (`.gitignore` etc.)
-    # are caught by the consumer's separate `sync-drift-check.yml`
-    # PR-time job if present.
-    paths:
-      - 'bos-launchpad-config.json'
-      - 'bos-managed-files.yaml'
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: 'Run mode: commit drift back, or check-only'
-        type: choice
-        options: [commit, check]
-        default: commit
-
-# No top-level `concurrency:` — the hub workflow owns serialization.
-# Declaring it on both sides triggers a GHA self-deadlock.
-permissions:
-  contents: read
-
-jobs:
-  parse-config:
-    name: Parse launchpad config
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      cfg: ${{ steps.config.outputs.cfg }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Load launchpad config
-        id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
-      - name: Validate sync_files.services
-        shell: bash
-        env:
-          CFG_JSON: ${{ steps.config.outputs.cfg }}
-        run: |
-          set -euo pipefail
-          # Sanity-check `sync_files.services` is a non-empty list.
-          # The reusable also validates this, but failing here points
-          # the operator at the data file instead of the kicker run.
-          # `# shellcheck disable=SC2016` — the embedded python uses
-          # bash-special characters (backticks, `${}`-looking braces
-          # via f-strings) that shellcheck mis-flags as broken bash
-          # expansion. They are correct python literals.
-          # shellcheck disable=SC2016
-          if ! echo "$CFG_JSON" | python3 -c '
-          import json, sys
-          cfg = json.loads(sys.stdin.read())
-          sf = (cfg or {}).get("sync_files") or {}
-          svcs = sf.get("services")
-          if not isinstance(svcs, list) or not svcs:
-              print("::error file=bos-launchpad-config.json::sync_files.services must be a non-empty list of service names.", file=sys.stderr)
-              sys.exit(1)
-          for s in svcs:
-              if not isinstance(s, str) or not s.strip():
-                  print("::error file=bos-launchpad-config.json::sync_files.services entry is not a non-blank string: " + repr(s), file=sys.stderr)
-                  sys.exit(1)
-          '; then
-            exit 1
-          fi
-
-  sync:
-    name: Sync managed dotfiles
-    needs: parse-config
-    permissions:
-      # `contents: write` required for `mode: commit`; harmless in
-      # `mode: check`. The reusable's leaf job declares the same.
-      contents: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
-    with:
-      # `join(<list>, ' ')` forwards the YAML list as a space-separated
-      # string — the reusable's `parse_services` accepts whitespace OR
-      # newline separation, so no `\\n` trickery is needed.
-      services: ${{ join(fromJson(needs.parse-config.outputs.cfg).sync_files.services, ' ') }}
-      # Mode precedence: workflow_dispatch input → data-file default →
-      # `commit`. Scheduled and push events never carry an input so
-      # they fall through to the data-file default.
-      mode: ${{ inputs.mode || fromJson(needs.parse-config.outputs.cfg).sync_files.mode || 'commit' }}
-      # Outer YAML quotes required: the default literal contains a
-      # `:` which YAML would otherwise treat as a nested mapping.
-      commit_message: "${{ fromJson(needs.parse-config.outputs.cfg).sync_files.commit_message || 'chore: sync managed files from bos-automation-hub' }}"
-      git_user_name:   ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.git_user_name || 'github-actions[bot]' }}
-      git_user_email:  ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.git_user_email || '41898282+github-actions[bot]@users.noreply.github.com' }}
-      push_retries:    ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.push_retries || 3 }}
-      runs_on:         ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.runs_on || 'ubuntu-latest' }}
-      timeout_minutes: ${{ fromJson(needs.parse-config.outputs.cfg).sync_files.timeout_minutes || 5 }}
-"""
-
-_BOS_LAUNCHPAD_SYNC_FILES_YML = _load_managed_template_or_default(
-  "workflows/bos-launchpad-sync-files.yml",
-  _BOS_LAUNCHPAD_SYNC_FILES_YML,
+_BOS_UNIVERSAL_SYNC_KICKER_YML = _load_managed_template_or_default(
+  "workflows/bos-universal-sync-kicker.yml",
+  "",
 )
 
 
-# Canonical copy/paste caller reference kept with the hub's managed examples.
-# It is derived from the same launchpad template the hub syncs into
-# consumers, with a repository guard as defense in depth if copied back into
-# the hub. Keeping it outside `.github/workflows` also lets self-sync update it
-# with the default GITHUB_TOKEN, which cannot create or modify workflow files.
-_BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = (
-  "# Reference caller template for copy/paste into consumer repositories.\n"
-  "# Source of truth: .github/actions/sync-managed-files/sync.py"
-  " (`_BOS_LAUNCHPAD_RELEASE_YML`).\n"
-  "#\n"
-  "# Safety guard:\n"
-  "# This workflow is intentionally stored in bos-automation-hub as a\n"
-  "# reference and is disabled in this repository.\n\n"
-  + _BOS_LAUNCHPAD_RELEASE_YML.replace(
-    "name: Blackout Secure Launchpad (kicker)",
-    "name: Blackout Secure Launchpad (caller reference)",
-    1,
-  ).replace(
-    "  parse-config:\n",
-    "  parse-config:\n"
-    "    if: ${{ github.repository != 'blackoutsecure/bos-automation-hub' }}\n",
-    1,
-  )
+_BOS_UNIVERSAL_SECURITY_KICKER_YML = _load_managed_template_or_default(
+  "workflows/bos-universal-security-kicker.yml",
+  "",
 )
 
-_BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML = _load_managed_template_or_default(
-  "workflows/bos-universal-launchpad-kicker-reference.yml",
-  _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
-)
-
-
-# The hub does NOT enable `bos_launchpad_gate` on itself — `hub-gate.yml`
-# at `.github/workflows/hub-gate.yml` uses a local `./` ref to
-# `bos-gate.yml` so a broken gate definition can be fixed inside the
-# same PR without first publishing the kicker. Every OTHER repo opts
-# in via `bos_launchpad_gate` and gets this file pushed by the sync.
-_BOS_LAUNCHPAD_GATE_YML = """\
-# Blackout Secure Launchpad — gate kicker (hub-managed).
-#
-# Calls `bos-gate.yml` in blackoutsecure/bos-automation-hub. Reads
-# per-repo customization from `bos-launchpad-config.json` at the repo root
-# (the optional `gate:` block — every key has a sensible default).
-#
-# CUSTOMIZE via `bos-launchpad-config.json` — NOT this file. The hub
-# overwrites this workflow in place on every sync; hand-edits are
-# lost. Schema docs: https://github.com/blackoutsecure/bos-automation-hub
-#
-# Branch targeting note: this kicker fires on PRs targeting `main` OR
-# `dev`. Static repos only have one; Marketplace Action repos (whose
-# default branch is `dev` and main lands via `release-promote.yml`)
-# have both. The unused branch never matches, so the filter is
-# harmless when only one exists. Repos using a non-standard target
-# branch should retire this kicker and hand-author their own caller
-# of `bos-gate.yml` until a second flavor is added.
-#
-# Single REQUIRED status check to pin in branch protection (after the
-# first green run): `gate / Gate summary`. Do NOT pin the individual
-# leaf jobs — the `Gate summary` aggregator stays green-stable when
-# the underlying gate set changes.
-name: Blackout Secure Launchpad (gate)
-run-name: >-
-  Blackout Secure Launchpad / gate / ${{
-    github.event_name == 'pull_request'
-      && format('PR #{0}', github.event.pull_request.number)
-      || github.event_name == 'merge_group'
-      && 'merge queue'
-      || 'manual'
-  }}
-
-on:
-  pull_request:
-    branches: [main, dev]
-  # Merge-queue commits must replay the same gate or required-check
-  # enforcement fails open. `bos-gate.yml` handles the merge_group
-  # event (skips PR-scope-only jobs like dependency-review).
-  merge_group:
-  # Manual trigger for ad-hoc revalidation against an arbitrary ref.
-  workflow_dispatch:
-
-# No top-level `concurrency:` — the gate reusable owns serialization
-# per `${{ github.event.pull_request.number || github.ref }}`.
-permissions:
-  contents: read
-
-jobs:
-  parse-config:
-    name: Parse launchpad config
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      cfg: ${{ steps.config.outputs.cfg }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-      - name: Load launchpad config
-        id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
-        with:
-          allow_missing: 'true'
-
-  gate:
-    name: gate
-    needs: parse-config
-    permissions:
-      # Superset of every leaf job in `bos-gate.yml`. GHA validates
-      # nested reusable-workflow permissions statically at call time,
-      # so even gates that are toggled off must have their permission
-      # bits granted here.
-      contents:        read
-      security-events: write   # code-scanning kit SARIF upload
-      actions:         read    # code-scanning kit posture audit
-      pull-requests:   read    # dependency-review + pr-title leaves
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@main
-    with:
-      kit_version:               ${{ fromJson(needs.parse-config.outputs.cfg).gate.kit_version || 'v0.1.2' }}
-      code_scanning_kit_version: ${{ fromJson(needs.parse-config.outputs.cfg).gate.code_scanning_kit_version || 'v1' }}
-      # `!= false` semantics: missing key → null → null != false →
-      # true. Match the reusable's own defaults for these flags.
-      enable_lint:                    ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_lint != false }}
-      enable_baseline:                ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_baseline != false }}
-      enable_dependency_review:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_dependency_review != false }}
-      enable_code_scan:               ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_code_scan != false }}
-      enable_pinned_actions_check:    ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pinned_actions_check != false }}
-      enable_pr_title_check:          ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pr_title_check != false }}
-      pr_title_types:                 ${{ fromJson(needs.parse-config.outputs.cfg).gate.pr_title_types || 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert' }}
-    secrets:
-      # Optional. Absent → falls back to GITHUB_TOKEN inside the gate
-      # (sufficient for PS001 only; the wider posture audit needs an
-      # admin-reach PAT exposed via org/repo secrets as `SCANNING_PAT`).
-      scanning_pat: ${{ secrets.SCANNING_PAT }}
-"""
-
-_BOS_LAUNCHPAD_GATE_YML = _load_managed_template_or_default(
-  "workflows/bos-launchpad-gate.yml",
-  _BOS_LAUNCHPAD_GATE_YML,
+_BOS_UNIVERSAL_MARKETPLACE_KICKER_YML = _load_managed_template_or_default(
+  "workflows/bos-universal-marketplace-kicker.yml",
+  "",
 )
 
 _BOS_LAUNCHPAD_CONFIG_INIT_JSON = """\
 {
+  "gate": {
+    "enable_node_lint": false,
+    "node_version": "20",
+    "enable_python_lint": false,
+    "python_version": "3.11",
+    "enable_shell_lint": false
+  },
+  "marketplace": {
+    "enabled": false,
+    "target_branch": "main",
+    "allowlist_paths": "action.yml\\nREADME.md\\nLICENSE"
+  },
   "sync_files": {
     "services": [
       "common",
@@ -2100,7 +1424,7 @@ _CODEOWNERS_TEMPLATE = """\
 # --------------------------------------------------------------------------- #
 #
 # Tiny flat-YAML reader for per-repo placeholder values consumed by the
-# `license`, `license_apache2`, `notice_apache2`, and `codeowners`
+# `license`, `notice_apache2`, and `codeowners`
 # services. Pure
 # stdlib — sync.py intentionally has no third-party deps.
 #
@@ -2119,6 +1443,7 @@ _CODEOWNERS_TEMPLATE = """\
 #     dotfiles_force_enable_paths: .dockerignore,.shellcheckrc
 #     dotfiles_force_disable_paths: .wranglerignore
 #     dotfiles_prune_disabled: false # true removes hub-managed disabled dotfiles
+#     target_repo_role: consumer     # or: org-default-repo
 #
 # `dependabot_target_branch` adds a `target-branch:` knob to EVERY
 # enabled `dependabot_*` ecosystem block, so Dependabot PRs land on
@@ -2159,10 +1484,7 @@ _DEFAULT_MANAGED_CONFIG: Dict[str, str] = {
     "maintainers_team": "@blackoutsecure/maintainers",
     # SPDX short identifier (lowercased). Used by the `license` service
     # to pick which canonical text from `_LICENSE_REGISTRY` to render.
-    # Must be one of the keys in `_LICENSE_REGISTRY`. The deprecated
-    # alias service `license_apache2` IGNORES this and always emits
-    # Apache 2.0 — useful when a repo wants to keep its existing
-    # license while the org default shifts.
+    # Must be one of the keys in `_LICENSE_REGISTRY`.
     "license_type": "apache-2.0",
     # Optional `target-branch:` override applied to every enabled
     # `dependabot_*` ecosystem block. Leave empty for the default
@@ -2197,6 +1519,9 @@ _DEFAULT_MANAGED_CONFIG: Dict[str, str] = {
     "dotfiles_force_disable_paths": "",
     # When true, disabled dotfiles are cleaned up after the fact.
     "dotfiles_prune_disabled": "false",
+    # Organization-default content is valid only in the dedicated `.github`
+    # repository. Normal repositories inherit it through GitHub.
+    "target_repo_role": "consumer",
 }
 
 _KNOWN_CONFIG_KEYS = frozenset(_DEFAULT_MANAGED_CONFIG.keys())
@@ -2237,6 +1562,7 @@ _DOTFILES_WORKSTREAM_VALUES = frozenset({
   "action",
   "generic",
 })
+_TARGET_REPO_ROLE_VALUES = frozenset({"consumer", "org-default-repo"})
 _MANAGED_SECTION_DOTFILE_PATHS = frozenset({
   ".gitignore",
   ".dockerignore",
@@ -2453,6 +1779,15 @@ def _load_managed_config(root: str) -> Dict[str, str]:
       "dotfiles_prune_disabled",
     )
 
+    target_repo_role = merged.get("target_repo_role", "").strip().lower()
+    if target_repo_role not in _TARGET_REPO_ROLE_VALUES:
+      die(
+        f"{MANAGED_FILES_CONFIG_FILENAME}: 'target_repo_role' "
+        f"({target_repo_role!r}) is invalid. Supported: "
+        f"{', '.join(sorted(_TARGET_REPO_ROLE_VALUES))}."
+      )
+    merged["target_repo_role"] = target_repo_role
+
     return merged
 
 
@@ -2645,12 +1980,9 @@ def _render_placeholders(body: str, subs: Dict[str, str]) -> str:
 # MUST stay byte-identical to the canonical form so license-detection
 # tools (GitHub linguist, FOSSA, etc.) can recognize the file by SHA /
 # fuzzy hash. Any service NOT in this set goes through the standard
-# `_make_init_file()` header injection. Both `license` (multi-type) and
-# `license_apache2` (alias) are listed — they share the LICENSE path
-# and the no-header requirement is per-PATH-content, not per-service.
+# `_make_init_file()` header injection.
 _NO_HEADER_INIT_SERVICES = frozenset({
     "license",
-    "license_apache2",
     "notice_apache2",
 })
 
@@ -2675,9 +2007,7 @@ _TEMPLATED_INIT_SERVICES = frozenset({
 # `_LICENSE_REGISTRY` based on `license_type` in `bos-managed-files.yaml`.
 # The body registered in `SERVICE_INIT_FILES` for these services is
 # a fallback placeholder; the init-loop swaps it for the right canonical
-# text BEFORE placeholder rendering. The `license_apache2` alias is
-# intentionally NOT here — it always emits Apache 2.0 regardless of
-# config, preserving backward compatibility for early adopters.
+# text BEFORE placeholder rendering.
 _DYNAMIC_LICENSE_INIT_SERVICES = frozenset({"license"})
 
 # Section-mode services whose body contains `{{KEY}}` placeholders
@@ -2800,12 +2130,32 @@ SERVICE_FILES: Dict[str, Dict[str, str]] = {
     "bos_launchpad": {
       ".github/workflows/bos-universal-launchpad-kicker.yml": _BOS_LAUNCHPAD_RELEASE_YML,
     },
-    "bos_launchpad_reference": {
-      "managed-files/examples/bos-universal-launchpad-kicker-reference.yml": _BOS_UNIVERSAL_LAUNCHPAD_CALLER_REFERENCE_YML,
+        "bos_universal_sync": {
+            ".github/workflows/bos-universal-sync-kicker.yml": _BOS_UNIVERSAL_SYNC_KICKER_YML,
     },
-    "bos_launchpad_gate": {
-      ".github/workflows/bos-launchpad-gate.yml": _BOS_LAUNCHPAD_GATE_YML,
+    "bos_universal_security": {
+      ".github/workflows/bos-universal-security-kicker.yml": _BOS_UNIVERSAL_SECURITY_KICKER_YML,
     },
+    "bos_universal_marketplace": {
+      ".github/workflows/bos-universal-marketplace-kicker.yml": _BOS_UNIVERSAL_MARKETPLACE_KICKER_YML,
+    },
+    "org_defaults": _ORG_DEFAULT_FILES,
+}
+
+# Files owned by retired service names. Replacement services remove these only
+# when they still carry the hub whole-file header; local files with the same
+# names are left untouched.
+SERVICE_RETIRED_FILES: Dict[str, Tuple[str, ...]] = {
+    "bos_universal_sync": (
+        ".github/workflows/bos-launchpad-sync-files.yml",
+    ),
+  "bos_universal_security": (
+    ".github/workflows/bos-launchpad-gate.yml",
+  ),
+  "bos_universal_marketplace": (
+    ".github/workflows/bos-marketplace-guard.yml",
+    ".github/workflows/bos-marketplace-release.yml",
+  ),
 }
 
 # Service pairs (or larger groups) that are semantically mutually
@@ -2819,15 +2169,6 @@ SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
     "gha_sync_drift_check": {
         ".github/workflows/sync-drift-check.yml": _GHA_SYNC_DRIFT_CHECK_YML,
     },
-    "gha_lint_node": {
-        ".github/workflows/lint.yml": _GHA_LINT_NODE_YML,
-    },
-    "gha_lint_python": {
-        ".github/workflows/lint.yml": _GHA_LINT_PYTHON_YML,
-    },
-    "gha_lint_shell": {
-        ".github/workflows/lint.yml": _GHA_LINT_SHELL_YML,
-    },
     # Templated whole-file content (init-if-missing). Values for
     # `{{KEY}}` placeholders come from `bos-managed-files.yaml` at
     # the consumer repo root (see `_load_managed_config`).
@@ -2838,16 +2179,7 @@ SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
     # real text is swapped in by the init-loop. See
     # `_DYNAMIC_LICENSE_INIT_SERVICES`.
     #
-    # `license_apache2` is a deprecated back-compat alias that ALWAYS
-    # emits Apache 2.0, ignoring `license_type` in config. Existing
-    # consumers using `license_apache2` continue to work unchanged;
-    # new consumers should use `license` + set `license_type` in
-    # `bos-managed-files.yaml`. Both target `LICENSE` and are
-    # mutually exclusive per repo (enforced at parse time).
     "license": {
-        "LICENSE": _LICENSE_APACHE2,
-    },
-    "license_apache2": {
         "LICENSE": _LICENSE_APACHE2,
     },
     "notice_apache2": {
@@ -2871,9 +2203,7 @@ KNOWN_SERVICES = (
 # by ONE registry mode. Within SERVICE_FILES, MULTIPLE services MAY
 # target the same path — at most one may be enabled per repo, enforced
 # at parse time by `parse_services()`. Within SERVICE_INIT_FILES, MULTIPLE
-# services may also target the same path (e.g. `gha_lint_node` /
-# `gha_lint_python` / `gha_lint_shell` all write
-# `.github/workflows/lint.yml`) with the same mutex semantics. All
+# services may also target the same path with the same mutex semantics. All
 # checks run at import so a registry typo fails CI immediately rather
 # than at runtime.
 _whole_file_owners: Dict[str, List[str]] = {}
@@ -3010,10 +2340,8 @@ def parse_services(raw: str) -> List[str]:
     AND that no two services listed in `_SEMANTIC_MUTEX_GROUPS` are
     enabled together. The registry-level check at import time only
     catches the case where two services accidentally target the same
-    path AT THE PYTHON LEVEL — for SERVICE_FILES (e.g. `gha_lint_*`
-    variants targeting `.github/workflows/lint.yml` when init-if-
-    missing) we deliberately allow that (so each flavor can ship its
-    own canonical body) and instead enforce the mutual exclusion at
+    path AT THE PYTHON LEVEL. Within a registry, co-targeting services
+    are deliberately allowed and mutual exclusion is enforced at
     parse time against the caller's `services:` list. The semantic
     mutex covers pairs that no longer collide on a path but still must
     not both be enabled (e.g. the two `bos_launchpad_*` kicker flavors,
@@ -3070,8 +2398,7 @@ def parse_services(raw: str) -> List[str]:
             )
 
     # Reject ≥2 enabled init-if-missing services that target the same
-    # path (e.g. `gha_lint_node` + `gha_lint_python` both writing
-    # `.github/workflows/lint.yml`). Reported with both service names
+    # path. Reported with both service names
     # AND the contested path so the caller can fix their list.
     init_path_owner: Dict[str, str] = {}
     for svc in result:
@@ -3337,8 +2664,8 @@ class FileChange:
 
 
 def _emit_composite_license_notice(root: str, services: List[str]) -> None:
-    """Warn (via `::notice::`) when a consumer enables `license` /
-    `license_apache2` on a repo whose existing `LICENSE` looks like
+    """Warn (via `::notice::`) when a consumer enables `license` on a
+    repo whose existing `LICENSE` looks like
     a composite or forked work (multiple distinct copyright holders,
     separator lines between sections, or significantly larger than
     canonical SPDX text).
@@ -3358,7 +2685,7 @@ def _emit_composite_license_notice(root: str, services: List[str]) -> None:
     None of those repos currently enable the `license` service, but
     this guard ensures they get a loud notice if anyone ever does.
     """
-    if "license" not in services and "license_apache2" not in services:
+    if "license" not in services:
         return
     license_path = os.path.join(root, "LICENSE")
     if not os.path.exists(license_path):
@@ -3436,6 +2763,7 @@ def sync_files(
         svc in _TEMPLATED_INIT_SERVICES
         or svc in _TEMPLATED_SECTION_SERVICES
         or svc == "wranglerignore"
+        or svc == "org_defaults"
       or (
         svc in SERVICE_BLOCKS
         and any(p in _MANAGED_SECTION_DOTFILE_PATHS for p in SERVICE_BLOCKS[svc])
@@ -3451,11 +2779,9 @@ def sync_files(
         # they don't apply under MIT/BSD/ISC and would mislead downstream
         # consumers about the project's licensing terms. Fail loud rather
         # than silently produce a NOTICE under a non-Apache license.
-        # The `license_apache2` alias is treated as implicit
-        # `license_type: apache-2.0` (which it always is). When `license`
-        # is enabled with a non-Apache `license_type`, `notice_apache2`
-        # must NOT be in the services list.
-        if "notice_apache2" in services and "license_apache2" not in services:
+        # When `license` is enabled with a non-Apache `license_type`,
+        # `notice_apache2` must NOT be in the services list.
+        if "notice_apache2" in services:
             _lic_type = _managed_config.get("license_type", "apache-2.0")
             if _lic_type != "apache-2.0":
                 die(
@@ -3467,6 +2793,16 @@ def sync_files(
                     f"{MANAGED_FILES_CONFIG_FILENAME} to 'apache-2.0', "
                     f"or remove 'notice_apache2' from the services list."
                 )
+        if (
+          "org_defaults" in services
+          and _managed_config["target_repo_role"] != "org-default-repo"
+        ):
+          die(
+            "service 'org_defaults' requires "
+            "target_repo_role='org-default-repo'. Organization community "
+            "health, metadata, and profile files must not be copied into "
+            "normal consumer repositories."
+          )
     else:
         _managed_config = dict(_DEFAULT_MANAGED_CONFIG)
         _placeholder_subs = {}
@@ -3557,6 +2893,24 @@ def sync_files(
                 FileChange(path=rel_path, before=before, after=after)
             )
 
+        for rel_path in SERVICE_RETIRED_FILES.get(svc, ()):
+            abs_path = os.path.join(root, rel_path)
+            if not os.path.exists(abs_path):
+                continue
+            with open(abs_path, "r", encoding="utf-8") as fh:
+                before = fh.read()
+            if not before.startswith(
+                "# Managed by https://github.com/blackoutsecure/bos-automation-hub"
+            ):
+                sys.stderr.write(
+                    f"::warning file={rel_path}::Legacy workflow is not hub-owned; "
+                    "leaving it in place for manual review.\n"
+                )
+                continue
+            all_changes.append(
+                FileChange(path=rel_path, before=before, after="", delete=True)
+            )
+
     # ------- Dotfile override mode -------
     # `wranglerignore` defaults to section mode. If `dotfiles_mode` is
     # explicitly set to `override`, write the full file body instead.
@@ -3645,8 +2999,8 @@ def sync_files(
     # both section and init modes see the same `_managed_config` /
     # `_placeholder_subs`.
 
-    # Composite-LICENSE heads-up. Runs unconditionally (cheap), only
-    # emits when `license`/`license_apache2` is enabled AND existing
+  # Composite-LICENSE heads-up. Runs unconditionally (cheap), only
+  # emits when `license` is enabled AND existing
     # LICENSE shows composite markers. Behavior is NOT changed — the
     # init-if-missing loop below still short-circuits on existence.
     _emit_composite_license_notice(root, services)

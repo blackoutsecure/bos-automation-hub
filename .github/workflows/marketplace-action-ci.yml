@@ -10,10 +10,11 @@
 #     workflow files landing on `main`.
 #   * [`release-promote.yml`](release-promote.yml) — dev -> main allowlist promotion.
 #
-# Together those three reusable workflows ARE the consumer-facing
-# Marketplace Action stack. A new Marketplace Action repo wires up
-# with three ~10-line caller workflows (one per reusable) on its
-# `dev` branch and gets:
+# Together those three reusable workflows form the consumer-facing
+# Marketplace Action stack. `bos-gate.yml` nests this PR CI workflow so its
+# result participates in `gate / Gate summary`, while the managed
+# `bos-universal-marketplace-kicker.yml` also protects and promotes the stable
+# branch through event-scoped jobs.
 #   * fast `check` feedback on every PR (manifest validity, missing
 #     LICENSE / README, branding colour/icon allowlist, workflow-on-
 #     default-branch detection, community-health files);
@@ -30,14 +31,10 @@
 # release; Dependabot will bump the pin in lockstep across all
 # three reusable workflows.
 #
-# Trigger model: this workflow is intended to be called from the hub
-# meta-workflow [`bos-launchpad-marketplace.yml`](./bos-launchpad-marketplace.yml),
-# which is itself called from a thin caller on the SOURCE branch
-# (typically `dev`) — see
-# [`examples/bos-launchpad-marketplace.example.yaml`](../../examples/bos-launchpad-marketplace.example.yaml).
-# Recommended triggers: `pull_request` (into `dev`), `push` (on `dev`
-# after merge, as a regression catch), and `workflow_dispatch` (one-
-# shot manual run when adding the workflow to an existing repo).
+# Trigger model: the managed `bos-universal-marketplace-kicker.yml` invokes
+# this workflow for pull requests, development-branch pushes, and optional
+# one-shot manual checks. Generic lint and security run independently through
+# `bos-universal-security-kicker.yml`.
 name: Marketplace action CI (reusable)
 
 "on":
@@ -346,7 +343,7 @@ jobs:
       check_passed: ${{ steps.check.conclusion == 'success' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -355,7 +352,7 @@ jobs:
         # Kit `check` composite. SHA-pinned per the hub GHA pin
         # policy. Dependabot bumps in lockstep with the guard +
         # promote pins.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@8cb53a2c81712c47b61af1031a1db69058bc5be3 # v0.1.2
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
         with:
           action_yml_path:        ${{ inputs.action_yml_path }}
           fail_on_warning:        ${{ inputs.fail_on_warning }}
@@ -405,7 +402,7 @@ jobs:
       collision: ${{ steps.name.outputs.user_or_org_collision == 'true' || steps.name.outputs.marketplace_collision == 'true' || steps.name.outputs.reserved_category == 'true' || steps.name.outputs.reserved_feature == 'true' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -444,7 +441,7 @@ jobs:
 
       - name: Marketplace name check
         id: name
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/name-check@8cb53a2c81712c47b61af1031a1db69058bc5be3 # v0.1.2
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/name-check@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
         with:
           proposed_name:     ${{ steps.resolve.outputs.name }}
           fail_on_collision: ${{ inputs.name_check_fail_on_collision }}
@@ -462,13 +459,13 @@ jobs:
       artifact: ${{ steps.upload.outputs.artifact-name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Render branding preview
         id: render
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/branding-preview@8cb53a2c81712c47b61af1031a1db69058bc5be3 # v0.1.2
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/branding-preview@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
         with:
           action_yml_path: ${{ inputs.action_yml_path }}
           feather_ref:     ${{ inputs.branding_preview_feather_ref }}

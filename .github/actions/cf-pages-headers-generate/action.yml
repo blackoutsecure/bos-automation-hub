@@ -293,7 +293,7 @@ runs:
             echo '# blackoutsecure/bos-automation-hub. DO NOT EDIT BY HAND — your changes'
             echo '# will be overwritten on the next deploy. To change rules, update the'
             echo '# `cloudflare_headers_*` inputs (or the `cloudflare.headers.*` block in'
-            echo '# `.bos-launchpad.yaml` when called through the launchpad).'
+            echo '# `bos-launchpad-config.json` when called through the launchpad).'
             echo '#'
             echo '# Format reference:'
             echo '#   https://developers.cloudflare.com/pages/configuration/headers/'

@@ -32,7 +32,7 @@ description: >-
         [![GitHub Stars](...stars badge...)](.../stargazers)
         [![Docker Pulls](...pulls badge...)](.../docker hub...)
         [![GitHub Release](...release badge...)](.../releases)
-        [![Blackout Secure Launchpad](...launchpad badge...)](.../actions/workflows/bos-launchpad-release.yml)
+        [![Blackout Secure Launchpad](...launchpad badge...)](.../actions/workflows/bos-universal-launchpad-kicker.yml)
 
       (Balena Hub badge may substitute for Launchpad on balena-only repos.)
 
@@ -212,7 +212,7 @@ runs:
             # Launchpad OR Balena Hub badge is acceptable as the 4th.
             # Both must carry the brand color when present.
             if ! grep -qE '\[!\[Blackout Secure Launchpad\]\([^)]*color=E7931D|\[!\[Balena Hub\]\([^)]*-E7931D' <<<"$head_block"; then
-              errors+=("missing Launchpad-or-Balena badge: \`[![Blackout Secure Launchpad](.../bos-launchpad-release.yml?style=flat-square&label=blackout%20secure%20launchpad&color=E7931D)](.../bos-launchpad-release.yml)\` OR \`[![Balena Hub](https://img.shields.io/badge/balena%20hub-<name>-E7931D?style=flat-square&logo=balena&logoColor=FFFFFF)](https://hub.balena.io/blocks/<id>/<name>)\`")
+              errors+=("missing Launchpad-or-Balena badge: \`[![Blackout Secure Launchpad](.../bos-universal-launchpad-kicker.yml?style=flat-square&label=blackout%20secure%20launchpad&color=E7931D)](.../bos-universal-launchpad-kicker.yml)\` OR \`[![Balena Hub](https://img.shields.io/badge/balena%20hub-<name>-E7931D?style=flat-square&logo=balena&logoColor=FFFFFF)](https://hub.balena.io/blocks/<id>/<name>)\`")
             fi
             ;;
 

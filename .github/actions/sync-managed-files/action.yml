@@ -16,7 +16,7 @@ description: >-
   hub-managed header comment). For init-if-missing services, the
   target file is written ONCE when missing and NEVER overwritten
   afterwards (preceded by an "Initialized by" header, EXCEPT for
-  `license` / `license_apache2` / `notice_apache2` which are
+  `license` / `notice_apache2` which are
   committed verbatim so license-detection tools recognize them).
   Templated init services (`license`, `notice_apache2`, `codeowners`)
   render `{{KEY}}` placeholders from per-repo
@@ -33,17 +33,15 @@ inputs:
       Section: `common`, `docker`, `balena`, `node`, `python`,
       `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
       `dependabot_pip`. Whole-file: `logger`, `prettier`,
-      `bos_launchpad`, `bos_launchpad_reference` (hub-only copy/paste
-      reference under `managed-files/examples/`),
-      `bos_launchpad_sync_files`, `bos_launchpad_gate`.
-      Init-if-missing: `gha_sync_drift_check`,
-      `gha_lint_node`, `gha_lint_python`, `gha_lint_shell` (at most
-      one `gha_lint_*` per repo — all three target the same
-      `.github/workflows/lint.yml`), `license` (multi-license; picks
+      `bos_launchpad`, `bos_universal_sync`,
+      `bos_universal_security`, `bos_universal_marketplace`,
+      `org_defaults` (only for the organization `.github` repository;
+      requires `target_repo_role: org-default-repo`).
+      Init-if-missing: `gha_sync_drift_check`, `bos_launchpad_config`
+      (`bos-launchpad-config.json`), `license` (multi-license; picks
       from `_LICENSE_REGISTRY` by `license_type:` in
       `bos-managed-files.yaml`, supports apache-2.0 / mit /
-      bsd-3-clause / isc), `license_apache2` (deprecated alias
-      that always emits Apache 2.0; mutex with `license`),
+      bsd-3-clause / isc),
       `notice_apache2` (Apache 2.0 NOTICE; requires `license_type:
       apache-2.0` when used with `license`), `codeowners`
       (`.github/CODEOWNERS` with a default catch-all rule). The

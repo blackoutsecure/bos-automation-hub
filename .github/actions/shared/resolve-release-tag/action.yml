@@ -1,0 +1,42 @@
+# Shared by hub-runtime and Marketplace promotion workflows.
+name: 'Resolve release tag'
+description: 'Resolve and validate an explicit or automatically bumped SemVer release tag.'
+
+inputs:
+  tag_name:
+    description: Optional explicit v-prefixed SemVer tag.
+    required: false
+    default: ''
+  bump:
+    description: Automatic bump mode when tag_name is empty (patch, minor, major, or none).
+    required: false
+    default: patch
+  first_tag:
+    description: First stable tag when no prior stable SemVer tags exist.
+    required: false
+    default: v0.0.1
+
+outputs:
+  tag_name:
+    description: Resolved release tag.
+    value: ${{ steps.resolve.outputs.tag_name }}
+  previous_tag:
+    description: Latest existing stable SemVer tag, when one exists.
+    value: ${{ steps.resolve.outputs.previous_tag }}
+  auto_resolved:
+    description: '`true` when tag_name was computed.'
+    value: ${{ steps.resolve.outputs.auto_resolved }}
+  bump:
+    description: Effective bump mode (`none` for explicit tags).
+    value: ${{ steps.resolve.outputs.bump }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      shell: bash
+      env:
+        INPUT_TAG_NAME: ${{ inputs.tag_name }}
+        INPUT_BUMP: ${{ inputs.bump }}
+        INPUT_FIRST_TAG: ${{ inputs.first_tag }}
+      run: python3 "${GITHUB_ACTION_PATH}/resolve.py"
