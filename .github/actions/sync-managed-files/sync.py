@@ -672,11 +672,11 @@ _HUMANS_TXT = _load_managed_template_or_default(
 
 _GHA_SYNC_DRIFT_CHECK_YML = """\
 # PR-time drift check. Runs the bos-automation-hub
-# `sync-managed-files.yml` reusable in `check` mode and fails the job
+# `bos-universal-sync.yml` reusable in `check` mode and fails the job
 # (and therefore the PR) if any managed block / file would be modified.
 #
 # The `services:` list below MUST mirror the list in
-# `.github/workflows/sync-managed-files.yml`. Keep them in sync
+# `.github/workflows/bos-universal-sync.yml`. Keep them in sync
 # manually or treat this file as authoritative and have the commit
 # workflow read from it (out of scope for the starter template).
 
@@ -706,13 +706,13 @@ concurrency:
 
 jobs:
   drift-check:
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-sync.yml@main
     with:
       mode: check
       services: |
         common
         lf_line_endings
-        # Mirror the list in `.github/workflows/sync-managed-files.yml`.
+        # Mirror the list in `.github/workflows/bos-universal-sync.yml`.
 """
 
 # Managed-files overrides for init workflow starter templates.

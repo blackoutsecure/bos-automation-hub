@@ -66,7 +66,7 @@ which owns Marketplace validation, stable-branch guarding, and promotion.
 
 ## Universal sync
 
-[`sync-managed-files.yml`](.github/workflows/sync-managed-files.yml) is the
+[`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) is the
 single config-aware managed-file backend. It also handles this hub's local
 schedule, config-change, and manual events. Its consumer front door is
 [`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml).
@@ -164,7 +164,7 @@ guard and promotion workflows.
 
 ## Managed files
 
-[`sync-managed-files.yml`](.github/workflows/sync-managed-files.yml) exposes
+[`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) exposes
 one reusable orchestration backend. It resolves explicit caller inputs when
 provided and otherwise reads the `sync_files` block from
 [`bos-launchpad-config.json`](bos-launchpad-config.json). The
@@ -210,7 +210,7 @@ security, and Marketplace workflows.
 - repositories without delivery still use the same `bos_universal_sync`
   caller;
 - this hub runs the same
-  [`sync-managed-files.yml`](.github/workflows/sync-managed-files.yml) backend
+  [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) backend
   directly from its own events, so there is no second orchestration workflow.
 
 Removing every consumer workflow would require a separate organization-wide
@@ -299,7 +299,7 @@ entry points:
 | --- | --- |
 | [`bos-universal-launchpad.yml`](.github/workflows/bos-universal-launchpad.yml) | Coordinate trusted release, deployment, security, and metadata stages. |
 | [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml) | Aggregate read-mostly PR and merge-queue validation into one required check. |
-| [`sync-managed-files.yml`](.github/workflows/sync-managed-files.yml) | Reconcile managed files without invoking delivery or policy workflows. |
+| [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) | Reconcile managed files without invoking delivery or policy workflows. |
 
 The following reusable workflows are stage modules, not additional files that
 consumer repositories must install. Universal and the specialized promotion
@@ -317,7 +317,7 @@ would not reduce Actions jobs or runner usage.
 | [`github-release.yml`](.github/workflows/github-release.yml) | Shared publisher used by artifact, Marketplace, and hub releases. |
 | [`deploy-cloudflare-pages.yml`](.github/workflows/deploy-cloudflare-pages.yml) | Universal stage for Cloudflare Pages build and deployment. |
 | [`security-scan.yml`](.github/workflows/security-scan.yml) | Shared scanning stage used by trusted delivery and pre-merge validation. |
-| [`sync-managed-files.yml`](.github/workflows/sync-managed-files.yml) | Shared managed-file engine called directly by the dedicated universal sync kicker. |
+| [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) | Shared managed-file engine called directly by the dedicated universal sync kicker. |
 
 Specialized reusable entry points remain separate when their event or mutation
 contract does not belong in Universal:

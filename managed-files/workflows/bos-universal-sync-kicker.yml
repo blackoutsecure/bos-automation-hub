@@ -60,7 +60,7 @@ jobs:
     if: needs.resolve-target.outputs.ref == 'dev'
     permissions:
       contents: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@dev
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-sync.yml@dev
     with:
       mode: ${{ inputs.mode || '' }}
 
@@ -70,6 +70,6 @@ jobs:
     if: needs.resolve-target.outputs.ref == 'main'
     permissions:
       contents: write
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-sync.yml@main
     with:
       mode: ${{ inputs.mode || '' }}

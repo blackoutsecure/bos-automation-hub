@@ -16,8 +16,9 @@ so the files in this directory are the normal authoring and review surface.
   and calls the promoted hub runtime on `@main`.
 - [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
   is the managed PR and merge-queue caller for shared lint, dependency review,
-  code scanning, and repository policy. Pin `security / Security summary` in
-  branch protection.
+  code scanning, and repository policy. Pin `security (dev) / Security summary`
+  or `security (main) / Security summary` in branch protection, depending on
+  the branch.
 - [`bos-universal-marketplace-kicker.yml`](workflows/bos-universal-marketplace-kicker.yml)
   is installed only in Marketplace Action repositories. One event-routed file
   owns Marketplace validation, trusted stable-branch guarding, name checks,
@@ -87,9 +88,10 @@ targeting is resolved ahead of time and encoded as static per-branch jobs:
   stable runtime;
 - the launchpad kicker only ever fires on `main` pushes, so it has no `dev`
   variant and always calls `@main`;
-- workflows that cannot reference `@main` without breaking self-validation
-  (e.g. `sync-managed-files.yml`, `release-hub.yml`) use local
-  `./.github/...` references instead;
+- `bos-universal-sync.yml` is both the hub's own event trigger and the
+  `workflow_call` backend in one file, so it never needs to call itself;
+- `release-hub.yml` cannot reference `@main` without breaking
+  self-validation, so it uses local `./.github/...` references instead;
 - the hub otherwise dogfoods its own managed services like any consumer —
   e.g. `bos_universal_security` is enabled in the hub's own
   `bos-launchpad-config.json` and synced to

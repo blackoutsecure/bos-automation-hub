@@ -130,6 +130,7 @@ def main() -> None:
     assert "sync_managed_files:" not in kicker
     assert "sync_mode:" not in kicker
     assert "sync-managed-files.yml@main" not in workflow
+    assert "bos-universal-sync.yml@main" not in workflow
     assert (
         "security_scan.enable != false" in kicker
     ), "managed Universal callers must enable the release security gate by default"
@@ -195,7 +196,7 @@ def main() -> None:
     ]
     assert "github.event.repository.default_branch" in managed_sync_caller
     assert "branches: [main]" not in managed_sync_caller
-    assert managed_sync_caller.count("sync-managed-files.yml@main") == 1
+    assert managed_sync_caller.count("bos-universal-sync.yml@main") == 1
     assert "parse-config:" not in managed_sync_caller
     assert "launchpad-config@main" not in managed_sync_caller
     assert "bos-launchpad-config.json" in managed_sync_caller
@@ -451,7 +452,7 @@ def main() -> None:
         refs = re.findall(r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)", managed_caller)
         assert refs and set(refs) == expected_refs, refs
 
-    sync_backend = (ROOT / ".github/workflows/sync-managed-files.yml").read_text()
+    sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
     hub_config = json.loads((ROOT / "bos-launchpad-config.json").read_text())
     assert hub_config["gate"] == {
         "enable_lint": False,
@@ -483,7 +484,7 @@ def main() -> None:
     assert "actions/shared/launchpad-config@main" in sync_backend
     assert "actions/sync-managed-files@main" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
-    assert managed_sync_caller.count("sync-managed-files.yml@main") == 1
+    assert managed_sync_caller.count("bos-universal-sync.yml@main") == 1
     assert "launchpad-config@main" not in managed_sync_caller
     assert "parse-config:" not in managed_sync_caller
 
