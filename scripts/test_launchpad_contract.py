@@ -433,7 +433,13 @@ def main() -> None:
 
     sync_backend = (ROOT / ".github/workflows/sync-managed-files.yml").read_text()
     hub_config = json.loads((ROOT / "bos-launchpad-config.json").read_text())
-    assert hub_config["sync_files"]["services"] == ["common", "lf_line_endings"]
+    assert hub_config["sync_files"]["services"] == [
+        "common",
+        "lf_line_endings",
+        "dependabot_actions",
+        "markdownlint",
+        "shellcheckrc",
+    ]
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" in sync_backend
