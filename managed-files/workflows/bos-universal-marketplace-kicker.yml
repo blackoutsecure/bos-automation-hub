@@ -13,7 +13,7 @@ run-name: >-
       || inputs.operation || 'manual'
   }}
 
-on:
+"on":
   pull_request:
     branches: [main, dev]
   push:

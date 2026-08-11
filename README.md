@@ -134,7 +134,7 @@ configuration can enable only the required stages:
   "marketplace": {
     "enabled": false,
     "target_branch": "main",
-    "allowlist_paths": "action.yml\nREADME.md\nLICENSE"
+    "allowlist_paths": ["action.yml", "README.md", "LICENSE"]
   },
   "sync_files": {
     "services": [
@@ -153,7 +153,11 @@ configuration can enable only the required stages:
 The shared
 [`launchpad-config`](.github/actions/shared/launchpad-config/action.yml) action
 validates and normalizes this file. Missing optional objects fall back to the
-reusable workflow defaults.
+reusable workflow defaults. Marketplace `allowlist_paths`, `blocked_paths`,
+`required_paths`, and `extra_sync_paths` accept JSON arrays of non-empty
+strings. Legacy newline-delimited strings remain supported; the normalizer
+converts arrays to the newline-delimited workflow API used by the Marketplace
+guard and promotion workflows.
 
 ## Managed files
 
@@ -235,9 +239,25 @@ Use this consumer configuration:
   "marketplace": {
     "enabled": true,
     "target_branch": "main",
-    "allowlist_paths": "action.yml\nsrc\nREADME.md\nLICENSE\nNOTICE",
-    "blocked_paths": ".github/workflows/\n.editorconfig\n.gitattributes\n.gitignore\n.markdownlint.yaml\npyproject.toml\nrequirements-dev.txt\ntest/",
-    "required_paths": ".github/dependabot.yml\naction.yml\nsrc\nLICENSE\nNOTICE\nREADME.md",
+    "allowlist_paths": ["action.yml", "src", "README.md", "LICENSE", "NOTICE"],
+    "blocked_paths": [
+      ".github/workflows/",
+      ".editorconfig",
+      ".gitattributes",
+      ".gitignore",
+      ".markdownlint.yaml",
+      "pyproject.toml",
+      "requirements-dev.txt",
+      "test/"
+    ],
+    "required_paths": [
+      ".github/dependabot.yml",
+      "action.yml",
+      "src",
+      "LICENSE",
+      "NOTICE",
+      "README.md"
+    ],
     "include_dependabot_config": true,
     "include_github_metadata": false
   },

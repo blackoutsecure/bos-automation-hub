@@ -11,7 +11,7 @@ run-name: >-
       || 'manual'
   }}
 
-on:
+"on":
   pull_request:
     branches: [main, dev]
   merge_group:

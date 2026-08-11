@@ -11,7 +11,7 @@ run-name: >-
       || 'config changed'
   }}
 
-on:
+"on":
   schedule:
     - cron: '29 14 * * 1'
   push:

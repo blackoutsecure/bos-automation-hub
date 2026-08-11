@@ -82,6 +82,28 @@ runs:
                     return default
             return default
 
+        def marketplace_paths(value, field):
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                return value
+            if not isinstance(value, list):
+                error(
+                    f"::error file={config_path}::marketplace.{field} must be "
+                    "a string or an array of strings."
+                )
+                sys.exit(1)
+            paths = []
+            for index, path in enumerate(value):
+                if not isinstance(path, str) or not path.strip():
+                    error(
+                        f"::error file={config_path}::marketplace.{field}[{index}] "
+                        "must be a non-empty string."
+                    )
+                    sys.exit(1)
+                paths.append(path.strip())
+            return "\n".join(paths)
+
         stages = as_dict(cfg.get("stages"))
         upstream = as_dict(cfg.get("upstream"))
         release = as_dict(cfg.get("release"))
@@ -89,6 +111,19 @@ runs:
         redirects = as_dict(cloudflare_raw.get("redirects"))
         headers = as_dict(cloudflare_raw.get("headers"))
         sync_raw = as_dict(cfg.get("sync_files"))
+        marketplace_raw = as_dict(cfg.get("marketplace"))
+
+        marketplace = dict(marketplace_raw)
+        for path_field in (
+            "allowlist_paths",
+            "blocked_paths",
+            "required_paths",
+            "extra_sync_paths",
+        ):
+            marketplace[path_field] = marketplace_paths(
+                marketplace_raw.get(path_field), path_field
+            )
+        cfg["marketplace"] = marketplace
 
         cloudflare = {
             "enabled": stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name")),

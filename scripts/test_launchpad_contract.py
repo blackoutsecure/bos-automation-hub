@@ -6,8 +6,12 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import re
+import subprocess
+import sys
 import tempfile
+import textwrap
 from contextlib import redirect_stderr
 from pathlib import Path
 from urllib.parse import unquote
@@ -52,7 +56,61 @@ def assert_markdown_links_exist(path: Path) -> None:
     assert not missing, {str(path.relative_to(ROOT)): sorted(missing)}
 
 
+def run_launchpad_config(config: object) -> subprocess.CompletedProcess[str]:
+    action = (
+        ROOT / ".github/actions/shared/launchpad-config/action.yml"
+    ).read_text()
+    script = action.split("        python3 - <<'PY'\n", 1)[1].split(
+        "\n        PY", 1
+    )[0]
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp = Path(temp_dir)
+        (temp / "bos-launchpad-config.json").write_text(json.dumps(config))
+        env = os.environ | {
+            "CONFIG_PATH": "bos-launchpad-config.json",
+            "ALLOW_MISSING": "false",
+            "GITHUB_OUTPUT": str(temp / "output"),
+            "GITHUB_STEP_SUMMARY": str(temp / "summary"),
+        }
+        result = subprocess.run(
+            [sys.executable, "-c", textwrap.dedent(script)],
+            cwd=temp,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            result.stdout += (temp / "output").read_text()
+        return result
+
+
 def main() -> None:
+    normalized = run_launchpad_config(
+        {
+            "marketplace": {
+                "allowlist_paths": ["action.yml", "README.md"],
+                "blocked_paths": ".github/workflows/\ntest/",
+                "required_paths": [],
+                "extra_sync_paths": ["NOTICE"],
+            }
+        }
+    )
+    assert normalized.returncode == 0, normalized.stderr
+    cfg_output = normalized.stdout.split("cfg<<__BOS_EOF__\n", 1)[1].split(
+        "\n__BOS_EOF__", 1
+    )[0]
+    marketplace = json.loads(cfg_output)["marketplace"]
+    assert marketplace["allowlist_paths"] == "action.yml\nREADME.md"
+    assert marketplace["blocked_paths"] == ".github/workflows/\ntest/"
+    assert marketplace["required_paths"] == ""
+    assert marketplace["extra_sync_paths"] == "NOTICE"
+    malformed = run_launchpad_config(
+        {"marketplace": {"allowlist_paths": ["action.yml", 3]}}
+    )
+    assert malformed.returncode == 1
+    assert "marketplace.allowlist_paths[1] must be a non-empty string" in malformed.stderr
+
     workflow = (ROOT / ".github/workflows/bos-universal-launchpad.yml").read_text()
     kicker = (
         ROOT / "managed-files/workflows/bos-universal-launchpad-kicker.yml"
@@ -212,6 +270,11 @@ def main() -> None:
     marketplace_kicker = (
         ROOT / "managed-files/workflows/bos-universal-marketplace-kicker.yml"
     ).read_text()
+    for managed_template in (
+        ROOT / "managed-files/workflows"
+    ).glob("*.yml"):
+        assert "\non:\n" not in managed_template.read_text()
+        assert "\n\"on\":\n" in managed_template.read_text()
     assert set(sync.SERVICE_FILES["bos_universal_marketplace"]) == {
         ".github/workflows/bos-universal-marketplace-kicker.yml",
     }
@@ -222,6 +285,7 @@ def main() -> None:
     assert marketplace_kicker.count("marketplace-action-ci.yml@main") == 1
     assert marketplace_kicker.count("marketplace-repo-guard.yml@main") == 1
     assert marketplace_kicker.count("release-promote.yml@main") == 1
+    assert "outputs.cfg" in marketplace_kicker
     assert "pull_request_target:" in marketplace_kicker
     assert "github.event.repository.default_branch" in marketplace_kicker
     assert not re.search(r"source_branch:\s+dev\b", marketplace_kicker)
@@ -270,6 +334,15 @@ def main() -> None:
     assert marketplace_promote.count(
         "uses: blackoutsecure/bos-automation-hub/"
         ".github/actions/shared/resolve-release-tag@main"
+    ) == 1
+    promote_hub_refs = re.findall(
+        r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)",
+        marketplace_promote,
+    )
+    assert promote_hub_refs and set(promote_hub_refs) == {"main"}, promote_hub_refs
+    assert marketplace_promote.count(
+        "uses: blackoutsecure/bos-automation-hub/"
+        ".github/actions/shared/preflight-runner-config@main"
     ) == 1
     assert "LATEST=\"$(git tag --list" not in marketplace_promote
     publisher_call = (

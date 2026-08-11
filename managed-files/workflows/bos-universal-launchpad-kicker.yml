@@ -16,7 +16,7 @@ run-name: >-
       || 'push'
   }} / ref:${{ github.ref_name }} / cf-env:${{ vars.CLOUDFLARE_DEPLOYMENT_ENV || 'from-bos-launchpad-config.json' }} / cf-domain:${{ vars.CLOUDFLARE_SITE_URL || 'from-bos-launchpad-config.json' }}
 
-on:
+"on":
   schedule:
     - cron: '17 */6 * * *'
   push:
