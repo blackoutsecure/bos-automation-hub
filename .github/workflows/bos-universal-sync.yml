@@ -1,16 +1,16 @@
 # One backend for hub-local and consumer managed-file reconciliation.
-# Event-driven runs read `sync_files` from bos-launchpad-config.json.
+# Event-driven runs read `sync_files` from bos-universal-config.json
 # Reusable callers may either rely on that config or provide explicit inputs.
-name: Sync managed files
+name: Blackout Secure universal sync (reusable)
 
 "on":
   schedule:
     - cron: '11 14 * * 1'
   push:
     paths:
-      - bos-launchpad-config.json
+      - bos-universal-config.json
       - bos-managed-files.yaml
-      - .github/workflows/sync-managed-files.yml
+      - .github/workflows/bos-universal-sync.yml
   workflow_dispatch:
     inputs:
       mode:
@@ -23,7 +23,7 @@ name: Sync managed files
       services:
         description: >-
           Optional whitespace-separated service list. When empty, services and
-          settings are read from bos-launchpad-config.json.
+          settings are read from bos-universal-config.json.
         required: false
         type: string
         default: ''
@@ -77,7 +77,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sync-managed-files-${{ github.repository }}-${{ github.ref }}
+  group: bos-universal-sync-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -100,7 +100,7 @@ jobs:
 
       - name: Load repository config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
         with:
           allow_missing: ${{ inputs.services != '' }}
 

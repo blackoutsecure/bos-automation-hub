@@ -1,7 +1,8 @@
 # Blackout Secure Launchpad — universal kicker (hub-managed).
-# Customize via `bos-launchpad-config.json` (repo root), not this file.
+# Customize via `bos-universal-config.json` (repo root; legacy
+# not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
-# Required vars (names overridable via `bos-launchpad-config.json`):
+# Required vars (names overridable via `bos-universal-config.json`):
 #   DOCKERHUB_NAMESPACE, BALENA_NAMESPACE
 # Required secrets:
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
@@ -14,7 +15,7 @@ run-name: >-
       || github.event_name == 'schedule'
       && 'scheduled'
       || 'push'
-  }} / ref:${{ github.ref_name }} / cf-env:${{ vars.CLOUDFLARE_DEPLOYMENT_ENV || 'from-bos-launchpad-config.json' }} / cf-domain:${{ vars.CLOUDFLARE_SITE_URL || 'from-bos-launchpad-config.json' }}
+  }} / ref:${{ github.ref_name }} / cf-env:${{ vars.CLOUDFLARE_DEPLOYMENT_ENV || 'from-bos-universal-config.json' }} / cf-domain:${{ vars.CLOUDFLARE_SITE_URL || 'from-bos-universal-config.json' }}
 
 "on":
   schedule:
@@ -28,7 +29,7 @@ run-name: >-
       - 'build/**'
       - 'scripts/**'
       - '.github/upstream/**'
-      - 'bos-launchpad-config.json'
+      - 'bos-universal-config.json'
       - 'bos-managed-files.yaml'
       - '.github/workflows/bos-universal-launchpad-kicker.yml'
   workflow_dispatch:
@@ -43,7 +44,7 @@ permissions:
 
 jobs:
   parse-config:
-    name: Parse launchpad config
+    name: Parse universal config
     # Resolve runner from org-shared `vars.DEFAULT_RUNNER` when set,
     # supporting both bare label and JSON-array formats. Fallback to
     # `ubuntu-latest` if the variable is not defined in the consumer.
@@ -56,9 +57,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Load launchpad config
+      - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
 
   release:
     name: Release

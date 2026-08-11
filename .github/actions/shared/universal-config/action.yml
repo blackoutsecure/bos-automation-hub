@@ -1,13 +1,29 @@
-name: Launchpad config
-description: Read, validate, normalize, and summarize bos-launchpad-config.json.
+name: Universal config
+description: >-
+  Read, validate, normalize, and summarize bos-universal-config.json
+    as the single shared entry point every managed kicker (launchpad,
+    marketplace, security, sync) uses to load
+  config — no workflow parses the JSON file itself. Accepts settings
+  either as flat top-level keys (`gate`, `sync_files`, `marketplace`,
+  `upstream`, `docker`, ...) or grouped under named sections
+  (`security`, `sync`, `launchpad`, `marketplace`, `general`); both
+  layouts, and any mix of the two, normalize identically. `general` is
+  a catch-all for keys owned by neither of the four named services
+  (e.g. a new standalone service's block). See the "Config sections"
+  table in the hub README.
 
 inputs:
   config_path:
-    description: Path to the launchpad config JSON file.
+    description: >-
+            Path to the config JSON file.
     required: false
-    default: bos-launchpad-config.json
+    default: bos-universal-config.json
   allow_missing:
     description: Emit {} when config file is missing instead of failing.
+    required: false
+    default: 'false'
+  require_marketplace_enabled:
+    description: Fail unless `marketplace.enabled` is `true` in the parsed config.
     required: false
     default: 'false'
 
@@ -31,6 +47,7 @@ runs:
       env:
         CONFIG_PATH: ${{ inputs.config_path }}
         ALLOW_MISSING: ${{ inputs.allow_missing }}
+        REQUIRE_MARKETPLACE_ENABLED: ${{ inputs.require_marketplace_enabled }}
       run: |
         set -euo pipefail
         python3 - <<'PY'
@@ -38,8 +55,9 @@ runs:
         import os
         import sys
 
-        config_path = os.environ.get("CONFIG_PATH") or "bos-launchpad-config.json"
+        config_path = os.environ.get("CONFIG_PATH") or "bos-universal-config.json"
         allow_missing = (os.environ.get("ALLOW_MISSING") or "false").lower() == "true"
+        require_marketplace_enabled = (os.environ.get("REQUIRE_MARKETPLACE_ENABLED") or "false").lower() == "true"
         output_path = os.environ["GITHUB_OUTPUT"]
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
 
@@ -53,16 +71,60 @@ runs:
                 error(f"::error file={config_path}::Required config file not found.")
                 sys.exit(1)
         else:
+            with open(config_path, encoding="utf-8") as handle:
+                raw = handle.read()
             try:
-                with open(config_path, encoding="utf-8") as handle:
-                    cfg = json.load(handle)
-            except Exception:
-                error(f"::error file={config_path}::JSON parse error (see preceding python output).")
-                raise
+                cfg = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                error(
+                    f"::error file={config_path},line={exc.lineno},col={exc.colno}::"
+                    f"Invalid JSON ({exc.msg}) at line {exc.lineno}, column {exc.colno}."
+                )
+                sys.exit(1)
 
         if not isinstance(cfg, dict):
             error(f"::error file={config_path}::Top-level config must be a JSON object.")
             sys.exit(1)
+
+        # Optional service-grouped authoring layout: consumers may nest a
+        # service's settings under a named section ("launchpad", "security",
+        # "sync") instead of (or alongside) the historical flat top-level
+        # keys. Sections are hoisted to the flat keys every downstream
+        # normalizer already reads, so both layouts — and any mix of the
+        # two — resolve identically. A flat key already present at the top
+        # level always wins over its section-nested equivalent.
+        #
+        # "security": { ...same fields as top-level "gate"... }
+        # "sync":     { ...same fields as top-level "sync_files"... }
+        # "launchpad": { "upstream": {...}, "docker": {...}, ... }
+        # "general":  catch-all for keys owned by neither of the four
+        #             named services (e.g. "action_test"); every key is
+        #             hoisted as-is, unlike the fixed per-section allowlists
+        #             above, since new standalone services land here first.
+        WHOLE_SECTION_ALIASES = {"security": "gate", "sync": "sync_files"}
+        LAUNCHPAD_SUBKEYS = (
+            "upstream", "stages", "docker", "scout", "balena",
+            "companion_docker", "release", "platforms", "security_scan",
+            "repo_metadata", "cloudflare", "triggers",
+        )
+
+        def hoist_sections(cfg):
+            for section_name, flat_key in WHOLE_SECTION_ALIASES.items():
+                section = cfg.get(section_name)
+                if isinstance(section, dict) and flat_key not in cfg:
+                    cfg[flat_key] = section
+            launchpad_section = cfg.get("launchpad")
+            if isinstance(launchpad_section, dict):
+                for subkey in LAUNCHPAD_SUBKEYS:
+                    if subkey not in cfg and subkey in launchpad_section:
+                        cfg[subkey] = launchpad_section[subkey]
+            general_section = cfg.get("general")
+            if isinstance(general_section, dict):
+                for key, value in general_section.items():
+                    if key not in cfg:
+                        cfg[key] = value
+
+        hoist_sections(cfg)
 
         def as_dict(value):
             return value if isinstance(value, dict) else {}
@@ -124,6 +186,10 @@ runs:
                 marketplace_raw.get(path_field), path_field
             )
         cfg["marketplace"] = marketplace
+
+        if require_marketplace_enabled and marketplace.get("enabled") is not True:
+            error(f"::error file={config_path}::marketplace.enabled must be true")
+            sys.exit(1)
 
         cloudflare = {
             "enabled": stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name")),
@@ -257,7 +323,7 @@ runs:
         release_template_path = (release.get("template_path") or "").strip() or "(unset)"
 
         summary_lines = [
-            "## Launchpad config snapshot",
+            "## Universal config snapshot",
             "",
             "| Field | Value |",
             "| --- | --- |",
@@ -275,7 +341,7 @@ runs:
             with open(summary_path, "a", encoding="utf-8") as handle:
                 handle.write("\n".join(summary_lines) + "\n")
 
-        print("Launchpad config snapshot:")
+        print("Universal config snapshot:")
         print(f"  enabled_stages: {enabled_stages}")
         print(f"  upstream_source: {upstream_source}")
         print(f"  cloudflare_project: {cf_project}")

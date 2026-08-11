@@ -643,7 +643,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         description: >-
           Run the hub's `cf-pages-redirects-generate` composite action
           before deploy to dynamically build a Cloudflare Pages
-          `_redirects` file. See the `bos-launchpad-config.json`
+          `_redirects` file. See the `bos-universal-config.json`
           `cloudflare.redirects.*` block for the full input schema.
         required: false
         type: boolean
@@ -671,7 +671,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           Run the hub's `cf-pages-headers-generate` composite action
           before deploy to dynamically build a Cloudflare Pages
           `_headers` file from composable presets. See the
-          `bos-launchpad-config.json` `cloudflare.headers.*` block for the
+          `bos-universal-config.json` `cloudflare.headers.*` block for the
           full input schema.
         required: false
         type: boolean
@@ -768,7 +768,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       use_launchpad_config:
         description: >-
           When `true`, read Cloudflare Pages settings from the caller
-          repo's `bos-launchpad-config.json` instead of the `cloudflare_*`
+          repo's `bos-universal-config.json` instead of the `cloudflare_*`
           workflow-call inputs. Intended for the universal
           `bos-launchpad.yml` kicker; legacy split callers leave this
           `false` and continue forwarding explicit inputs.
@@ -1211,7 +1211,7 @@ concurrency:
 
 jobs:
   parse-config:
-    name: Parse launchpad config
+    name: Parse universal config
     if: inputs.use_launchpad_config
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -1223,9 +1223,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Load launchpad config
+      - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
 
   # ---------------------------------------------------------------------------
   # Stage 0 — Consolidated security scan (opt-in, gating by default).

@@ -3,7 +3,11 @@
 This directory contains canonical files loaded by
 [`sync-managed-files`](../.github/actions/sync-managed-files/). Consumer
 repositories select services in their sync configuration; repository-specific
-launchpad behavior belongs in `bos-launchpad-config.json`.
+universal behavior belongs in `bos-universal-config.json`.
+Settings may be authored as flat top-level keys or grouped under a named
+section per service (`launchpad`, `marketplace`, `security`, `sync`, plus a
+`general` catch-all for anything else) — see the ["Config sections"](../README.md#config-sections)
+table in the hub README for the full key mapping; this file doesn't repeat it.
 
 ## Active templates
 
@@ -12,12 +16,13 @@ and [`dotfiles/`](dotfiles/). `sync.py` loads these files with inline fallbacks,
 so the files in this directory are the normal authoring and review surface.
 
 - [`bos-universal-launchpad-kicker.yml`](workflows/bos-universal-launchpad-kicker.yml)
-  is the managed release/deploy caller. It reads `bos-launchpad-config.json`
+  is the managed release/deploy caller. It reads `bos-universal-config.json`
   and calls the promoted hub runtime on `@main`.
 - [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
   is the managed PR and merge-queue caller for shared lint, dependency review,
-  code scanning, and repository policy. Pin `security / Security summary` in
-  branch protection.
+  code scanning, and repository policy. Pin `security (dev) / Security summary`
+  or `security (main) / Security summary` in branch protection, depending on
+  the branch.
 - [`bos-universal-marketplace-kicker.yml`](workflows/bos-universal-marketplace-kicker.yml)
   is installed only in Marketplace Action repositories. One event-routed file
   owns Marketplace validation, trusted stable-branch guarding, name checks,
@@ -33,7 +38,7 @@ them directly.
 
 Enable `bos_universal_sync` alongside whichever other managed callers the
 repository needs. GitHub still requires one event-trigger workflow per
-repository; `bos-launchpad-config.json` controls sync behavior but cannot
+repository; `bos-universal-config.json` controls sync behavior but cannot
 itself trigger a reusable workflow.
 
 ## Ownership modes
@@ -75,13 +80,28 @@ The organization-default targets are the repository root files
 
 ## Branch policy
 
-`dev` is the hub development branch. Consumer-facing managed callers use
-`@main`, which is the promoted stable runtime. GitHub Actions does not allow
-expressions in `uses:` references, so this separation is intentionally static:
+`dev` is the hub development branch; `main` is the promoted stable runtime.
+GitHub Actions does not allow expressions in `uses:` references, so branch
+targeting is resolved ahead of time and encoded as static per-branch jobs:
 
-- hub-only validation uses local `./.github/actions/...` references;
-- managed consumer callers use
-  `blackoutsecure/bos-automation-hub/...@main`;
+- the security, Marketplace, and sync kickers each resolve which branch
+  (`dev` or `main`) a run targets, then dispatch to a same-named job pair
+  (e.g. `security-dev` / `security-main`) whose `uses:` refs are pinned to
+  `@dev` and `@main` respectively — a `dev`-targeted run exercises the hub's
+  current unreleased source, a `main`-targeted run exercises the promoted
+  stable runtime;
+- the launchpad kicker only ever fires on `main` pushes, so it has no `dev`
+  variant and always calls `@main`;
+- `bos-universal-sync.yml` is both the hub's own event trigger and the
+  `workflow_call` backend in one file, so it never needs to call itself;
+- `release-hub.yml` cannot reference `@main` without breaking
+  self-validation, so it uses local `./.github/...` references instead;
+- the hub otherwise dogfoods its own managed services like any consumer —
+  `bos_universal_config`, `bos_universal_security`, and
+  `bos_universal_sync` are enabled in the hub's own
+  `bos-universal-config.json`; the latter two maintain the security and sync
+  kicker workflows while the config service provisions the canonical config
+  when needed;
 - runtime branch decisions inside actions use the caller repository's
   `github.event.repository.default_branch` where appropriate.
 
