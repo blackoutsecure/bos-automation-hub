@@ -210,18 +210,24 @@ def main() -> None:
     security_kicker = (
         ROOT / "managed-files/workflows/bos-universal-security-kicker.yml"
     ).read_text()
-    hub_security = (ROOT / ".github/workflows/security.yml").read_text()
+    hub_security = (
+        ROOT / ".github/workflows/bos-universal-security-kicker.yml"
+    ).read_text()
     gate_declared = workflow_input_names(gate_workflow)
     gate_forwarded = caller_input_names(security_kicker, "bos-gate.yml")
     assert gate_declared == gate_forwarded, {
         "missing": sorted(gate_declared - gate_forwarded),
         "unknown": sorted(gate_forwarded - gate_declared),
     }
-    hub_gate_forwarded = caller_input_names(hub_security, "bos-gate.yml")
-    assert gate_declared == hub_gate_forwarded, {
-        "missing": sorted(gate_declared - hub_gate_forwarded),
-        "unknown": sorted(hub_gate_forwarded - gate_declared),
-    }
+    # The hub enables `bos_universal_security` on itself like any consumer —
+    # the synced copy must be the managed template verbatim, header aside.
+    hub_security_header = (
+        "# Managed by https://github.com/blackoutsecure/bos-automation-hub —\n"
+        "# do not edit. To modify, update the `bos_universal_security` service in\n"
+        "# .github/actions/sync-managed-files/sync.py.\n"
+        "#\n"
+    )
+    assert hub_security == hub_security_header + security_kicker
     assert "name: Blackout Secure universal security (reusable)" in gate_workflow
     assert "name: security" in security_kicker
     assert "name: Security summary" in gate_workflow
@@ -380,7 +386,7 @@ def main() -> None:
         "lint.yml",
         "openwrt-readsb-wiedehopf-bump.yml",
         "release-hub.yml",
-        "security.yml",
+        "bos-universal-security-kicker.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -437,6 +443,7 @@ def main() -> None:
         security_kicker,
         marketplace_kicker,
         managed_sync_caller,
+        hub_security,
     ):
         refs = re.findall(r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)", managed_caller)
         assert refs and set(refs) == {"main"}, refs
@@ -464,14 +471,9 @@ def main() -> None:
         "dependabot_actions",
         "markdownlint",
         "shellcheckrc",
+        "bos_universal_security",
     ]
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
-    assert "uses: ./.github/workflows/bos-gate.yml" in hub_security
-    assert (
-        "uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@main"
-        not in hub_security
-    )
-    assert "bos_universal_security" not in hub_config["sync_files"]["services"]
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" in sync_backend
     assert "  workflow_dispatch:" in sync_backend

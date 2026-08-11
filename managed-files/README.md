@@ -79,9 +79,14 @@ The organization-default targets are the repository root files
 `@main`, which is the promoted stable runtime. GitHub Actions does not allow
 expressions in `uses:` references, so this separation is intentionally static:
 
-- hub-only validation uses local `./.github/actions/...` references;
-- managed consumer callers use
-  `blackoutsecure/bos-automation-hub/...@main`;
+- workflows that cannot reference `@main` without breaking self-validation
+  (e.g. `sync-managed-files.yml`, `release-hub.yml`) use local
+  `./.github/...` references instead;
+- the hub otherwise dogfoods its own managed services like any consumer —
+  e.g. `bos_universal_security` is enabled in the hub's own
+  `bos-launchpad-config.json` and synced to
+  `.github/workflows/bos-universal-security-kicker.yml`, calling
+  `blackoutsecure/bos-automation-hub/...@main` the same as everyone else;
 - runtime branch decisions inside actions use the caller repository's
   `github.event.repository.default_branch` where appropriate.
 

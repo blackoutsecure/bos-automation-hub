@@ -1,5 +1,19 @@
-# Hub-local caller: validate current bos-gate source before promotion.
-name: Security
+# Managed by https://github.com/blackoutsecure/bos-automation-hub —
+# do not edit. To modify, update the `bos_universal_security` service in
+# .github/actions/sync-managed-files/sync.py.
+#
+# Blackout Secure universal security and policy kicker (hub-managed).
+# Customize via `bos-launchpad-config.json` (repo root), not this file.
+# Schema docs: https://github.com/blackoutsecure/bos-automation-hub
+name: Blackout Secure Universal Security
+run-name: >-
+  Blackout Secure / security / ${{
+    github.event_name == 'pull_request'
+      && format('PR #{0}', github.event.pull_request.number)
+      || github.event_name == 'merge_group'
+      && 'merge queue'
+      || 'manual'
+  }}
 
 "on":
   pull_request:
@@ -9,10 +23,6 @@ name: Security
 
 permissions:
   contents: read
-
-concurrency:
-  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 jobs:
   parse-config:
@@ -28,7 +38,9 @@ jobs:
           persist-credentials: false
       - name: Load launchpad config
         id: config
-        uses: ./.github/actions/shared/launchpad-config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
+        with:
+          allow_missing: 'true'
 
   security:
     name: security
@@ -38,7 +50,7 @@ jobs:
       security-events: write
       actions: read
       pull-requests: read
-    uses: ./.github/workflows/bos-gate.yml
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@main
     with:
       enable_lint:                 ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_lint != false }}
       enable_node_lint:            ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_node_lint == true }}
@@ -52,6 +64,6 @@ jobs:
       enable_pr_title_check:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pr_title_check != false }}
       pr_title_types:              ${{ fromJson(needs.parse-config.outputs.cfg).gate.pr_title_types || 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert' }}
       enable_readme_header_check:  ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_readme_header_check != false }}
-      readme_header_profile:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.readme_header_profile || 'generic' }}
+      readme_header_profile:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.readme_header_profile || 'auto' }}
     secrets:
       scanning_pat: ${{ secrets.SCANNING_PAT }}

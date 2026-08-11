@@ -20,7 +20,8 @@
       "lf_line_endings",
       "dependabot_actions",
       "markdownlint",
-      "shellcheckrc"
+      "shellcheckrc",
+      "bos_universal_security"
     ],
     "mode": "commit",
     "commit_message": "chore: sync managed files from bos-automation-hub",
