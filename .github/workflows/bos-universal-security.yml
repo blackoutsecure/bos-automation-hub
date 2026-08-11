@@ -1,5 +1,5 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# bos-gate.yml — reusable universal security / policy workflow
+# bos-universal-security.yml — reusable universal security / policy workflow
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #
 # Purpose
@@ -63,7 +63,7 @@
 #   permissions: {}     # caller declares minimal; this workflow grants per-job
 #   jobs:
 #     security:
-#       uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@main
+#       uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-security.yml@main
 #       secrets:
 #         scanning_pat: ${{ secrets.SCANNING_PAT }}      # optional
 #

@@ -69,7 +69,7 @@ jobs:
       security-events: write
       actions: read
       pull-requests: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@dev
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-security.yml@dev
     with:
       enable_lint:                 ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_lint != false }}
       enable_node_lint:            ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_node_lint == true }}
@@ -96,7 +96,7 @@ jobs:
       security-events: write
       actions: read
       pull-requests: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-security.yml@main
     with:
       enable_lint:                 ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_lint != false }}
       enable_node_lint:            ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_node_lint == true }}

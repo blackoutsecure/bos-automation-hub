@@ -18,7 +18,7 @@
 #
 # Why a separate composite
 # ------------------------
-# Lives here (not inline in `bos-gate.yml`) so other repos that adopt
+# Lives here (not inline in `bos-universal-security.yml`) so other repos that adopt
 # the gate inherit the exact same enforcement logic. Updating the rule
 # (e.g. tightening to include local actions in the SHA check) is a
 # one-line composite change, not 14 caller updates.

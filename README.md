@@ -42,11 +42,14 @@ workflow files are not edited in consumer repositories.
 
 ## Universal security
 
-[`bos-gate.yml`](.github/workflows/bos-gate.yml) is the reusable universal
-PR and merge-queue security/policy workflow. Its managed caller is
+[`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml) is
+the reusable universal PR and merge-queue security/policy workflow. Its
+managed caller is
 [`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml).
 
-The stable required check is `security / Security summary`. It aggregates:
+The required check is `security (dev) / Security summary` or
+`security (main) / Security summary`, depending on which branch a run
+targets. It aggregates:
 
 - workflow, Markdown, YAML, and Shell lint;
 - optional Node checks (ESLint and Prettier);
@@ -77,7 +80,7 @@ different trust and permission boundaries:
 
 | Layer | Trigger and authority | Responsibility |
 | --- | --- | --- |
-| `bos-gate.yml` (universal security) | Pull request / merge queue; read-mostly | Lint, tests, dependency review, code scanning, and policy checks before merge. |
+| `bos-universal-security.yml` (universal security) | Pull request / merge queue; read-mostly | Lint, tests, dependency review, code scanning, and policy checks before merge. |
 | `bos-universal-marketplace-kicker.yml` | Marketplace PR, trusted-target PR, or manual release | Validate Actions, guard the workflow-free stable branch, and promote releases. |
 | `bos-universal-launchpad.yml` | Push, schedule, or manual caller; publish permissions | Monitor upstreams, run the release-blocking security scan, and coordinate delivery. |
 | `bos-universal-sync-kicker.yml` | Config push, schedule, or manual dispatch; repository contents write | Reconcile only the managed files selected by `sync_files.services`. |
@@ -295,7 +298,7 @@ entry points:
 | Entry point | Purpose |
 | --- | --- |
 | [`bos-universal-launchpad.yml`](.github/workflows/bos-universal-launchpad.yml) | Coordinate trusted release, deployment, security, and metadata stages. |
-| [`bos-gate.yml`](.github/workflows/bos-gate.yml) | Aggregate read-mostly PR and merge-queue validation into one required check. |
+| [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml) | Aggregate read-mostly PR and merge-queue validation into one required check. |
 | [`sync-managed-files.yml`](.github/workflows/sync-managed-files.yml) | Reconcile managed files without invoking delivery or policy workflows. |
 
 The following reusable workflows are stage modules, not additional files that

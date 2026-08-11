@@ -11,7 +11,7 @@
 #   * [`release-promote.yml`](release-promote.yml) — dev -> main allowlist promotion.
 #
 # Together those three reusable workflows form the consumer-facing
-# Marketplace Action stack. `bos-gate.yml` nests this PR CI workflow so its
+# Marketplace Action stack. `bos-universal-security.yml` nests this PR CI workflow so its
 # result participates in `gate / Gate summary`, while the managed
 # `bos-universal-marketplace-kicker.yml` also protects and promotes the stable
 # branch through event-scoped jobs.

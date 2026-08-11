@@ -206,7 +206,7 @@ def main() -> None:
         "bos_universal_sync",
     ]
 
-    gate_workflow = (ROOT / ".github/workflows/bos-gate.yml").read_text()
+    gate_workflow = (ROOT / ".github/workflows/bos-universal-security.yml").read_text()
     security_kicker = (
         ROOT / "managed-files/workflows/bos-universal-security-kicker.yml"
     ).read_text()
@@ -214,7 +214,7 @@ def main() -> None:
         ROOT / ".github/workflows/bos-universal-security-kicker.yml"
     ).read_text()
     gate_declared = workflow_input_names(gate_workflow)
-    gate_forwarded = caller_input_names(security_kicker, "bos-gate.yml")
+    gate_forwarded = caller_input_names(security_kicker, "bos-universal-security.yml")
     assert gate_declared == gate_forwarded, {
         "missing": sorted(gate_declared - gate_forwarded),
         "unknown": sorted(gate_forwarded - gate_declared),
