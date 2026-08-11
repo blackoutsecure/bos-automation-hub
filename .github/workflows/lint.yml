@@ -20,7 +20,7 @@ name: Lint
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - '**/*.md'
       - '**/*.yml'

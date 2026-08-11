@@ -361,6 +361,8 @@ def main() -> None:
     ) == 1
 
     workflows = sorted((ROOT / ".github/workflows").glob("*.yml"))
+    lint_workflow = (ROOT / ".github/workflows/lint.yml").read_text()
+    assert "branches: [main, dev]" in lint_workflow
     reusable = {
         path.name for path in workflows if "\n  workflow_call:\n" in path.read_text()
     }
