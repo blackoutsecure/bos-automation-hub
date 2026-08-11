@@ -35,10 +35,11 @@ inputs:
       `dependabot_pip`. Whole-file: `logger`, `prettier`,
       `bos_launchpad`, `bos_universal_sync`,
       `bos_universal_security`, `bos_universal_marketplace`,
+      `bos_universal_action_test`,
       `org_defaults` (only for the organization `.github` repository;
       requires `target_repo_role: org-default-repo`).
-      Init-if-missing: `gha_sync_drift_check`, `bos_launchpad_config`
-      (`bos-launchpad-config.json`), `license` (multi-license; picks
+      Init-if-missing: `gha_sync_drift_check`, `bos_universal_config`
+      (`bos-universal-config.json`), `license` (multi-license; picks
       from `_LICENSE_REGISTRY` by `license_type:` in
       `bos-managed-files.yaml`, supports apache-2.0 / mit /
       bsd-3-clause / isc),

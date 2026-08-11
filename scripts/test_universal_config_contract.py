@@ -59,18 +59,23 @@ def assert_markdown_links_exist(path: Path) -> None:
     assert not missing, {str(path.relative_to(ROOT)): sorted(missing)}
 
 
-def run_launchpad_config(config: object) -> subprocess.CompletedProcess[str]:
+def run_universal_config(config: object) -> subprocess.CompletedProcess[str]:
+    return run_universal_config_raw(json.dumps(config))
+
+
+def run_universal_config_raw(raw_text: str) -> subprocess.CompletedProcess[str]:
     action = (
-        ROOT / ".github/actions/shared/launchpad-config/action.yml"
+        ROOT / ".github/actions/shared/universal-config/action.yml"
     ).read_text()
     script = action.split("        python3 - <<'PY'\n", 1)[1].split(
         "\n        PY", 1
     )[0]
     with tempfile.TemporaryDirectory() as temp_dir:
         temp = Path(temp_dir)
-        (temp / "bos-launchpad-config.json").write_text(json.dumps(config))
+        config_path = temp / "bos-universal-config.json"
+        config_path.write_text(raw_text)
         env = os.environ | {
-            "CONFIG_PATH": "bos-launchpad-config.json",
+            "CONFIG_PATH": config_path.name,
             "ALLOW_MISSING": "false",
             "GITHUB_OUTPUT": str(temp / "output"),
             "GITHUB_STEP_SUMMARY": str(temp / "summary"),
@@ -89,7 +94,7 @@ def run_launchpad_config(config: object) -> subprocess.CompletedProcess[str]:
 
 
 def main() -> None:
-    normalized = run_launchpad_config(
+    normalized = run_universal_config(
         {
             "marketplace": {
                 "allowlist_paths": ["action.yml", "README.md"],
@@ -108,11 +113,79 @@ def main() -> None:
     assert marketplace["blocked_paths"] == ".github/workflows/\ntest/"
     assert marketplace["required_paths"] == ""
     assert marketplace["extra_sync_paths"] == "NOTICE"
-    malformed = run_launchpad_config(
+    malformed = run_universal_config(
         {"marketplace": {"allowlist_paths": ["action.yml", 3]}}
     )
     assert malformed.returncode == 1
     assert "marketplace.allowlist_paths[1] must be a non-empty string" in malformed.stderr
+
+    # Invalid JSON syntax must fail cleanly with a line/column-annotated
+    # error, not a raw Python traceback.
+    invalid_json = run_universal_config_raw('{"gate": {"enable_lint": true,}}')
+    assert invalid_json.returncode == 1
+    assert "Invalid JSON" in invalid_json.stderr
+    assert "line" in invalid_json.stderr and "column" in invalid_json.stderr
+    assert "Traceback (most recent call last)" not in invalid_json.stderr
+
+    def cfg_from(result: subprocess.CompletedProcess[str]) -> dict:
+        assert result.returncode == 0, result.stderr
+        return json.loads(
+            result.stdout.split("cfg<<__BOS_EOF__\n", 1)[1].split(
+                "\n__BOS_EOF__", 1
+            )[0]
+        )
+
+    # Grouped-section authoring layout hoists to the flat keys every
+    # downstream kicker/normalizer reads — both layouts must resolve
+    # identically, and a flat key always wins over its section alias.
+    grouped = cfg_from(
+        run_universal_config(
+            {
+                "security": {"enable_lint": True, "enable_shell_lint": True},
+                "sync": {"services": ["common"], "mode": "check"},
+                "launchpad": {
+                    "upstream": {"repo": "owner/grouped"},
+                    "docker": {"image_name": "grouped-image"},
+                },
+                "marketplace": {"enabled": True},
+            }
+        )
+    )
+    assert grouped["gate"] == {
+        "enable_lint": True,
+        "enable_shell_lint": True,
+    }
+    assert grouped["sync_files"] == {"services": ["common"], "mode": "check"}
+    assert grouped["upstream"]["repo"] == "owner/grouped"
+    assert grouped["docker"]["image_name"] == "grouped-image"
+    assert grouped["marketplace"]["enabled"] is True
+
+    flat_wins = cfg_from(
+        run_universal_config(
+            {
+                "gate": {"enable_lint": False},
+                "security": {"enable_lint": True},
+            }
+        )
+    )
+    assert flat_wins["gate"] == {"enable_lint": False}
+
+    # "general" is a catch-all for keys owned by neither of the four named
+    # services — every key it holds is hoisted as-is (no fixed allowlist),
+    # so a brand-new standalone service's block lands there first.
+    general = cfg_from(
+        run_universal_config(
+            {
+                "general": {
+                    "action_test": {"python_versions": ["3.12"]},
+                    "upstream": {"repo": "should-not-win"},
+                },
+                "upstream": {"repo": "owner/flat-wins"},
+            }
+        )
+    )
+    assert general["action_test"] == {"python_versions": ["3.12"]}
+    assert general["upstream"]["repo"] == "owner/flat-wins"
 
     workflow = (ROOT / ".github/workflows/bos-universal-launchpad.yml").read_text()
     kicker = (
@@ -145,12 +218,16 @@ def main() -> None:
     sync_source = sync_path.read_text()
     sync = load_sync_module()
     services = sync.parse_services(
-        "bos_launchpad bos_universal_security bos_launchpad_config "
+        "bos_launchpad bos_universal_security bos_universal_config "
         "bos_universal_marketplace bos_universal_sync"
     )
     with tempfile.TemporaryDirectory() as root:
         _, drift = sync.sync_files(services, root)
-    generated_config = json.loads(sync.SERVICE_INIT_FILES["bos_launchpad_config"]["bos-launchpad-config.json"])
+    generated_config = json.loads(sync.SERVICE_INIT_FILES["bos_universal_config"]["bos-universal-config.json"])
+    assert "security" in generated_config
+    assert "sync" in generated_config
+    assert "gate" not in generated_config
+    assert "sync_files" not in generated_config
     assert generated_config["marketplace"]["enabled"] is False
     assert generated_config["marketplace"]["target_branch"] == "main"
     assert {change.path for change in drift} == {
@@ -158,7 +235,7 @@ def main() -> None:
         ".github/workflows/bos-universal-security-kicker.yml",
         ".github/workflows/bos-universal-marketplace-kicker.yml",
         ".github/workflows/bos-universal-sync-kicker.yml",
-        "bos-launchpad-config.json",
+        "bos-universal-config.json",
     }
     for removed_service in (
         "bos_launchpad_gate",
@@ -189,7 +266,7 @@ def main() -> None:
     assert "_GHA_LINT_NODE_YML" not in sync_source
     assert "_BOS_LAUNCHPAD_CF_PAGES_YML" not in sync_source
     assert not (
-        ROOT / ".github/actions/summarize-launchpad-config/action.yml"
+        ROOT / ".github/actions/summarize-universal-config/action.yml"
     ).exists()
     managed_sync_caller = sync.SERVICE_FILES["bos_universal_sync"][
         ".github/workflows/bos-universal-sync-kicker.yml"
@@ -198,8 +275,7 @@ def main() -> None:
     assert "branches: [main]" not in managed_sync_caller
     assert managed_sync_caller.count("bos-universal-sync.yml@main") == 1
     assert "parse-config:" not in managed_sync_caller
-    assert "launchpad-config@main" not in managed_sync_caller
-    assert "bos-launchpad-config.json" in managed_sync_caller
+    assert "bos-universal-config.json" in managed_sync_caller
     assert "bos-managed-files.yaml" in managed_sync_caller
     assert ".github/workflows/bos-universal-sync-kicker.yml" not in managed_sync_caller
     assert sync.parse_services("bos_launchpad bos_universal_sync") == [
@@ -453,7 +529,11 @@ def main() -> None:
         assert refs and set(refs) == expected_refs, refs
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
-    hub_config = json.loads((ROOT / "bos-launchpad-config.json").read_text())
+    hub_config_raw = json.loads((ROOT / "bos-universal-config.json").read_text())
+    assert set(hub_config_raw) == {"security", "sync"}
+    hub_config = cfg_from(
+        run_universal_config_raw((ROOT / "bos-universal-config.json").read_text())
+    )
     assert hub_config["gate"] == {
         "enable_lint": False,
         "enable_node_lint": False,
@@ -475,17 +555,18 @@ def main() -> None:
         "dependabot_actions",
         "markdownlint",
         "shellcheckrc",
+        "bos_universal_config",
         "bos_universal_security",
+        "bos_universal_sync",
     ]
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" in sync_backend
     assert "  workflow_dispatch:" in sync_backend
-    assert "actions/shared/launchpad-config@main" in sync_backend
+    assert "actions/shared/universal-config@main" in sync_backend
     assert "actions/sync-managed-files@main" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert managed_sync_caller.count("bos-universal-sync.yml@main") == 1
-    assert "launchpad-config@main" not in managed_sync_caller
     assert "parse-config:" not in managed_sync_caller
 
     assert_markdown_links_exist(ROOT / "README.md")

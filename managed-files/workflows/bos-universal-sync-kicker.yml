@@ -1,5 +1,6 @@
 # Blackout Secure universal sync kicker (hub-managed).
-# Customize via `bos-launchpad-config.json` (repo root), not this file.
+# Customize via `bos-universal-config.json` (repo root; legacy
+# not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 name: Blackout Secure universal sync (kicker)
 run-name: >-
@@ -16,7 +17,7 @@ run-name: >-
     - cron: '29 14 * * 1'
   push:
     paths:
-      - 'bos-launchpad-config.json'
+      - 'bos-universal-config.json'
       - 'bos-managed-files.yaml'
   workflow_dispatch:
     inputs:

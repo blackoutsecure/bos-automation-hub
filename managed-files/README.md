@@ -3,7 +3,11 @@
 This directory contains canonical files loaded by
 [`sync-managed-files`](../.github/actions/sync-managed-files/). Consumer
 repositories select services in their sync configuration; repository-specific
-launchpad behavior belongs in `bos-launchpad-config.json`.
+universal behavior belongs in `bos-universal-config.json`.
+Settings may be authored as flat top-level keys or grouped under a named
+section per service (`launchpad`, `marketplace`, `security`, `sync`, plus a
+`general` catch-all for anything else) — see the ["Config sections"](../README.md#config-sections)
+table in the hub README for the full key mapping; this file doesn't repeat it.
 
 ## Active templates
 
@@ -12,7 +16,7 @@ and [`dotfiles/`](dotfiles/). `sync.py` loads these files with inline fallbacks,
 so the files in this directory are the normal authoring and review surface.
 
 - [`bos-universal-launchpad-kicker.yml`](workflows/bos-universal-launchpad-kicker.yml)
-  is the managed release/deploy caller. It reads `bos-launchpad-config.json`
+  is the managed release/deploy caller. It reads `bos-universal-config.json`
   and calls the promoted hub runtime on `@main`.
 - [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
   is the managed PR and merge-queue caller for shared lint, dependency review,
@@ -34,7 +38,7 @@ them directly.
 
 Enable `bos_universal_sync` alongside whichever other managed callers the
 repository needs. GitHub still requires one event-trigger workflow per
-repository; `bos-launchpad-config.json` controls sync behavior but cannot
+repository; `bos-universal-config.json` controls sync behavior but cannot
 itself trigger a reusable workflow.
 
 ## Ownership modes
@@ -93,9 +97,11 @@ targeting is resolved ahead of time and encoded as static per-branch jobs:
 - `release-hub.yml` cannot reference `@main` without breaking
   self-validation, so it uses local `./.github/...` references instead;
 - the hub otherwise dogfoods its own managed services like any consumer —
-  e.g. `bos_universal_security` is enabled in the hub's own
-  `bos-launchpad-config.json` and synced to
-  `.github/workflows/bos-universal-security-kicker.yml`;
+  `bos_universal_config`, `bos_universal_security`, and
+  `bos_universal_sync` are enabled in the hub's own
+  `bos-universal-config.json`; the latter two maintain the security and sync
+  kicker workflows while the config service provisions the canonical config
+  when needed;
 - runtime branch decisions inside actions use the caller repository's
   `github.event.repository.default_branch` where appropriate.
 

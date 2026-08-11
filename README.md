@@ -37,7 +37,7 @@ The launchpad can compose:
 - security scanning;
 - repository metadata updates.
 
-Consumer behavior is data-driven through `bos-launchpad-config.json`; managed
+Consumer behavior is data-driven through `bos-universal-config.json`; managed
 workflow files are not edited in consumer repositories.
 
 ## Universal security
@@ -49,15 +49,17 @@ managed caller is
 
 The required check is `security (dev) / Security summary` or
 `security (main) / Security summary`, depending on which branch a run
-targets. It aggregates:
+targets. Gates are grouped by concern (see the comments in the workflow
+file), though they stay one `workflow_call` surface and one required check
+by design — splitting into separate workflows would force every consumer to
+re-pin branch protection whenever a gate moved between groups:
 
-- workflow, Markdown, YAML, and Shell lint;
-- optional Node checks (ESLint and Prettier);
-- optional Python checks (Ruff and pytest);
-- optional Shell checks (ShellCheck and Bats);
-- dependency review and code scanning;
-- pinned-action enforcement;
-- README-header and PR-title checks.
+- **Code quality:** workflow, Markdown, YAML, and Shell lint; optional Node
+  checks (ESLint and Prettier); optional Python checks (Ruff and pytest);
+  optional Shell checks (ShellCheck and Bats);
+- **Security:** dependency review, code scanning (secret scan, SAST, GHAS
+  posture audit), and pinned-action enforcement;
+- **Compliance:** README-header and PR-title checks.
 
 Marketplace-specific validation is intentionally excluded. Marketplace Action
 repositories add the managed
@@ -72,6 +74,38 @@ schedule, config-change, and manual events. Its consumer front door is
 [`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml).
 It runs independently on config changes, schedule, or manual dispatch and
 never traverses the release, security, or Marketplace workflows.
+
+## Universal action test
+
+[`bos-universal-action-test.yml`](.github/workflows/bos-universal-action-test.yml)
+is a reusable pytest matrix plus an optional live-upstream smoke test for
+Actions repositories with a Python implementation. Its managed caller is
+[`bos-universal-action-test-kicker.yml`](managed-files/workflows/bos-universal-action-test-kicker.yml).
+
+It complements `bos-universal-security.yml`'s single-OS/Python `python-lint`
+job (Ruff + pytest, part of the PR security gate) rather than replacing it:
+use this workflow when a repo needs broader Python/OS matrix coverage and/or
+validation against a live upstream target, driven by an `action_test` block
+in `bos-universal-config.json`:
+
+```json
+{
+  "action_test": {
+    "python_versions": ["3.10", "3.11", "3.12"],
+    "os_matrix": ["ubuntu-latest", "macos-latest", "windows-latest"],
+    "requirements_file": "requirements-dev.txt",
+    "pytest_args": "-q",
+    "enable_smoke_test": true,
+    "smoke_trigger": "push-dev",
+    "smoke_test_config": { "source": "npm", "package_name": "@actions/core" }
+  }
+}
+```
+
+The smoke-test job checks out the calling repo, invokes it as an action
+(`uses: ./`), and asserts its declared `version` output is non-empty; it
+requires an `action.yml` at the repo root. `smoke_trigger` defaults to
+`push-dev` so live-upstream calls don't run on untrusted PR heads.
 
 ## Workflow boundaries
 
@@ -99,6 +133,17 @@ actions. Hub and Marketplace promotion both use
 with distinct first-release defaults (`v0.0.1` for the hub and `v0.1.0` for a
 Marketplace action).
 
+There is intentionally no standalone `bos-universal-release-kicker.yml`.
+Release entry points are already owned by the workflow that has enough context
+and authority to start them: Universal Launchpad calls
+[`release.yml`](.github/workflows/release.yml) for artifact publication,
+Marketplace repos use
+[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml)
+for operator-driven promotion, and this hub uses
+[`release-hub.yml`](.github/workflows/release-hub.yml) for its own runtime
+promotion. A generic release kicker would either duplicate those front doors
+or need enough branching logic to blur their trust boundaries.
+
 The Universal Launchpad retains a release-blocking scan. Scheduled and manual
 releases need a fresh assessment even when no PR triggered the universal
 security kicker. This is defense in depth at a different trust boundary, not a
@@ -111,7 +156,7 @@ never executes PR-head code; its release job runs only by manual dispatch with
 
 ## Consumer configuration
 
-Create `bos-launchpad-config.json` at the consumer repository root. A minimal
+Create `bos-universal-config.json` at the consumer repository root. A minimal
 configuration can enable only the required stages:
 
 ```json
@@ -154,7 +199,7 @@ configuration can enable only the required stages:
 ```
 
 The shared
-[`launchpad-config`](.github/actions/shared/launchpad-config/action.yml) action
+[`universal-config`](.github/actions/shared/universal-config/action.yml) action
 validates and normalizes this file. Missing optional objects fall back to the
 reusable workflow defaults. Marketplace `allowlist_paths`, `blocked_paths`,
 `required_paths`, and `extra_sync_paths` accept JSON arrays of non-empty
@@ -162,12 +207,65 @@ strings. Legacy newline-delimited strings remain supported; the normalizer
 converts arrays to the newline-delimited workflow API used by the Marketplace
 guard and promotion workflows.
 
+### Config sections
+
+Every managed kicker (launchpad, marketplace, security, sync) reads this file
+through the same shared
+[`universal-config`](.github/actions/shared/universal-config/action.yml)
+action — no workflow parses the JSON itself. Settings can be authored as
+flat top-level keys (as shown above, and required for anyone who already has
+a config) or grouped under a named section per service; both layouts, and
+any mix of the two, normalize identically. A flat key always wins over its
+section-nested equivalent when both are present.
+
+| Section (optional) | Flat top-level key(s) it groups | Consumed by |
+| --- | --- | --- |
+| `security` | `gate` | `bos-universal-security.yml` |
+| `sync` | `sync_files` | `bos-universal-sync.yml` |
+| `launchpad` | `upstream`, `stages`, `docker`, `scout`, `balena`, `companion_docker`, `release`, `platforms`, `security_scan`, `repo_metadata`, `cloudflare`, `triggers` | `bos-universal-launchpad.yml` |
+| `marketplace` | `marketplace` (already the flat key name) | `bos-universal-marketplace.yml` |
+| `general` | any key not owned by the four services above (e.g. `action_test`) | whichever workflow reads that key |
+
+Unlike the other sections, `general` hoists every key it contains rather than
+a fixed allowlist — it's the landing spot for a new standalone service's
+config (like `bos-universal-action-test.yml`'s `action_test` block) before it
+earns its own named section.
+
+For example, the sample above can equivalently be written grouped:
+
+```json
+{
+  "launchpad": {
+    "stages": { "docker": true, "balena": false, "github_release": true },
+    "upstream": { "repo": "owner/project", "source": "github_release" },
+    "docker": { "image_name": "project" }
+  },
+  "security": {
+    "enable_node_lint": false,
+    "enable_python_lint": false,
+    "enable_shell_lint": true
+  },
+  "marketplace": {
+    "enabled": false,
+    "target_branch": "main",
+    "allowlist_paths": ["action.yml", "README.md", "LICENSE"]
+  },
+  "sync": {
+    "services": ["common", "lf_line_endings", "dependabot_actions"],
+    "mode": "commit"
+  },
+  "general": {
+    "action_test": { "python_versions": ["3.11", "3.12"] }
+  }
+}
+```
+
 ## Managed files
 
 [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) exposes
 one reusable orchestration backend. It resolves explicit caller inputs when
 provided and otherwise reads the `sync_files` block from
-[`bos-launchpad-config.json`](bos-launchpad-config.json). The
+[`bos-universal-config.json`](bos-universal-config.json). The
 [`sync-managed-files`](.github/actions/sync-managed-files/action.yml) composite
 action remains the file-mutation engine. Canonical on-disk templates live
 under [`managed-files/`](managed-files/); the service registry in
@@ -188,8 +286,9 @@ Primary services include:
 - canonical files: `logger`, `shellcheckrc`, `markdownlint`, `prettier`,
   `wranglerignore`, `humans`;
 - universal callers: `bos_launchpad`, `bos_universal_security`,
-  `bos_universal_marketplace`, `bos_universal_sync`;
-- initialization: `bos_launchpad_config`, `gha_sync_drift_check`, `license`,
+  `bos_universal_marketplace`, `bos_universal_sync`,
+  `bos_universal_action_test`;
+- initialization: `bos_universal_config`, `gha_sync_drift_check`, `license`,
   `notice_apache2`, `codeowners`;
 - organization repository only: `org_defaults`, gated by
   `target_repo_role: org-default-repo` in `bos-managed-files.yaml`.
@@ -271,7 +370,7 @@ Use this consumer configuration:
       "python",
       "dependabot_actions",
       "dependabot_pip",
-      "bos_launchpad_config",
+      "bos_universal_config",
       "bos_universal_security",
       "bos_universal_marketplace",
       "bos_universal_sync"
@@ -292,7 +391,7 @@ Consumer repositories normally need only the managed
 [`bos-universal-launchpad-kicker.yml`](managed-files/workflows/bos-universal-launchpad-kicker.yml)
 [`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml),
 and [`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml)
-callers. They read `bos-launchpad-config.json` and invoke independent hub
+callers. They read `bos-universal-config.json` and invoke independent hub
 entry points:
 
 | Entry point | Purpose |
@@ -389,14 +488,14 @@ Common secrets are stage-dependent:
 Run the repository contract before promotion:
 
 ```bash
-python3 scripts/test_launchpad_contract.py
+python3 scripts/test_universal_config_contract.py
 python3 -m py_compile \
   .github/actions/sync-managed-files/sync.py \
-  scripts/test_launchpad_contract.py
+  scripts/test_universal_config_contract.py
 git diff --check
 ```
 
-The contract verifies launchpad and gate input forwarding, managed-service
+The contract verifies universal config and gate input forwarding, managed-service
 output, branch/ref ownership, semantic runtime promotion, and internal README
 links. [`lint.yml`](.github/workflows/lint.yml) runs it in CI.
 

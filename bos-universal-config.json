@@ -1,5 +1,5 @@
 {
-  "gate": {
+  "security": {
     "enable_lint": false,
     "enable_node_lint": false,
     "node_version": "20",
@@ -14,14 +14,16 @@
     "enable_readme_header_check": true,
     "readme_header_profile": "generic"
   },
-  "sync_files": {
+  "sync": {
     "services": [
       "common",
       "lf_line_endings",
       "dependabot_actions",
       "markdownlint",
       "shellcheckrc",
-      "bos_universal_security"
+      "bos_universal_config",
+      "bos_universal_security",
+      "bos_universal_sync"
     ],
     "mode": "commit",
     "commit_message": "chore: sync managed files from bos-automation-hub",

@@ -3,7 +3,8 @@
 # .github/actions/sync-managed-files/sync.py.
 #
 # Blackout Secure universal security and policy kicker (hub-managed).
-# Customize via `bos-launchpad-config.json` (repo root), not this file.
+# Customize via `bos-universal-config.json` (repo root; legacy
+# not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 name: Blackout Secure Universal Security
 run-name: >-
@@ -26,7 +27,7 @@ permissions:
 
 jobs:
   parse-config:
-    name: Parse launchpad config
+    name: Parse universal config
     # Resolve runner from org-shared `vars.DEFAULT_RUNNER` when set,
     # supporting both bare label and JSON-array formats. Fallback to
     # `ubuntu-latest` if the variable is not defined in the consumer.
@@ -40,9 +41,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Load launchpad config
+      - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
         with:
           allow_missing: 'true'
       # `uses:` refs cannot be dynamic, so resolve which hub branch this

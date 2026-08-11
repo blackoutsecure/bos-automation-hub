@@ -30,6 +30,17 @@
 #                        set of gates without re-pinning required checks
 #                        in repo branch-protection.
 #
+# Logical groups (single workflow, single required check by design): jobs
+# below are ordered and commented by group —
+#   Code quality: lint, node-lint, python-lint, shell-lint
+#   Security:     dependency-review, code-scan, pinned-actions
+#   Compliance:   readme-header, pr-title
+# These stay one `workflow_call` surface (not three) so a repo pins exactly
+# one required check (`security (dev|main) / Security summary`); splitting
+# by group would force every consumer to re-pin branch protection every
+# time a gate moves between groups. Toggle individual gates via inputs
+# instead of by removing them from this file.
+#
 # Note: branch-protection drift checking lives in `bos-code-scanning-kit`
 # (rules PS020-PS025) and runs as part of gate #4. It was previously a
 # separate gate here; consolidating into the posture audit removed the
@@ -169,6 +180,7 @@ jobs:
   # 1. Lint — markdownlint / yamllint / shellcheck / actionlint via the
   # kit composite (already inherits packaged defaults; per-repo overrides
   # via standard config filenames at the repo root).
+  # Group: Code quality
   # -----------------------------------------------------------------
   lint:
     if: ${{ inputs.enable_lint }}
@@ -291,6 +303,7 @@ jobs:
   # with known CVEs or out-of-policy licenses. PR-scope only — the
   # action requires a base/head pair, so it is skipped on merge_group
   # (the merge-queue commit already passed this on the original PR).
+  # Group: Security
   # -----------------------------------------------------------------
   dependency-review:
     if: ${{ inputs.enable_dependency_review && github.event_name == 'pull_request' }}
@@ -310,6 +323,7 @@ jobs:
   # 4. Code scanning — umbrella scan + posture audit. Uploads merged
   # SARIF to GitHub Advanced Security. `security-events: write` is
   # required for the SARIF upload step inside the kit.
+  # Group: Security
   # -----------------------------------------------------------------
   code-scan:
     if: ${{ inputs.enable_code_scan }}
@@ -341,6 +355,7 @@ jobs:
   # Once the pinned kit release ships PS012, remove this job AND the
   # `enable_pinned_actions_check`
   # input — the kit's posture audit (gate #4) will own the check.
+  # Group: Security
   # -----------------------------------------------------------------
   pinned-actions:
     if: ${{ inputs.enable_pinned_actions_check }}
@@ -361,6 +376,7 @@ jobs:
   # BlackOut Secure org header pattern (H1, copyright line, fixed badge
   # set). Profile is auto-detected from repo contents. Cheap, fast, and
   # keeps every public repo on-brand without manual review.
+  # Group: Compliance
   # -----------------------------------------------------------------
   readme-header:
     if: ${{ inputs.enable_readme_header_check }}
@@ -378,6 +394,7 @@ jobs:
   # -----------------------------------------------------------------
   # 6. PR title — conventional-commits format so release-notes
   # generation parses cleanly. PR-scope only.
+  # Group: Compliance
   # -----------------------------------------------------------------
   pr-title:
     if: ${{ inputs.enable_pr_title_check && github.event_name == 'pull_request' }}

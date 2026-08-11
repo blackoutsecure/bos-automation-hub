@@ -28,7 +28,7 @@ on:
       - '**/*.sh'
       - '.shellcheckrc'
       - '.github/actions/sync-managed-files/sync.py'
-      - 'scripts/test_launchpad_contract.py'
+      - 'scripts/test_universal_config_contract.py'
   pull_request:
     paths:
       - '**/*.md'
@@ -37,7 +37,7 @@ on:
       - '**/*.sh'
       - '.shellcheckrc'
       - '.github/actions/sync-managed-files/sync.py'
-      - 'scripts/test_launchpad_contract.py'
+      - 'scripts/test_universal_config_contract.py'
   workflow_dispatch:
 
 permissions:
@@ -48,8 +48,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  launchpad-contract:
-    name: launchpad contract
+  universal-config-contract:
+    name: universal config contract
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -57,8 +57,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate managed launchpad contract
-        run: python3 scripts/test_launchpad_contract.py
+      - name: Validate managed universal config contract
+        run: python3 scripts/test_universal_config_contract.py
 
   actionlint:
     name: actionlint

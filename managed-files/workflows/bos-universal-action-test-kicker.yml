@@ -1,0 +1,93 @@
+# Blackout Secure universal action test kicker (hub-managed).
+# Customize via `bos-universal-config.json` (repo root; legacy
+# not this file.
+# Schema docs: https://github.com/blackoutsecure/bos-automation-hub
+name: Blackout Secure Universal Action Test
+run-name: >-
+  Blackout Secure / action test / ${{
+    github.event_name == 'pull_request'
+      && format('PR #{0}', github.event.pull_request.number)
+      || github.event_name == 'push'
+      && 'push'
+      || 'manual'
+  }}
+
+"on":
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parse-config:
+    name: Parse universal config
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    timeout-minutes: 2
+    outputs:
+      cfg: ${{ steps.config.outputs.cfg }}
+      target_ref: ${{ steps.target-ref.outputs.ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Load universal config
+        id: config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+        with:
+          allow_missing: 'true'
+      # `uses:` refs cannot be dynamic, so resolve which hub branch this
+      # run targets here and pick the matching static-ref job below.
+      - name: Resolve target hub ref
+        id: target-ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          case "${EVENT_NAME}" in
+            pull_request|pull_request_target) ref="${BASE_REF}" ;;
+            *) ref="${REF_NAME}" ;;
+          esac
+          [ "${ref}" = "dev" ] || ref="main"
+          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+
+  action-test-dev:
+    name: action-test (dev)
+    needs: parse-config
+    if: needs.parse-config.outputs.target_ref == 'dev'
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-action-test.yml@dev
+    with:
+      python_versions:    ${{ fromJson(needs.parse-config.outputs.cfg).action_test.python_versions || '["3.11"]' }}
+      os_matrix:          ${{ fromJson(needs.parse-config.outputs.cfg).action_test.os_matrix || '["ubuntu-latest"]' }}
+      requirements_file:  ${{ fromJson(needs.parse-config.outputs.cfg).action_test.requirements_file || 'requirements-dev.txt' }}
+      pytest_args:        ${{ fromJson(needs.parse-config.outputs.cfg).action_test.pytest_args || '-q' }}
+      enable_smoke_test:  ${{ fromJson(needs.parse-config.outputs.cfg).action_test.enable_smoke_test == true }}
+      smoke_trigger:      ${{ fromJson(needs.parse-config.outputs.cfg).action_test.smoke_trigger || 'push-dev' }}
+      smoke_test_config:  ${{ toJson(fromJson(needs.parse-config.outputs.cfg).action_test.smoke_test_config || {}) }}
+      timeout_pytest:     ${{ fromJson(needs.parse-config.outputs.cfg).action_test.timeout_pytest || 10 }}
+      timeout_smoke:      ${{ fromJson(needs.parse-config.outputs.cfg).action_test.timeout_smoke || 5 }}
+
+  action-test-main:
+    name: action-test (main)
+    needs: parse-config
+    if: needs.parse-config.outputs.target_ref == 'main'
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-action-test.yml@main
+    with:
+      python_versions:    ${{ fromJson(needs.parse-config.outputs.cfg).action_test.python_versions || '["3.11"]' }}
+      os_matrix:          ${{ fromJson(needs.parse-config.outputs.cfg).action_test.os_matrix || '["ubuntu-latest"]' }}
+      requirements_file:  ${{ fromJson(needs.parse-config.outputs.cfg).action_test.requirements_file || 'requirements-dev.txt' }}
+      pytest_args:        ${{ fromJson(needs.parse-config.outputs.cfg).action_test.pytest_args || '-q' }}
+      enable_smoke_test:  ${{ fromJson(needs.parse-config.outputs.cfg).action_test.enable_smoke_test == true }}
+      smoke_trigger:      ${{ fromJson(needs.parse-config.outputs.cfg).action_test.smoke_trigger || 'push-dev' }}
+      smoke_test_config:  ${{ toJson(fromJson(needs.parse-config.outputs.cfg).action_test.smoke_test_config || {}) }}
+      timeout_pytest:     ${{ fromJson(needs.parse-config.outputs.cfg).action_test.timeout_pytest || 10 }}
+      timeout_smoke:      ${{ fromJson(needs.parse-config.outputs.cfg).action_test.timeout_smoke || 5 }}
