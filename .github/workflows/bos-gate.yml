@@ -401,8 +401,11 @@ jobs:
 
   # -----------------------------------------------------------------
   # 6. Security summary — single aggregated job that depends on every
-  # other check. Use THIS job (`security / Security summary`) as the
-  # required status check in branch protection. That way the set of
+  # other check. Use THIS job as the required status check in branch
+  # protection (the managed kicker calls this workflow from two
+  # branch-scoped jobs, so the check name is `security (dev) /
+  # Security summary` or `security (main) / Security summary`
+  # depending on which branch a run targets). That way the set of
   # underlying gates can change without re-pinning required checks
   # in repo settings.
   #

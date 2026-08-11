@@ -30,14 +30,44 @@ permissions:
   contents: read
 
 jobs:
-  sync:
-    name: Sync managed files
+  resolve-target:
+    name: Resolve target hub ref
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
     if: >-
       !cancelled()
       && (
         github.event_name != 'push'
         || github.ref_name == github.event.repository.default_branch
       )
+    outputs:
+      ref: ${{ steps.target-ref.outputs.ref }}
+    steps:
+      # `uses:` refs cannot be dynamic, so resolve which hub branch this
+      # run targets here and pick the matching static-ref job below.
+      - name: Resolve target hub ref
+        id: target-ref
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          ref="main"
+          [ "${REF_NAME}" = "dev" ] && ref="dev"
+          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+
+  sync-dev:
+    name: Sync managed files (dev)
+    needs: resolve-target
+    if: needs.resolve-target.outputs.ref == 'dev'
+    permissions:
+      contents: write
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@dev
+    with:
+      mode: ${{ inputs.mode || '' }}
+
+  sync-main:
+    name: Sync managed files (main)
+    needs: resolve-target
+    if: needs.resolve-target.outputs.ref == 'main'
     permissions:
       contents: write
     uses: blackoutsecure/bos-automation-hub/.github/workflows/sync-managed-files.yml@main

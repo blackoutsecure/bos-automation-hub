@@ -38,7 +38,7 @@ def workflow_input_names(body: str) -> set[str]:
 def caller_input_names(body: str, workflow_name: str) -> set[str]:
     call_pattern = re.compile(
         r"^    uses: (?:\./|blackoutsecure/bos-automation-hub/)"
-        rf"\.github/workflows/{re.escape(workflow_name)}(?:@main)?$",
+        rf"\.github/workflows/{re.escape(workflow_name)}(?:@\w+)?$",
         re.MULTILINE,
     )
     match = call_pattern.search(body)
@@ -438,15 +438,17 @@ def main() -> None:
     assert docker_workflow.count(compose_build_args) == 2
     assert "echo \"build_args<<__EOF__\"" not in docker_workflow
 
-    for managed_caller in (
-        kicker,
-        security_kicker,
-        marketplace_kicker,
-        managed_sync_caller,
-        hub_security,
+    # `kicker` (launchpad) only ever fires on `main` pushes; the other
+    # dual-branch kickers resolve a static @dev or @main ref per run.
+    for managed_caller, expected_refs in (
+        (kicker, {"main"}),
+        (security_kicker, {"main", "dev"}),
+        (marketplace_kicker, {"main", "dev"}),
+        (managed_sync_caller, {"main", "dev"}),
+        (hub_security, {"main", "dev"}),
     ):
         refs = re.findall(r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)", managed_caller)
-        assert refs and set(refs) == {"main"}, refs
+        assert refs and set(refs) == expected_refs, refs
 
     sync_backend = (ROOT / ".github/workflows/sync-managed-files.yml").read_text()
     hub_config = json.loads((ROOT / "bos-launchpad-config.json").read_text())

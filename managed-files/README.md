@@ -75,18 +75,25 @@ The organization-default targets are the repository root files
 
 ## Branch policy
 
-`dev` is the hub development branch. Consumer-facing managed callers use
-`@main`, which is the promoted stable runtime. GitHub Actions does not allow
-expressions in `uses:` references, so this separation is intentionally static:
+`dev` is the hub development branch; `main` is the promoted stable runtime.
+GitHub Actions does not allow expressions in `uses:` references, so branch
+targeting is resolved ahead of time and encoded as static per-branch jobs:
 
+- the security, Marketplace, and sync kickers each resolve which branch
+  (`dev` or `main`) a run targets, then dispatch to a same-named job pair
+  (e.g. `security-dev` / `security-main`) whose `uses:` refs are pinned to
+  `@dev` and `@main` respectively — a `dev`-targeted run exercises the hub's
+  current unreleased source, a `main`-targeted run exercises the promoted
+  stable runtime;
+- the launchpad kicker only ever fires on `main` pushes, so it has no `dev`
+  variant and always calls `@main`;
 - workflows that cannot reference `@main` without breaking self-validation
   (e.g. `sync-managed-files.yml`, `release-hub.yml`) use local
   `./.github/...` references instead;
 - the hub otherwise dogfoods its own managed services like any consumer —
   e.g. `bos_universal_security` is enabled in the hub's own
   `bos-launchpad-config.json` and synced to
-  `.github/workflows/bos-universal-security-kicker.yml`, calling
-  `blackoutsecure/bos-automation-hub/...@main` the same as everyone else;
+  `.github/workflows/bos-universal-security-kicker.yml`;
 - runtime branch decisions inside actions use the caller repository's
   `github.event.repository.default_branch` where appropriate.
 

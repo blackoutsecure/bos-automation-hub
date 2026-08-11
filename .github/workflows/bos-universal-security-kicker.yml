@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 2
     outputs:
       cfg: ${{ steps.config.outputs.cfg }}
+      target_ref: ${{ steps.target-ref.outputs.ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,10 +42,55 @@ jobs:
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad-config@main
         with:
           allow_missing: 'true'
+      # `uses:` refs cannot be dynamic, so resolve which hub branch this
+      # run targets here and pick the matching static-ref job below.
+      - name: Resolve target hub ref
+        id: target-ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          case "${EVENT_NAME}" in
+            pull_request|pull_request_target) ref="${BASE_REF}" ;;
+            merge_group) ref="${MERGE_GROUP_BASE_REF#refs/heads/}" ;;
+            *) ref="${REF_NAME}" ;;
+          esac
+          [ "${ref}" = "dev" ] || ref="main"
+          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
 
-  security:
-    name: security
+  security-dev:
+    name: security (dev)
     needs: parse-config
+    if: needs.parse-config.outputs.target_ref == 'dev'
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      pull-requests: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-gate.yml@dev
+    with:
+      enable_lint:                 ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_lint != false }}
+      enable_node_lint:            ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_node_lint == true }}
+      node_version:                ${{ fromJson(needs.parse-config.outputs.cfg).gate.node_version || '20' }}
+      enable_python_lint:          ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_python_lint == true }}
+      python_version:              ${{ fromJson(needs.parse-config.outputs.cfg).gate.python_version || '3.11' }}
+      enable_shell_lint:           ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_shell_lint == true }}
+      enable_dependency_review:    ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_dependency_review != false }}
+      enable_code_scan:            ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_code_scan != false }}
+      enable_pinned_actions_check: ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pinned_actions_check != false }}
+      enable_pr_title_check:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pr_title_check != false }}
+      pr_title_types:              ${{ fromJson(needs.parse-config.outputs.cfg).gate.pr_title_types || 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert' }}
+      enable_readme_header_check:  ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_readme_header_check != false }}
+      readme_header_profile:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.readme_header_profile || 'auto' }}
+    secrets:
+      scanning_pat: ${{ secrets.SCANNING_PAT }}
+
+  security-main:
+    name: security (main)
+    needs: parse-config
+    if: needs.parse-config.outputs.target_ref == 'main'
     permissions:
       contents: read
       security-events: write
