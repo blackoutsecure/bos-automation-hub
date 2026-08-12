@@ -1,6 +1,6 @@
 # Managed by https://github.com/blackoutsecure/bos-automation-hub —
 # do not edit. To modify, update the `shellcheckrc` service in
-# .github/actions/sync-managed-files/sync.py.
+# the managed-file sync catalog.
 #
 # Central ShellCheck defaults for Blackout Secure repositories.
 #

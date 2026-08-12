@@ -298,6 +298,7 @@ def main() -> None:
     assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" in marketplace_kicker
     assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" in marketplace_kicker
     assert "outputs.cfg" in marketplace_kicker
+    assert "`.github/bos-universal-config.json`" in marketplace_kicker
     assert "pull_request_target:" in marketplace_kicker
     assert "github.event.repository.default_branch" in marketplace_kicker
     assert not re.search(r"source_branch:\s+dev\b", marketplace_kicker)
