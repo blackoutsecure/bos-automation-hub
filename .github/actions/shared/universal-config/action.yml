@@ -37,6 +37,9 @@ outputs:
   sync:
     description: Normalized sync_files block derived from the config.
     value: ${{ steps.config.outputs.sync }}
+    action_test:
+        description: Normalized action_test block derived from the config.
+        value: ${{ steps.config.outputs.action_test }}
 
 runs:
   using: composite
@@ -306,9 +309,51 @@ runs:
             "timeout_minutes": as_int(sync_raw.get("timeout_minutes"), 5),
         }
 
+        action_test_raw = as_dict(cfg.get("action_test"))
+        action_test_python_versions = [
+            str(version).strip()
+            for version in as_list(action_test_raw.get("python_versions"))
+            if str(version).strip()
+        ]
+        action_test_os_matrix = [
+            str(runner).strip()
+            for runner in as_list(action_test_raw.get("os_matrix"))
+            if str(runner).strip()
+        ]
+        action_test_python_packages = [
+            str(package).strip()
+            for package in as_list(action_test_raw.get("python_packages"))
+            if str(package).strip()
+        ]
+        smoke_test_config = action_test_raw.get("smoke_test_config")
+        if smoke_test_config is None:
+            smoke_test_config = {}
+        if not isinstance(smoke_test_config, dict):
+            error(
+                f"::error file={config_path}::action_test.smoke_test_config must be an object."
+            )
+            sys.exit(1)
+
+        action_test = {
+            "python_versions": action_test_python_versions or ["3.11"],
+            "os_matrix": action_test_os_matrix or ["ubuntu-latest"],
+            "python_packages": action_test_python_packages or [
+                "pytest>=8.0",
+                "ruff>=0.6",
+                "PyYAML>=6.0",
+            ],
+            "pytest_args": str(action_test_raw.get("pytest_args") or "-q"),
+            "enable_smoke_test": action_test_raw.get("enable_smoke_test") is True,
+            "smoke_trigger": str(action_test_raw.get("smoke_trigger") or "push-dev"),
+            "smoke_test_config": smoke_test_config,
+            "timeout_pytest": as_int(action_test_raw.get("timeout_pytest"), 10),
+            "timeout_smoke": as_int(action_test_raw.get("timeout_smoke"), 5),
+        }
+
         compact_cfg = json.dumps(cfg, separators=(",", ":"))
         compact_cloudflare = json.dumps(cloudflare, separators=(",", ":"))
         compact_sync = json.dumps(sync, separators=(",", ":"))
+        compact_action_test = json.dumps(action_test, separators=(",", ":"))
 
         cloudflare_enabled = stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name"))
         stage_flags = {
@@ -361,4 +406,5 @@ runs:
             handle.write("__BOS_EOF__\n")
             handle.write(f"cloudflare={compact_cloudflare}\n")
             handle.write(f"sync={compact_sync}\n")
+            handle.write(f"action_test={compact_action_test}\n")
         PY

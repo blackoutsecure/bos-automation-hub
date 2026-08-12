@@ -151,13 +151,19 @@ jobs:
               raw = os.environ.get(name, "").strip()
               return int(raw) if raw and int(raw) > 0 else int(config[config_key])
 
-          runs_on = os.environ.get("RUNS_ON", "").strip()
+          def runner_value(value):
+              value = (value or "").strip()
+              default_runner = os.environ.get("DEFAULT_RUNNER", "").strip()
+              if value in {"DEFAULT_RUNNER", "vars.DEFAULT_RUNNER", "${{ vars.DEFAULT_RUNNER }}"}:
+                  return default_runner
+              return value
+
+          runs_on = runner_value(os.environ.get("RUNS_ON", "").strip())
           if not runs_on:
-              runs_on = (
-                  os.environ.get("DEFAULT_RUNNER", "").strip()
-                  if direct_call
-                  else str(config["runs_on"])
-              )
+              if direct_call:
+                  runs_on = os.environ.get("DEFAULT_RUNNER", "").strip()
+              else:
+                  runs_on = runner_value(config.get("runs_on", ""))
 
           resolved = {
               "enabled": bool(services),

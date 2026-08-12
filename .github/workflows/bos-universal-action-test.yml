@@ -54,11 +54,6 @@ on:
         type: string
         required: false
         default: '["ubuntu-latest"]'
-      requirements_file:
-        description: Path to a pip requirements file installed before pytest.
-        type: string
-        required: false
-        default: requirements-dev.txt
       pytest_args:
         description: Additional arguments appended to the `pytest` invocation.
         type: string
@@ -113,7 +108,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      test: ${{ steps.resolve.outputs.test }}
+      test: ${{ steps.config.outputs.action_test }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,38 +118,6 @@ jobs:
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
         with:
           allow_missing: 'false'
-      - name: Resolve action-test settings
-        id: resolve
-        env:
-          CONFIG: ${{ steps.config.outputs.cfg }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-
-          config = json.loads(os.environ["CONFIG"])
-          settings = {
-              "python_versions": ["3.11"],
-              "os_matrix": ["ubuntu-latest"],
-              "requirements_file": "requirements-dev.txt",
-              "pytest_args": "-q",
-              "enable_smoke_test": False,
-              "smoke_trigger": "push-dev",
-              "smoke_test_config": {},
-              "timeout_pytest": 10,
-              "timeout_smoke": 5,
-          }
-          configured = config.get("action_test", {})
-          if not isinstance(configured, dict):
-              raise SystemExit("action_test config must be an object")
-          settings.update(configured)
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write("test<<__BOS_TEST__\n")
-              output.write(json.dumps(settings, separators=(",", ":")) + "\n")
-              output.write("__BOS_TEST__\n")
-          PY
 
   pytest:
     name: pytest (py${{ matrix.python-version }} / ${{ matrix.os }})
@@ -179,14 +142,28 @@ jobs:
 
       - name: Install dev dependencies
         shell: bash
+        env:
+          ACTION_TEST: ${{ needs.resolve-config.outputs.test }}
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          if [[ -f "${{ fromJSON(needs.resolve-config.outputs.test).requirements_file }}" ]]; then
-            pip install -r "${{ fromJSON(needs.resolve-config.outputs.test).requirements_file }}"
-          else
-            pip install pytest
-          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          test_cfg = json.loads(os.environ["ACTION_TEST"])
+          packages = test_cfg.get("python_packages", [])
+          if not isinstance(packages, list) or not packages:
+              raise SystemExit("action_test.python_packages must be a non-empty array")
+          normalized = []
+          for package in packages:
+              if not isinstance(package, str) or not package.strip():
+                  raise SystemExit("action_test.python_packages entries must be non-empty strings")
+              normalized.append(package.strip())
+          subprocess.check_call([sys.executable, "-m", "pip", "install", *normalized])
+          PY
 
       - name: Run pytest
         shell: bash

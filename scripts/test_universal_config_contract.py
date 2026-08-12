@@ -143,6 +143,23 @@ def main() -> None:
             )[0]
         )
 
+    action_test_defaults = run_universal_config({})
+    assert action_test_defaults.returncode == 0, action_test_defaults.stderr
+    action_test_output = action_test_defaults.stdout.split("action_test=", 1)[1].split(
+        "\n", 1
+    )[0]
+    assert json.loads(action_test_output) == {
+        "python_versions": ["3.11"],
+        "os_matrix": ["ubuntu-latest"],
+        "python_packages": ["pytest>=8.0", "ruff>=0.6", "PyYAML>=6.0"],
+        "pytest_args": "-q",
+        "enable_smoke_test": False,
+        "smoke_trigger": "push-dev",
+        "smoke_test_config": {},
+        "timeout_pytest": 10,
+        "timeout_smoke": 5,
+    }
+
     # Grouped-section authoring layout hoists to the flat keys every
     # downstream kicker/normalizer reads — both layouts must resolve
     # identically, and a flat key always wins over its section alias.
@@ -628,6 +645,7 @@ def main() -> None:
     assert hub_config["sync_files"]["fallback_commit_message"] == (
         "chore: sync managed files from bos-automation-hub"
     )
+    assert hub_config["sync_files"]["runs_on"] == "DEFAULT_RUNNER"
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" in sync_backend

@@ -105,7 +105,7 @@ in `bos-universal-config.json`:
   "action_test": {
     "python_versions": ["3.10", "3.11", "3.12"],
     "os_matrix": ["ubuntu-latest", "macos-latest", "windows-latest"],
-    "requirements_file": "requirements-dev.txt",
+    "python_packages": ["pytest>=8.0", "ruff>=0.6", "PyYAML>=6.0"],
     "pytest_args": "-q",
     "enable_smoke_test": true,
     "smoke_trigger": "push-dev",
@@ -406,7 +406,6 @@ Use this consumer configuration:
       ".gitignore",
       ".markdownlint.yaml",
       "pyproject.toml",
-      "requirements-dev.txt",
       "test/"
     ],
     "required_paths": [

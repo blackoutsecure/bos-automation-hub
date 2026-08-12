@@ -19,7 +19,7 @@
     "mode": "commit",
     "generate_commit_message": true,
     "fallback_commit_message": "chore: sync managed files from bos-automation-hub",
-    "runs_on": "ubuntu-latest",
+    "runs_on": "DEFAULT_RUNNER",
     "timeout_minutes": 5
   }
 }

@@ -253,6 +253,7 @@ jobs:
               "node_version": "20",
               "enable_python_lint": False,
               "python_version": "3.11",
+              "python_packages": ["ruff>=0.6", "pytest>=8.0"],
               "enable_shell_lint": False,
               "enable_dependency_review": True,
               "enable_code_scan": True,
@@ -371,13 +372,28 @@ jobs:
         with:
           python-version: ${{ fromJSON(needs.resolve-config.outputs.gate).python_version }}
       - name: Install dev dependencies
+        env:
+          GATE: ${{ needs.resolve-config.outputs.gate }}
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
-          if [[ -f requirements-dev.txt ]]; then
-            pip install -r requirements-dev.txt
-          else
-            pip install ruff pytest
-          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          gate = json.loads(os.environ["GATE"])
+          packages = gate.get("python_packages", [])
+          if not isinstance(packages, list) or not packages:
+              raise SystemExit("gate.python_packages must be a non-empty array")
+          normalized = []
+          for package in packages:
+              if not isinstance(package, str) or not package.strip():
+                  raise SystemExit("gate.python_packages entries must be non-empty strings")
+              normalized.append(package.strip())
+          subprocess.check_call([sys.executable, "-m", "pip", "install", *normalized])
+          PY
       - name: Ruff
         run: ruff check .
       - name: Pytest
