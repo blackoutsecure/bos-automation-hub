@@ -960,10 +960,10 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
 
       # ----- Repo-metadata stage -------------------------------------------
       # Opt-in About-box sync (description / homepage / topics / sidebar
-      # widget toggles). Wraps the hub-local `repo-metadata` composite so
-      # consumer repos no longer copy a ~50-line guarded job into their
-      # kicker — they flip `enable_repo_metadata: true` and pass the
-      # handful of policy values below. The composite PATCHes
+      # widget toggles). Calls the shared `repo-metadata-sync.yml` workflow,
+      # which wraps the hub-local `repo-metadata` composite, so consumer
+      # repos only flip `enable_repo_metadata: true` and pass the policy
+      # values below. The composite PATCHes
       # `/repos/{owner}/{repo}` + PUTs the topics endpoint, both of which
       # need `Administration: write`; the default `GITHUB_TOKEN` is
       # rejected, so a PAT must be forwarded as `secrets.REPO_ADMIN_PAT`
@@ -1644,88 +1644,29 @@ jobs:
   # ---------------------------------------------------------------------------
   # Stage 4 — Repo About-box sync (opt-in, independent of the deploy path).
   #
-  # Centralises the metadata sync that consumer kickers used to copy in
-  # by hand. Wraps the hub-local `repo-metadata` composite. Runs in
-  # PARALLEL with every other stage (no `needs:`) — the repo's public
-  # About box is independent of whether the deploy/release succeeded —
-  # and is gated solely by `enable_repo_metadata`.
-  #
-  # Referenced via the FULL repo-qualified path
-  # (`blackoutsecure/bos-automation-hub/.github/actions/repo-metadata@main`)
-  # rather than `./.github/actions/...`: this job checks out the CALLER
-  # repo into the workspace (so the composite can read the caller's
-  # README as a fallback source), which would shadow a `./` local-action
-  # lookup. The repo-qualified form always resolves the composite from
-  # THIS repo, matching how `deploy-cloudflare-pages.yml` references its
-  # own composites.
-  #
-  # Token: the composite needs `Administration: write`, which the default
-  # `GITHUB_TOKEN` lacks. The caller forwards a PAT as
-  # `secrets.REPO_ADMIN_PAT`; the `token-check` step soft-skips the sync
-  # (with a `::warning::`) when that secret is empty, because the
-  # composite itself hard-fails on an empty `github_token`.
+  # Runs in parallel with every other stage and delegates token handling,
+  # checkout, concurrency, and the composite invocation to the shared
+  # reusable workflow. The caller already resolves REPO_ADMIN_PAT from its
+  # dedicated secret or RELEASE_PAT fallback.
   # ---------------------------------------------------------------------------
   repo-metadata:
     name: Sync About box
     if: inputs.enable_repo_metadata
-    runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Granted unconditionally; only consumed when the caller leaves
-      # `repo_metadata_ai_enabled: true`. Harmless otherwise.
       models: read
-    # Serialise repeated syncs of the same repo so two near-simultaneous
-    # triggers can't race the repo PATCH. Never cancel — a metadata write
-    # is cheap and idempotent, but a cancelled one could leave the last
-    # writer's intent unapplied.
-    concurrency:
-      group: repo-metadata-${{ github.repository }}
-      cancel-in-progress: false
-    steps:
-      - name: Checkout (caller repo — README used as AI / fallback source)
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 1
-
-      # The composite PATCHes /repos/{owner}/{repo} + PUTs the topics
-      # endpoint (both require Administration:write) and HARD-FAILS when
-      # its `github_token` input is empty ("required input GH_TOKEN is
-      # empty"). Resolve the PAT first and SKIP — rather than fail — when
-      # none is forwarded. Mirrors the canonical guard in
-      # `bos-marketplace-kit/.github/workflows/release.yml`.
-      - id: token-check
-        name: Resolve metadata sync token
-        env:
-          HAS_PAT: ${{ secrets.REPO_ADMIN_PAT != '' && 'true' || 'false' }}
-        run: |
-          set -euo pipefail
-          if [ "${HAS_PAT}" != "true" ]; then
-            {
-              echo "## Repo metadata sync"
-              echo ""
-              echo "Skipped — \`secrets.REPO_ADMIN_PAT\` was not forwarded to the launchpad."
-              echo ""
-              echo "The public \`About\` box was not refreshed. Forward a PAT with \`Administration: write\` on the target repo as \`REPO_ADMIN_PAT\` (e.g. resolved from \`secrets.REPO_ADMIN_PAT\` with an org-level \`secrets.RELEASE_PAT\` fallback)."
-            } >> "${GITHUB_STEP_SUMMARY}"
-            echo "::warning title=Repo metadata sync skipped::No REPO_ADMIN_PAT forwarded; the public About box was not refreshed."
-          else
-            echo "::notice title=Repo metadata sync::Using the forwarded REPO_ADMIN_PAT for repo-metadata PATCH/PUT calls."
-          fi
-          echo "has_pat=${HAS_PAT}" >> "${GITHUB_OUTPUT}"
-
-      - if: steps.token-check.outputs.has_pat == 'true'
-        name: Sync repository metadata
-        uses: blackoutsecure/bos-automation-hub/.github/actions/repo-metadata@main
-        with:
-          description:      ${{ inputs.repo_metadata_description }}
-          homepage:         ${{ inputs.repo_metadata_homepage }}
-          topics:           ${{ inputs.repo_metadata_topics }}
-          generate_topics:  ${{ inputs.repo_metadata_generate_topics }}
-          topics_fallback:  ${{ inputs.repo_metadata_topics_fallback }}
-          ai_enabled:       ${{ inputs.repo_metadata_ai_enabled }}
-          ai_model:         ${{ inputs.repo_metadata_ai_model }}
-          show_releases:    ${{ inputs.repo_metadata_show_releases }}
-          show_deployments: ${{ inputs.repo_metadata_show_deployments }}
-          show_packages:    ${{ inputs.repo_metadata_show_packages }}
-          github_token:     ${{ secrets.REPO_ADMIN_PAT }}
-          dry_run:          ${{ inputs.repo_metadata_dry_run }}
+    uses: ./.github/workflows/repo-metadata-sync.yml
+    with:
+      description: ${{ inputs.repo_metadata_description }}
+      homepage: ${{ inputs.repo_metadata_homepage }}
+      topics: ${{ inputs.repo_metadata_topics }}
+      generate_topics: ${{ inputs.repo_metadata_generate_topics }}
+      topics_fallback: ${{ inputs.repo_metadata_topics_fallback }}
+      ai_enabled: ${{ inputs.repo_metadata_ai_enabled }}
+      ai_model: ${{ inputs.repo_metadata_ai_model }}
+      show_releases: ${{ inputs.repo_metadata_show_releases }}
+      show_deployments: ${{ inputs.repo_metadata_show_deployments }}
+      show_packages: ${{ inputs.repo_metadata_show_packages }}
+      dry_run: ${{ inputs.repo_metadata_dry_run }}
+    secrets:
+      REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}

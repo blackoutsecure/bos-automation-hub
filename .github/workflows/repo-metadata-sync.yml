@@ -1,0 +1,217 @@
+# Repository About-box synchronization (reusable).
+#
+# Centralizes the orchestration around the hub's `repo-metadata` composite:
+# token selection, released-tree checkout, write serialization, and outputs.
+# Real writes require an Administration-capable PAT. Dry runs may use the
+# job-scoped GITHUB_TOKEN because the composite does not call write endpoints.
+name: Repository metadata sync (reusable)
+
+"on":
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: >-
+          Git ref whose README supplies metadata source material. Empty uses
+          the triggering workflow's commit.
+        required: false
+        type: string
+        default: ''
+      readme_path:
+        description: 'README path at `checkout_ref`. Default `README.md`.'
+        required: false
+        type: string
+        default: 'README.md'
+      description:
+        description: 'Explicit repository description. Empty derives it from the README.'
+        required: false
+        type: string
+        default: ''
+      description_max_length:
+        description: 'Maximum repository-description length (1-350).'
+        required: false
+        type: number
+        default: 350
+      homepage:
+        description: 'Explicit homepage URL. Empty preserves it; `__unset__` clears it.'
+        required: false
+        type: string
+        default: ''
+      topics:
+        description: 'Explicit space- or comma-separated topics.'
+        required: false
+        type: string
+        default: ''
+      generate_topics:
+        description: 'Derive topics from the README when explicit topics are empty.'
+        required: false
+        type: boolean
+        default: false
+      topics_fallback:
+        description: 'Topics used when generated topics are unavailable.'
+        required: false
+        type: string
+        default: ''
+      max_topics:
+        description: 'Maximum number of topics; values above 20 are clamped.'
+        required: false
+        type: number
+        default: 20
+      ai_enabled:
+        description: 'Use GitHub Models for README-derived description and topics.'
+        required: false
+        type: boolean
+        default: true
+      ai_model:
+        description: 'GitHub Models model identifier.'
+        required: false
+        type: string
+        default: 'openai/gpt-4o-mini'
+      show_releases:
+        description: 'Request the Releases repository-home widget.'
+        required: false
+        type: boolean
+        default: true
+      show_deployments:
+        description: 'Request the Deployments repository-home widget.'
+        required: false
+        type: boolean
+        default: false
+      show_packages:
+        description: 'Request the Packages repository-home widget.'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Resolve and summarize metadata without API writes.'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      REPO_ADMIN_PAT:
+        description: >-
+          Preferred fine-grained PAT with Administration: write and Metadata:
+          read on the caller repository.
+        required: false
+      RELEASE_PAT:
+        description: >-
+          Fallback PAT for repositories using one credential for promotion and
+          metadata synchronization.
+        required: false
+    outputs:
+      description:
+        description: 'Resolved description.'
+        value: ${{ jobs.sync.outputs.description }}
+      description_source:
+        description: 'Description source: explicit, ai, readme, or existing.'
+        value: ${{ jobs.sync.outputs.description_source }}
+      homepage:
+        description: 'Resolved homepage, or empty when unchanged.'
+        value: ${{ jobs.sync.outputs.homepage }}
+      topics:
+        description: 'Resolved topics, space-separated.'
+        value: ${{ jobs.sync.outputs.topics }}
+      topics_source:
+        description: 'Topics source: explicit, ai, fallback, or skipped.'
+        value: ${{ jobs.sync.outputs.topics_source }}
+      ai_used:
+        description: '`true` when GitHub Models supplied metadata.'
+        value: ${{ jobs.sync.outputs.ai_used }}
+      applied:
+        description: '`true` when the composite completed at least one API write.'
+        value: ${{ jobs.sync.outputs.applied }}
+      skipped:
+        description: '`true` when no write-capable token was available.'
+        value: ${{ jobs.sync.outputs.skipped }}
+
+permissions:
+  contents: read
+  models: read
+
+jobs:
+  sync:
+    name: Sync repository About box
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      models: read
+    concurrency:
+      group: repo-metadata-${{ github.repository }}
+      cancel-in-progress: false
+    outputs:
+      description: ${{ steps.metadata.outputs.description }}
+      description_source: ${{ steps.metadata.outputs.description_source }}
+      homepage: ${{ steps.metadata.outputs.homepage }}
+      topics: ${{ steps.metadata.outputs.topics }}
+      topics_source: ${{ steps.metadata.outputs.topics_source }}
+      ai_used: ${{ steps.metadata.outputs.ai_used }}
+      applied: ${{ steps.metadata.outputs.applied }}
+      skipped: ${{ steps.token.outputs.available != 'true' }}
+    steps:
+      - name: Resolve metadata token
+        id: token
+        env:
+          HAS_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT != '' && 'true' || 'false' }}
+          HAS_RELEASE_PAT: ${{ secrets.RELEASE_PAT != '' && 'true' || 'false' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+
+          available='false'
+          token_source='none'
+          if [ "${HAS_ADMIN_PAT}" = "true" ]; then
+            available='true'
+            token_source='REPO_ADMIN_PAT'
+          elif [ "${HAS_RELEASE_PAT}" = "true" ]; then
+            available='true'
+            token_source='RELEASE_PAT'
+          elif [ "${DRY_RUN}" = "true" ]; then
+            available='true'
+            token_source='GITHUB_TOKEN'
+          fi
+
+          if [ "${available}" = "true" ]; then
+            token_mode='write'
+            [ "${DRY_RUN}" = "true" ] && token_mode='dry-run'
+            echo "::notice title=Repository metadata sync::Using ${token_source} (${token_mode} mode)"
+          else
+            {
+              echo "## Repository metadata sync"
+              echo ""
+              echo "Skipped because neither \`REPO_ADMIN_PAT\` nor \`RELEASE_PAT\` was provided."
+              echo ""
+              echo "A real sync requires a token with \`Administration: write\` and \`Metadata: read\` on this repository."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            echo "::notice title=Repository metadata sync skipped::No Administration-capable token was provided"
+          fi
+
+          echo "available=${available}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout metadata source
+        if: steps.token.outputs.available == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Synchronize repository metadata
+        if: steps.token.outputs.available == 'true'
+        id: metadata
+        uses: blackoutsecure/bos-automation-hub/.github/actions/repo-metadata@main
+        with:
+          github_token: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token }}
+          readme_path: ${{ inputs.readme_path }}
+          description: ${{ inputs.description }}
+          description_max_length: ${{ inputs.description_max_length }}
+          homepage: ${{ inputs.homepage }}
+          topics: ${{ inputs.topics }}
+          generate_topics: ${{ inputs.generate_topics }}
+          topics_fallback: ${{ inputs.topics_fallback }}
+          max_topics: ${{ inputs.max_topics }}
+          ai_enabled: ${{ inputs.ai_enabled }}
+          ai_model: ${{ inputs.ai_model }}
+          show_releases: ${{ inputs.show_releases }}
+          show_deployments: ${{ inputs.show_deployments }}
+          show_packages: ${{ inputs.show_packages }}
+          dry_run: ${{ inputs.dry_run }}

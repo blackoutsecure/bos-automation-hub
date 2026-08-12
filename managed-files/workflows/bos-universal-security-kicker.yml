@@ -1,6 +1,5 @@
 # Blackout Secure universal security and policy kicker (hub-managed).
-# Customize via `bos-universal-config.json` (repo root; legacy
-# not this file.
+# Customize via `bos-universal-config.json` (repo root), not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 name: Blackout Secure Universal Security
 run-name: >-
@@ -30,18 +29,12 @@ jobs:
     runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 2
     outputs:
-      cfg: ${{ steps.config.outputs.cfg }}
       target_ref: ${{ steps.target-ref.outputs.ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Load universal config
-        id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
-        with:
-          allow_missing: 'true'
       # `uses:` refs cannot be dynamic, so resolve which hub branch this
       # run targets here and pick the matching static-ref job below.
       - name: Resolve target hub ref
@@ -71,19 +64,7 @@ jobs:
       pull-requests: read
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-security.yml@dev
     with:
-      enable_lint:                 ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_lint != false }}
-      enable_node_lint:            ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_node_lint == true }}
-      node_version:                ${{ fromJson(needs.parse-config.outputs.cfg).gate.node_version || '20' }}
-      enable_python_lint:          ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_python_lint == true }}
-      python_version:              ${{ fromJson(needs.parse-config.outputs.cfg).gate.python_version || '3.11' }}
-      enable_shell_lint:           ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_shell_lint == true }}
-      enable_dependency_review:    ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_dependency_review != false }}
-      enable_code_scan:            ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_code_scan != false }}
-      enable_pinned_actions_check: ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pinned_actions_check != false }}
-      enable_pr_title_check:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pr_title_check != false }}
-      pr_title_types:              ${{ fromJson(needs.parse-config.outputs.cfg).gate.pr_title_types || 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert' }}
-      enable_readme_header_check:  ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_readme_header_check != false }}
-      readme_header_profile:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.readme_header_profile || 'auto' }}
+      config_authoritative: true
     secrets:
       scanning_pat: ${{ secrets.SCANNING_PAT }}
 
@@ -98,18 +79,6 @@ jobs:
       pull-requests: read
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-security.yml@main
     with:
-      enable_lint:                 ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_lint != false }}
-      enable_node_lint:            ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_node_lint == true }}
-      node_version:                ${{ fromJson(needs.parse-config.outputs.cfg).gate.node_version || '20' }}
-      enable_python_lint:          ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_python_lint == true }}
-      python_version:              ${{ fromJson(needs.parse-config.outputs.cfg).gate.python_version || '3.11' }}
-      enable_shell_lint:           ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_shell_lint == true }}
-      enable_dependency_review:    ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_dependency_review != false }}
-      enable_code_scan:            ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_code_scan != false }}
-      enable_pinned_actions_check: ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pinned_actions_check != false }}
-      enable_pr_title_check:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_pr_title_check != false }}
-      pr_title_types:              ${{ fromJson(needs.parse-config.outputs.cfg).gate.pr_title_types || 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert' }}
-      enable_readme_header_check:  ${{ fromJson(needs.parse-config.outputs.cfg).gate.enable_readme_header_check != false }}
-      readme_header_profile:       ${{ fromJson(needs.parse-config.outputs.cfg).gate.readme_header_profile || 'auto' }}
+      config_authoritative: true
     secrets:
       scanning_pat: ${{ secrets.SCANNING_PAT }}

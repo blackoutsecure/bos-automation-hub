@@ -1,5 +1,7 @@
 # Blackout Secure Automation Hub
 
+[![Made by BlackoutSecure](https://img.shields.io/badge/made%20by-BlackoutSecure-1f1f1f)](https://github.com/blackoutsecure)
+
 Central reusable GitHub Actions workflows, shared composite actions, and
 managed repository files for Blackout Secure projects.
 
@@ -61,10 +63,20 @@ re-pin branch protection whenever a gate moved between groups:
   posture audit), and pinned-action enforcement;
 - **Compliance:** README-header and PR-title checks.
 
+The hub itself runs
+[`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)
+directly. Use **Actions → Blackout Secure universal security (reusable) → Run
+workflow** on `dev` for a manual scan; it loads the current `security` section
+from `bos-universal-config.json`, just like the sync backend. The managed
+[`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml)
+is retained for consumer repositories, but the hub does not install a local
+kicker for this workflow.
+
 Marketplace-specific validation is intentionally excluded. Marketplace Action
 repositories add the managed
 [`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml),
-which owns Marketplace validation, stable-branch guarding, and promotion.
+which owns Marketplace validation, stable-branch guarding, promotion, and
+opt-in post-release repository metadata synchronization.
 
 ## Universal sync
 
@@ -115,7 +127,7 @@ different trust and permission boundaries:
 | Layer | Trigger and authority | Responsibility |
 | --- | --- | --- |
 | `bos-universal-security.yml` (universal security) | Pull request / merge queue; read-mostly | Lint, tests, dependency review, code scanning, and policy checks before merge. |
-| `bos-universal-marketplace-kicker.yml` | Marketplace PR, trusted-target PR, or manual release | Validate Actions, guard the workflow-free stable branch, and promote releases. |
+| `bos-universal-marketplace-kicker.yml` | Marketplace PR, trusted-target PR, or manual release/metadata operation | Validate Actions, guard the workflow-free stable branch, promote releases, and refresh the repository About box. |
 | `bos-universal-launchpad.yml` | Push, schedule, or manual caller; publish permissions | Monitor upstreams, run the release-blocking security scan, and coordinate delivery. |
 | `bos-universal-sync-kicker.yml` | Config push, schedule, or manual dispatch; repository contents write | Reconcile only the managed files selected by `sync_files.services`. |
 | `release.yml` (artifact release) | Called by Universal or another trusted workflow | Publish Docker, Balena, and GitHub Release artifacts for an already-approved version. |
@@ -149,15 +161,20 @@ or need enough branching logic to blur their trust boundaries.
 For this hub, the production path is a manual dispatch of
 [`release-hub.yml`](.github/workflows/release-hub.yml) from `dev`. It computes
 or accepts a SemVer tag, builds the runtime allowlist, promotes that allowlist
-to `main`, pushes the tag, and publishes the GitHub Release. Consumers then
-use the promoted runtime from `@main` (or a version tag).
+to `main`, pushes the tag, publishes the GitHub Release, and optionally calls
+[`repo-metadata-sync.yml`](.github/workflows/repo-metadata-sync.yml) against
+the released tag. Consumers then use the promoted runtime from `@main` (or a
+version tag).
 
 For a Marketplace Action consumer, the production path is a manual
 `operation: release` dispatch of the managed
 [`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml)
 from the source branch. It validates trusted configuration, calls
 [`release-promote.yml`](.github/workflows/release-promote.yml) to promote the
-allowlist to the stable branch, and publishes the GitHub Release.
+allowlist to the stable branch, publishes the GitHub Release, and optionally
+calls [`repo-metadata-sync.yml`](.github/workflows/repo-metadata-sync.yml)
+against the promoted tag. `operation: metadata` refreshes the same fields from
+the configured stable branch without cutting another release.
 
 For a product repository using Universal Launchpad, the launchpad owns the
 artifact path: it calls [`release.yml`](.github/workflows/release.yml), which
@@ -211,7 +228,12 @@ configuration can enable only the required stages:
   "marketplace": {
     "enabled": false,
     "target_branch": "main",
-    "allowlist_paths": ["action.yml", "README.md", "LICENSE"]
+    "allowlist_paths": ["action.yml", "README.md", "LICENSE"],
+    "repo_metadata": {
+      "enable": false,
+      "homepage": "",
+      "generate_topics": false
+    }
   },
   "sync_files": {
     "services": [
@@ -320,7 +342,8 @@ Primary services include:
 - initialization: `bos_universal_config`, `gha_sync_drift_check`, `license`,
   `notice_apache2`, `codeowners`;
 - organization repository only: `org_defaults`, gated by
-  `target_repo_role: org-default-repo` in `bos-managed-files.yaml`.
+  `target_repo_role: "org-default-repo"` in the repo-root
+  `bos-universal-config.json`.
 
 See [`managed-files/README.md`](managed-files/README.md) for template ownership
 and branch policy.
@@ -409,16 +432,42 @@ Use this consumer configuration:
 }
 ```
 
+For `blackoutsecure/bos-code-scanning-kit`, merge this policy into its existing
+`marketplace` object to replace the repository-local post-release workflow:
+
+```json
+{
+  "marketplace": {
+    "repo_metadata": {
+      "enable": true,
+      "homepage": "https://github.com/marketplace/actions/blackout-secure-code-scanning-kit",
+      "generate_topics": true,
+      "topics_fallback": "github-actions code-scanning security sarif posture-audit gitleaks actionlint shellcheck composite-action devsecops github-advanced-security"
+    }
+  }
+}
+```
+
 The source branch defaults to `github.event.repository.default_branch`; only
 the stable Marketplace target remains explicitly `main`. GitHub Actions does
 not support expressions in reusable-workflow `uses:` refs, so managed callers
 continue to consume promoted hub runtime at `@main`.
 
+Marketplace metadata synchronization is opt-in through
+`marketplace.repo_metadata.enable`. Real writes prefer `REPO_ADMIN_PAT` and
+fall back to `RELEASE_PAT`; the selected token needs `Administration: write`
+and `Metadata: read` on the consumer repository. With neither secret, the
+metadata stage succeeds as a documented skip so an already-published release
+is not retroactively failed. Dispatch `operation: metadata` with `dry_run:
+true` to preview README-derived values using the scoped `GITHUB_TOKEN` without
+granting repository-administration authority.
+
 ## Workflow API
 
 Consumer repositories normally need only the managed
-[`bos-universal-launchpad-kicker.yml`](managed-files/workflows/bos-universal-launchpad-kicker.yml)
+[`bos-universal-launchpad-kicker.yml`](managed-files/workflows/bos-universal-launchpad-kicker.yml),
 [`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml),
+[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml),
 and [`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml)
 callers. They read `bos-universal-config.json` and invoke independent hub
 entry points:
@@ -445,6 +494,7 @@ would not reduce Actions jobs or runner usage.
 | [`github-release.yml`](.github/workflows/github-release.yml) | Shared publisher used by artifact, Marketplace, and hub releases. |
 | [`deploy-cloudflare-pages.yml`](.github/workflows/deploy-cloudflare-pages.yml) | Universal stage for Cloudflare Pages build and deployment. |
 | [`security-scan.yml`](.github/workflows/security-scan.yml) | Shared scanning stage used by trusted delivery and pre-merge validation. |
+| [`repo-metadata-sync.yml`](.github/workflows/repo-metadata-sync.yml) | Shared About-box synchronization stage used by hub, Launchpad, and Marketplace publication. |
 | [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) | Shared managed-file engine called directly by the dedicated universal sync kicker. |
 
 Specialized reusable entry points remain separate when their event or mutation

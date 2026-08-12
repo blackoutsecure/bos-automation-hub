@@ -1,6 +1,5 @@
 # Blackout Secure Launchpad — universal kicker (hub-managed).
-# Customize via `bos-universal-config.json` (repo root; legacy
-# not this file.
+# Customize via `bos-universal-config.json` (repo root), not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 # Required vars (names overridable via `bos-universal-config.json`):
 #   DOCKERHUB_NAMESPACE, BALENA_NAMESPACE
@@ -30,7 +29,6 @@ run-name: >-
       - 'scripts/**'
       - '.github/upstream/**'
       - 'bos-universal-config.json'
-      - 'bos-managed-files.yaml'
       - '.github/workflows/bos-universal-launchpad-kicker.yml'
   workflow_dispatch:
     inputs:

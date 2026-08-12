@@ -9,7 +9,6 @@ name: Blackout Secure universal sync (reusable)
   push:
     paths:
       - bos-universal-config.json
-      - bos-managed-files.yaml
       - .github/workflows/bos-universal-sync.yml
   workflow_dispatch:
     inputs:
@@ -230,20 +229,37 @@ jobs:
           CHANGED_FILES: ${{ steps.sync.outputs.changed_files }}
           COMMIT_SHA: ${{ steps.commit.outputs.commit_sha }}
         run: |
-          {
-            echo "## Sync managed files"
-            echo
-            echo "- Mode: \`$(jq -r .mode <<< \"${SYNC}\")\`"
-            echo "- Services: \`$(jq -r '.services | join(" ")' <<< \"${SYNC}\")\`"
-            echo "- Changed: \`${CHANGED:-false}\`"
-            if [ -n "${COMMIT_SHA:-}" ]; then
-              echo "- Commit: \`${COMMIT_SHA}\`"
-            fi
-            if [ "${CHANGED:-false}" = "true" ]; then
-              echo
-              echo "### Files"
-              while IFS= read -r file || [ -n "${file}" ]; do
-                [ -n "${file}" ] && echo "- \`${file}\`"
-              done <<< "${CHANGED_FILES}"
-            fi
-          } >> "${GITHUB_STEP_SUMMARY}"
+          python3 - <<'PY'
+          import json
+          import os
+
+          sync_raw = os.environ.get("SYNC", "")
+          sync_obj = {}
+
+          if sync_raw:
+              try:
+                  sync_obj = json.loads(sync_raw)
+              except json.JSONDecodeError:
+                  sync_obj = {}
+
+          mode = str(sync_obj.get("mode", "unknown"))
+          services = sync_obj.get("services", [])
+          services_text = " ".join(str(s) for s in services) if isinstance(services, list) else str(services or "")
+
+          changed = os.environ.get("CHANGED", "false")
+          commit_sha = os.environ.get("COMMIT_SHA", "").strip()
+          changed_files = os.environ.get("CHANGED_FILES", "")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Sync managed files\n\n")
+              summary.write(f"- Mode: `{mode}`\n")
+              summary.write(f"- Services: `{services_text}`\n")
+              summary.write(f"- Changed: `{changed}`\n")
+              if commit_sha:
+                  summary.write(f"- Commit: `{commit_sha}`\n")
+              if changed == "true":
+                  summary.write("\n### Files\n")
+                  for file in changed_files.splitlines():
+                      if file.strip():
+                          summary.write(f"- `{file}`\n")
+          PY

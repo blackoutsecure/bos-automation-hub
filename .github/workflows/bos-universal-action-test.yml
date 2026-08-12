@@ -106,17 +106,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve-config:
+    name: Resolve universal config
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      test: ${{ steps.resolve.outputs.test }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Load universal config
+        id: config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+        with:
+          allow_missing: 'false'
+      - name: Resolve action-test settings
+        id: resolve
+        env:
+          CONFIG: ${{ steps.config.outputs.cfg }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+
+          config = json.loads(os.environ["CONFIG"])
+          settings = {
+              "python_versions": ["3.11"],
+              "os_matrix": ["ubuntu-latest"],
+              "requirements_file": "requirements-dev.txt",
+              "pytest_args": "-q",
+              "enable_smoke_test": False,
+              "smoke_trigger": "push-dev",
+              "smoke_test_config": {},
+              "timeout_pytest": 10,
+              "timeout_smoke": 5,
+          }
+          configured = config.get("action_test", {})
+          if not isinstance(configured, dict):
+              raise SystemExit("action_test config must be an object")
+          settings.update(configured)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("test<<__BOS_TEST__\n")
+              output.write(json.dumps(settings, separators=(",", ":")) + "\n")
+              output.write("__BOS_TEST__\n")
+          PY
+
   pytest:
     name: pytest (py${{ matrix.python-version }} / ${{ matrix.os }})
+    needs: resolve-config
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ inputs.timeout_pytest }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.test).timeout_pytest }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        python-version: ${{ fromJSON(inputs.python_versions) }}
-        os: ${{ fromJSON(inputs.os_matrix) }}
+        python-version: ${{ fromJSON(needs.resolve-config.outputs.test).python_versions }}
+        os: ${{ fromJSON(needs.resolve-config.outputs.test).os_matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -131,15 +182,15 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          if [[ -f "${{ inputs.requirements_file }}" ]]; then
-            pip install -r "${{ inputs.requirements_file }}"
+          if [[ -f "${{ fromJSON(needs.resolve-config.outputs.test).requirements_file }}" ]]; then
+            pip install -r "${{ fromJSON(needs.resolve-config.outputs.test).requirements_file }}"
           else
             pip install pytest
           fi
 
       - name: Run pytest
         shell: bash
-        run: pytest ${{ inputs.pytest_args }}
+        run: pytest ${{ fromJSON(needs.resolve-config.outputs.test).pytest_args }}
 
   # -----------------------------------------------------------------
   # Smoke test — validates the action against a live upstream target.
@@ -149,15 +200,15 @@ jobs:
   # -----------------------------------------------------------------
   smoke-test:
     name: smoke test (live upstream)
-    needs: pytest
+    needs: [resolve-config, pytest]
     if: |
-      inputs.enable_smoke_test &&
+      fromJSON(needs.resolve-config.outputs.test).enable_smoke_test == true &&
       (
-        inputs.smoke_trigger == 'always' ||
-        (inputs.smoke_trigger == 'push-dev' && github.event_name == 'push' && github.ref == 'refs/heads/dev')
+        fromJSON(needs.resolve-config.outputs.test).smoke_trigger == 'always' ||
+        (fromJSON(needs.resolve-config.outputs.test).smoke_trigger == 'push-dev' && github.event_name == 'push' && github.ref == 'refs/heads/dev')
       )
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.timeout_smoke }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.test).timeout_smoke }}
     permissions:
       contents: read
     steps:
@@ -167,7 +218,7 @@ jobs:
 
       - id: action-under-test
         uses: ./
-        with: ${{ fromJSON(inputs.smoke_test_config) }}
+        with: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config }}
 
       - name: Verify action outputs
         shell: bash

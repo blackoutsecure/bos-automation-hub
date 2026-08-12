@@ -26,7 +26,8 @@ so the files in this directory are the normal authoring and review surface.
 - [`bos-universal-marketplace-kicker.yml`](workflows/bos-universal-marketplace-kicker.yml)
   is installed only in Marketplace Action repositories. One event-routed file
   owns Marketplace validation, trusted stable-branch guarding, name checks,
-  and manual promotion/releases.
+  manual promotion/releases, and opt-in post-release or manual repository
+  metadata refreshes.
 - [`bos-universal-sync-kicker.yml`](workflows/bos-universal-sync-kicker.yml)
   is the independent scheduled/manual managed-file caller. It contains only
   event routing and calls the config-aware sync backend, which reads the
@@ -38,8 +39,8 @@ them directly.
 
 Enable `bos_universal_sync` alongside whichever other managed callers the
 repository needs. GitHub still requires one event-trigger workflow per
-repository; `bos-universal-config.json` controls sync behavior but cannot
-itself trigger a reusable workflow.
+repository; `bos-universal-config.json` controls sync behavior and is the
+only repo-level config used by the sync service.
 
 ## Ownership modes
 
@@ -62,10 +63,14 @@ which files each service owns.
 [`community-health/`](community-health/), [`github-meta/`](github-meta/), and
 [`org-profile/`](org-profile/) are canonical sources for the dedicated
 `blackoutsecure/.github` repository. Enable the whole-file `org_defaults`
-service there and set this in `bos-managed-files.yaml`:
+service there and set this in the JSON config:
 
-```yaml
-target_repo_role: org-default-repo
+```json
+{
+  "general": {
+    "target_repo_role": "org-default-repo"
+  }
+}
 ```
 
 The role check prevents these files, especially `profile/README.md`, from

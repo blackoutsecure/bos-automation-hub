@@ -63,6 +63,7 @@ Env (set by `action.yml`)
 from __future__ import annotations
 
 import difflib
+import json
 import os
 import re
 import sys
@@ -461,7 +462,7 @@ log_pipe_cmd() {
 
 # The `{{DEPENDABOT_TARGET_BRANCH_LINE}}` token (sits at end of the
 # `directory: /` line) is rendered at sync time from
-# `dependabot_target_branch:` in `bos-managed-files.yaml`. When that
+# `dependabot_target_branch:` in `bos-universal-config.json`. When that
 # config key is empty (the default), the placeholder resolves to the
 # empty string and the block stays one line shorter. When set (e.g.
 # `dependabot_target_branch: dev` for Marketplace Action repos using
@@ -806,7 +807,10 @@ _BOS_UNIVERSAL_CONFIG_INIT_JSON = """\
   "marketplace": {
     "enabled": false,
     "target_branch": "main",
-    "allowlist_paths": "action.yml\\nREADME.md\\nLICENSE"
+        "allowlist_paths": "action.yml\\nREADME.md\\nLICENSE",
+        "repo_metadata": {
+            "enable": false
+        }
   },
     "sync": {
     "services": [
@@ -824,8 +828,8 @@ _BOS_UNIVERSAL_CONFIG_INIT_JSON = """\
 #
 # These three services are init-if-missing (the hub writes them ONLY when
 # the target file is absent and NEVER overwrites a hand-edited version).
-# They support `{{KEY}}` placeholder substitution from per-repo
-# `bos-managed-files.yaml` config (see `_load_managed_config` below).
+# They support `{{KEY}}` placeholder substitution from the repo-root
+# `bos-universal-config.json` config (see `_load_managed_config` below).
 #
 # Supported placeholders:
 #
@@ -1147,7 +1151,7 @@ PERFORMANCE OF THIS SOFTWARE.
 
 
 # SPDX-keyed registry. The `license` service (init-if-missing,
-# templated) reads `license_type` from `bos-managed-files.yaml` and
+# templated) reads `license_type` from `bos-universal-config.json` and
 # resolves the rendered body from here at sync time. Keys MUST match
 # the lowercased SPDX short identifier so consumers can copy-paste
 # from spdx.org/licenses. Apache 2.0 has no placeholders by design
@@ -1187,7 +1191,7 @@ def _resolve_license_text(license_type: str) -> str:
 #     (see `_ALLOWED_CROSS_MODE_VARIANTS` design — TBD).
 #
 #   * CODEOWNERS team-rename propagation: when `maintainers_team` in
-#     `bos-managed-files.yaml` changes, the catch-all rule should
+#     `bos-universal-config.json` changes, the catch-all rule should
 #     update without clobbering per-path overrides the consumer has
 #     added below. Cleanest implementation: SECTION mode (markers
 #     around just the catch-all line), reusing the existing
@@ -1238,63 +1242,37 @@ _CODEOWNERS_TEMPLATE = """\
 
 
 # --------------------------------------------------------------------------- #
-# Per-repo managed-files config (bos-managed-files.yaml)                      #
+# Per-repo managed config (bos-universal-config.json)                         #
 # --------------------------------------------------------------------------- #
 #
-# Tiny flat-YAML reader for per-repo placeholder values consumed by the
-# `license`, `notice_apache2`, and `codeowners`
-# services. Pure
-# stdlib — sync.py intentionally has no third-party deps.
+# The canonical per-repo configuration is the repo-root
+# `bos-universal-config.json` file. The sync engine reads the same JSON
+# config from the consumer repo and normalizes a small set of
+# template-related scalar keys used by the init-if-missing services.
 #
-# Schema (all keys optional; defaults applied for missing keys):
+# Supported keys (all optional; defaults applied when absent):
 #
-#     copyright_holder: Blackout Secure
+#     copyright_holder: "Blackout Secure"
 #     copyright_year_start: 2024
 #     maintainers_team: "@blackoutsecure/maintainers"
-#     license_type: apache-2.0
-#     dependabot_target_branch: dev   # optional; for dev/main split repos
-#     dotfiles_mode: managed_section   # or: override
-#     dotfiles_conflict_precedence: central   # or: local
-#     dotfiles_local_precedence_paths: .wranglerignore,.gitignore
-#     dotfiles_sync_strategy: auto   # or: all, explicit
-#     dotfiles_workstream: auto      # or: container,node,python,static_site,action,generic
-#     dotfiles_force_enable_paths: .dockerignore,.shellcheckrc
-#     dotfiles_force_disable_paths: .wranglerignore
-#     dotfiles_prune_disabled: false # true removes hub-managed disabled dotfiles
-#     target_repo_role: consumer     # or: org-default-repo
+#     license_type: "apache-2.0"
+#     dependabot_target_branch: "dev"
+#     dotfiles_mode: "managed_section"
+#     dotfiles_conflict_precedence: "central"
+#     dotfiles_local_precedence_paths: ".wranglerignore,.gitignore"
+#     dotfiles_sync_strategy: "auto"
+#     dotfiles_workstream: "auto"
+#     dotfiles_force_enable_paths: ".dockerignore,.shellcheckrc"
+#     dotfiles_force_disable_paths: ".wranglerignore"
+#     dotfiles_prune_disabled: false
+#     target_repo_role: "consumer"
 #
-# `dependabot_target_branch` adds a `target-branch:` knob to EVERY
-# enabled `dependabot_*` ecosystem block, so Dependabot PRs land on
-# the named branch instead of the default branch. Use this on
-# Marketplace Action repos that follow the dev/main split (CI
-# workflows live on `dev`, Marketplace artifact lives on `main`).
-# Leave empty (or omit the key) for the standard same-branch flow.
-#
-# `dotfiles_mode` controls how the `wranglerignore` service writes
-# `.wranglerignore`:
-#   * `managed_section` (default): append/replace only the hub-managed
-#     marker block and preserve all user-owned lines outside markers.
-#   * `override`: write `.wranglerignore` as a whole-file managed asset.
-#
-# `dotfiles_conflict_precedence` controls conflict behavior for
-# managed-section dotfiles (`.gitignore`, `.dockerignore`,
-# `.editorconfig`, `.gitattributes`, `.wranglerignore`):
-#   * `central` (default): central managed lines win on conflict.
-#   * `local`: local repo lines win on conflict.
-#
-# `dotfiles_local_precedence_paths` optionally forces LOCAL precedence
-# for selected dotfiles even when global precedence is `central`.
-# Comma/space-separated list of managed section dotfile paths.
-#
-# Comments (`#` whole-line and inline-after-value) are stripped. Values
-# may be unquoted, double-quoted, or single-quoted. Nesting, lists, and
-# multi-line scalars are NOT supported — the file is intentionally tiny.
-#
-# The config file is `bos-managed-files.yaml` at the repo root —
-# deliberately NOT a dotfile so it shows up in `ls`, file pickers, and
-# code reviews without needing `ls -a`.
+# These keys are accepted either at the top level or inside the
+# `general` object; this aligns with the repo’s universal-config JSON
+# contract, which already treats JSON as the configuration source of
+# truth.
 
-MANAGED_FILES_CONFIG_FILENAME = "bos-managed-files.yaml"
+MANAGED_FILES_CONFIG_FILENAME = "bos-universal-config.json"
 
 _DEFAULT_MANAGED_CONFIG: Dict[str, str] = {
     "copyright_holder": "Blackout Secure",
@@ -1405,58 +1383,39 @@ _DOTFILE_SCAN_SKIP_DIRS = frozenset({
   "coverage",
 })
 
-# Flat-YAML line: `key: value` or `key: "value"` or `key: 'value'`.
-# Anchored to allow leading whitespace (tolerated even though flat YAML
-# shouldn't have indentation).
-_FLAT_YAML_LINE_RE = re.compile(
-    r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*"
-    r"(?:\"([^\"]*)\"|'([^']*)'|([^#\n]*?))\s*(?:#.*)?$"
-)
-
-
-def _parse_flat_yaml(text: str) -> Dict[str, str]:
-    """Parse a tiny subset of YAML: flat key/value pairs, optional quoting,
-    `#` comments, blank lines. Unknown keys are rejected with `die()` so
-    typos fail fast rather than silently fall through to defaults.
-
-    Returns a dict of {key: value}. Caller merges with defaults.
-    """
-    result: Dict[str, str] = {}
-    for lineno, raw in enumerate(text.splitlines(), start=1):
-        stripped = raw.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        m = _FLAT_YAML_LINE_RE.match(raw)
-        if not m:
-            die(
-                f"{MANAGED_FILES_CONFIG_FILENAME}:{lineno}: cannot parse line: "
-                f"{raw!r}. Expected `key: value` or `key: \"value\"`."
-            )
-        key = m.group(1)
-        # First non-None capture group of (double, single, bare) is the value.
-        value = m.group(2) if m.group(2) is not None else (
-            m.group(3) if m.group(3) is not None else (m.group(4) or "")
-        )
-        value = value.strip()
-        if key not in _KNOWN_CONFIG_KEYS:
-            die(
-                f"{MANAGED_FILES_CONFIG_FILENAME}:{lineno}: unknown key "
-                f"'{key}'. Known: {', '.join(sorted(_KNOWN_CONFIG_KEYS))}."
-            )
-        result[key] = value
-    return result
-
-
-def _load_managed_config(root: str) -> Dict[str, str]:
-    """Read `bos-managed-files.yaml` if present at `root`; return the
-    parsed config merged over the defaults. Missing file is fine —
-    defaults are used."""
-    config_path = os.path.join(root, MANAGED_FILES_CONFIG_FILENAME)
+def _normalize_managed_config(raw: object, *, source: str = MANAGED_FILES_CONFIG_FILENAME) -> Dict[str, str]:
+    """Normalize raw config data from either the repo file or the shared
+    universal-config action output into the managed-file scalar contract."""
     merged = dict(_DEFAULT_MANAGED_CONFIG)
-    if not os.path.exists(config_path):
+    if raw is None:
         return merged
-    with open(config_path, "r", encoding="utf-8") as fh:
-        parsed = _parse_flat_yaml(fh.read())
+    if not isinstance(raw, dict):
+        die(f"{source}: root config must be a JSON object.")
+
+    flat = dict(raw)
+    for section_name in ("general", "security", "sync", "launchpad", "marketplace"):
+        section = raw.get(section_name)
+        if isinstance(section, dict):
+            flat.update(section)
+    sync_files = raw.get("sync_files")
+    if isinstance(sync_files, dict):
+        flat.update(sync_files)
+
+    parsed: Dict[str, str] = {}
+    for key in _KNOWN_CONFIG_KEYS:
+        if key not in flat:
+            continue
+        value = flat[key]
+        if isinstance(value, bool):
+            value = "true" if value else "false"
+        elif isinstance(value, (list, tuple, set)):
+            value = ",".join(str(item).strip() for item in value if str(item).strip())
+        elif value is None:
+            value = ""
+        elif not isinstance(value, str):
+            value = str(value)
+        parsed[key] = value.strip() if isinstance(value, str) else str(value)
+
     merged.update(parsed)
 
     # Validate license_type eagerly so an unknown SPDX ID fails fast
@@ -1607,6 +1566,39 @@ def _load_managed_config(root: str) -> Dict[str, str]:
     merged["target_repo_role"] = target_repo_role
 
     return merged
+
+
+def _load_managed_config(root: str, config_json: str | None = None) -> Dict[str, str]:
+    """Load the normalized managed config.
+
+    GitHub Actions uses the shared universal-config action output for the
+    single source of truth; local/test use falls back to reading the JSON file
+    directly at the repo root.
+    """
+    if config_json is not None:
+        try:
+            raw = json.loads(config_json)
+        except json.JSONDecodeError as exc:
+            die(
+                f"{MANAGED_FILES_CONFIG_FILENAME}: invalid JSON from shared "
+                f"universal-config output at line {exc.lineno}, column "
+                f"{exc.colno}: {exc.msg}."
+            )
+        return _normalize_managed_config(raw, source=MANAGED_FILES_CONFIG_FILENAME)
+
+    config_path = os.path.join(root, MANAGED_FILES_CONFIG_FILENAME)
+    if not os.path.exists(config_path):
+        return dict(_DEFAULT_MANAGED_CONFIG)
+
+    with open(config_path, "r", encoding="utf-8") as fh:
+        try:
+            raw = json.load(fh)
+        except json.JSONDecodeError as exc:
+            die(
+                f"{MANAGED_FILES_CONFIG_FILENAME}: invalid JSON at line "
+                f"{exc.lineno}, column {exc.colno}: {exc.msg}."
+            )
+    return _normalize_managed_config(raw, source=MANAGED_FILES_CONFIG_FILENAME)
 
 
 def _parse_dotfiles_path_list(raw: str) -> List[str]:
@@ -1822,7 +1814,7 @@ _TEMPLATED_INIT_SERVICES = frozenset({
 })
 
 # Init-if-missing services whose body is RESOLVED at sync time from
-# `_LICENSE_REGISTRY` based on `license_type` in `bos-managed-files.yaml`.
+# `_LICENSE_REGISTRY` based on `license_type` in `bos-universal-config.json`.
 # The body registered in `SERVICE_INIT_FILES` for these services is
 # a fallback placeholder; the init-loop swaps it for the right canonical
 # text BEFORE placeholder rendering.
@@ -1833,7 +1825,7 @@ _DYNAMIC_LICENSE_INIT_SERVICES = frozenset({"license"})
 # vary per-repo). Currently only the `dependabot_*` services carry a
 # placeholder — the `{{DEPENDABOT_TARGET_BRANCH_LINE}}` token that
 # expands to either empty (default) or `\n    target-branch: <name>`
-# when the consumer's `bos-managed-files.yaml` sets the
+# when the consumer's `bos-universal-config.json` sets the
 # `dependabot_target_branch` knob.
 #
 # Same registry-time validation as `_TEMPLATED_INIT_SERVICES`: every
@@ -1991,7 +1983,7 @@ SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
         ".github/workflows/sync-drift-check.yml": _GHA_SYNC_DRIFT_CHECK_YML,
     },
     # Templated whole-file content (init-if-missing). Values for
-    # `{{KEY}}` placeholders come from `bos-managed-files.yaml` at
+    # `{{KEY}}` placeholders come from `bos-universal-config.json` at
     # the consumer repo root (see `_load_managed_config`).
     #
     # `license` resolves its body DYNAMICALLY at sync time by looking
@@ -2568,7 +2560,7 @@ def sync_files(
     a file once present — that's the whole point of the mode.
     """
     # ------- Per-repo config -------
-    # Load `bos-managed-files.yaml` ONCE per sync run if ANY enabled
+    # Load `bos-universal-config.json` ONCE per sync run if ANY enabled
     # service is templated (section OR init-if-missing). Values are
     # the same across all services in a run, and a missing config
     # file is cheap (one stat + dict copy).
@@ -2578,8 +2570,9 @@ def sync_files(
     # init-templated services (`_TEMPLATED_INIT_SERVICES`) need them
     # later in the init-if-missing loop. Sharing the config load
     # keeps the two paths in lockstep — there is no scenario where
-    # section and init would see different `bos-managed-files.yaml`
+    # section and init would see different `bos-universal-config.json`
     # state within a single run.
+    config_json = os.environ.get("CONFIG_JSON") or os.environ.get("BOS_UNIVERSAL_CONFIG_JSON")
     _needs_config = any(
         svc in _TEMPLATED_INIT_SERVICES
         or svc in _TEMPLATED_SECTION_SERVICES
@@ -2592,7 +2585,7 @@ def sync_files(
         for svc in services
     )
     if _needs_config:
-        _managed_config = _load_managed_config(root)
+        _managed_config = _load_managed_config(root, config_json=config_json)
         _placeholder_subs = _resolve_placeholders(
             _managed_config, _resolve_repo_full_name(root)
         )
@@ -2677,7 +2670,7 @@ def sync_files(
             body = SERVICE_BLOCKS[svc][rel_path]
             # Templated section services (currently the `dependabot_*`
             # trio) carry `{{KEY}}` placeholders rendered from
-            # `bos-managed-files.yaml`. Pass-through is safe for
+            # `bos-universal-config.json`. Pass-through is safe for
             # non-templated services — `_render_placeholders` is a
             # no-op when the body has no `{{KEY}}` tokens — but we
             # gate on the explicit set anyway to keep the contract
@@ -2811,7 +2804,7 @@ def sync_files(
     # only `drift` entries, so existing files are never touched.
     #
     # Templated services (`_TEMPLATED_INIT_SERVICES`) get their
-    # `{{KEY}}` placeholders rendered from `bos-managed-files.yaml`
+    # `{{KEY}}` placeholders rendered from `bos-universal-config.json`
     # (or defaults). License/NOTICE (`_NO_HEADER_INIT_SERVICES`) skip
     # the "Initialized by ..." header injection so license-detection
     # tools still match the canonical text.
