@@ -1,0 +1,11 @@
+{
+  "security": {},
+  "launchpad": {
+    "repo_metadata": {
+      "enable": true,
+      "homepage": "https://github.com/blackoutsecure/bos-automation-hub",
+      "generate_topics": true,
+      "topics_fallback": "github-actions automation reusable-workflows composite-actions devops ci-cd workflow-automation"
+    }
+  }
+}

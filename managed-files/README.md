@@ -1,22 +1,27 @@
 # Managed files
 
-This directory contains canonical files loaded by
-[`sync-managed-files`](../.github/actions/sync-managed-files/). Consumer
-repositories select services in their sync configuration; repository-specific
-universal behavior belongs in `bos-universal-config.json`.
+This directory contains canonical hub templates published with the repository.
+Managed-file synchronization is provided by
+[`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
+Consumer repositories select its services in the `managed_file_sync` section
+of `.github/bos-universal-config.json`.
+This repository's own sync wrappers use `.github/bos-universal-config.json` as
+the repo layer and explicitly merge
+`.github/blackout-secure-managed-file-sync-global-config.json` as the global
+layer.
 Settings may be authored as flat top-level keys or grouped under a named
-section per service (`launchpad`, `marketplace`, `security`, `sync`, plus a
+section per service (`launchpad`, `marketplace`, `security`, plus a
 `general` catch-all for anything else) — see the ["Config sections"](../README.md#config-sections)
 table in the hub README for the full key mapping; this file doesn't repeat it.
 
 ## Active templates
 
 Canonical workflow and dotfile templates live under [`workflows/`](workflows/)
-and [`dotfiles/`](dotfiles/). `sync.py` loads these files with inline fallbacks,
-so the files in this directory are the normal authoring and review surface.
+and [`dotfiles/`](dotfiles/). These files remain the normal authoring and
+review surface for hub-specific release content.
 
 - [`bos-universal-launchpad-kicker.yml`](workflows/bos-universal-launchpad-kicker.yml)
-  is the managed release/deploy caller. It reads `bos-universal-config.json`
+  is the managed release/deploy caller. It reads `.github/bos-universal-config.json`
   and calls the promoted hub runtime on `@main`.
 - [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
   is the managed PR and merge-queue caller for shared lint, dependency review,
@@ -30,19 +35,17 @@ so the files in this directory are the normal authoring and review surface.
   metadata refreshes.
 - [`bos-universal-sync-kicker.yml`](workflows/bos-universal-sync-kicker.yml)
   is the independent scheduled/manual managed-file caller. It contains only
-  event routing and calls the config-aware sync backend, which reads the
-  `sync_files` block. Repository maintenance never starts the delivery
-  workflow.
+  event routing and calls the published managed-file sync action. Repository
+  maintenance never starts the delivery workflow.
 
 These workflows are whole-file managed. Consumer repositories must not edit
 them directly.
 
-Enable `bos_universal_sync` alongside whichever other managed callers the
-repository needs. GitHub still requires one event-trigger workflow per
-repository; `bos-universal-config.json` controls sync behavior and is the
-only repo-level config used by the sync service. The convenience alias
-`dotfiles` is supported in `sync.services` and expands to the standard
-managed-dotfile bundle defined in the sync registry.
+Enable the published managed-file sync action alongside whichever other
+managed callers the repository needs. GitHub still requires one event-trigger
+workflow per repository; `.github/bos-universal-config.json` controls sync behavior
+through `managed_file_sync`. The `dotfiles` bundle is provided by the
+published action's default catalog.
 
 ## Ownership modes
 
@@ -56,9 +59,9 @@ The sync engine supports three ownership modes:
   centralized and independently testable.
 - **Init-if-missing:** creates a starter file once and never overwrites it.
 
-The service registry in
-[`sync.py`](../.github/actions/sync-managed-files/sync.py) is authoritative for
-which files each service owns.
+The published action's catalog is authoritative for generic services. Hub-only
+workflow templates are maintained here and are not part of the public sync
+catalog.
 
 ## Organization defaults
 
@@ -91,24 +94,17 @@ The organization-default targets are the repository root files
 GitHub Actions does not allow expressions in `uses:` references, so branch
 targeting is resolved ahead of time and encoded as static per-branch jobs:
 
-- the security, Marketplace, and sync kickers each resolve which branch
-  (`dev` or `main`) a run targets, then dispatch to a same-named job pair
-  (e.g. `security-dev` / `security-main`) whose `uses:` refs are pinned to
-  `@dev` and `@main` respectively — a `dev`-targeted run exercises the hub's
-  current unreleased source, a `main`-targeted run exercises the promoted
-  stable runtime;
+- the security and Marketplace kickers resolve which branch (`dev` or `main`)
+  a run targets, then dispatch to same-named jobs whose `uses:` refs are pinned
+  to `@dev` and `@main`; the sync kicker invokes the published action directly
+  and does not depend on a hub runtime branch;
 - the launchpad kicker only ever fires on `main` pushes, so it has no `dev`
   variant and always calls `@main`;
-- `bos-universal-sync.yml` is both the hub's own event trigger and the
-  `workflow_call` backend in one file, so it never needs to call itself;
+- `bos-universal-sync.yml` is the hub's event wrapper and reusable caller for
+  the published sync action;
 - `release-hub.yml` cannot reference `@main` without breaking
   self-validation, so it uses local `./.github/...` references instead;
-- the hub otherwise dogfoods its own managed services like any consumer —
-  `bos_universal_config`, `bos_universal_security`, and
-  `bos_universal_sync` are enabled in the hub's own
-  `bos-universal-config.json`; the latter two maintain the security and sync
-  kicker workflows while the config service provisions the canonical config
-  when needed;
+- the hub uses the published action for generic managed-file synchronization;
 - runtime branch decisions inside actions use the caller repository's
   `github.event.repository.default_branch` where appropriate.
 

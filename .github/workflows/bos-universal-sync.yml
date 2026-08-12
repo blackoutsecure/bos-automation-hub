@@ -1,6 +1,5 @@
-# One backend for hub-local and consumer managed-file reconciliation.
-# Event-driven runs read `sync_files` from bos-universal-config.json
-# Reusable callers may either rely on that config or provide explicit inputs.
+# Hub-local event wrapper for the published managed-file sync action.
+# The sync engine and service catalog live in bos-managed-file-sync-action.
 name: Blackout Secure universal sync (reusable)
 
 "on":
@@ -8,7 +7,8 @@ name: Blackout Secure universal sync (reusable)
     - cron: '11 14 * * 1'
   push:
     paths:
-      - bos-universal-config.json
+      - .github/bos-universal-config.json
+      - .github/blackout-secure-managed-file-sync-global-config.json
       - .github/workflows/bos-universal-sync.yml
   workflow_dispatch:
     inputs:
@@ -20,9 +20,7 @@ name: Blackout Secure universal sync (reusable)
   workflow_call:
     inputs:
       services:
-        description: >-
-          Optional whitespace-separated service list. When empty, services and
-          settings are read from bos-universal-config.json.
+        description: Optional service override passed to the published sync action.
         required: false
         type: string
         default: ''
@@ -35,38 +33,9 @@ name: Blackout Secure universal sync (reusable)
         description: Optional explicit commit message override.
         required: false
         type: string
-        default: ''
-      generate_commit_message:
-        description: >-
-          When `true` (default), generate a concise sync commit message via
-          GitHub Models when possible and fall back to `fallback_commit_message`
-          if generation is unavailable. When `false`, skip AI generation and use
-          the explicit `commit_message` or the configured fallback message.
-        required: false
-        type: boolean
-        default: true
-      fallback_commit_message:
-        description: Deterministic commit message used when AI generation is disabled or fails.
-        required: false
-        type: string
-        default: chore: sync managed files from bos-automation-hub
-      git_user_name:
-        description: Optional Git author name override.
-        required: false
-        type: string
-        default: ''
-      git_user_email:
-        description: Optional Git author email override.
-        required: false
-        type: string
-        default: ''
-      push_retries:
-        description: Optional push retry override.
-        required: false
-        type: number
-        default: 0
+        default: 'chore: sync managed files'
       runs_on:
-        description: Optional runner override.
+        description: Optional runner override. Defaults to `vars.DEFAULT_RUNNER`.
         required: false
         type: string
         default: ''
@@ -74,7 +43,7 @@ name: Blackout Secure universal sync (reusable)
         description: Optional per-job timeout override.
         required: false
         type: number
-        default: 0
+        default: 5
     outputs:
       changed:
         description: '`true` when files changed or would change.'
@@ -94,129 +63,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  resolve-config:
-    name: Resolve sync config
+  sync:
+    name: Sync managed files (${{ inputs.mode || 'commit' }})
     if: >-
       github.event_name != 'push'
       || github.ref_name == github.event.repository.default_branch
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    permissions:
-      contents: read
-    outputs:
-      sync: ${{ steps.resolve.outputs.sync }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Load repository config
-        id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
-        with:
-          allow_missing: ${{ inputs.services != '' }}
-
-      - name: Resolve explicit inputs and config
-        id: resolve
-        shell: bash
-        env:
-          CONFIG_SYNC: ${{ steps.config.outputs.sync }}
-          SERVICES: ${{ inputs.services }}
-          MODE: ${{ inputs.mode }}
-          COMMIT_MESSAGE: ${{ inputs.commit_message }}
-          GENERATE_COMMIT_MESSAGE: ${{ inputs.generate_commit_message }}
-          FALLBACK_COMMIT_MESSAGE: ${{ inputs.fallback_commit_message }}
-          GIT_USER_NAME: ${{ inputs.git_user_name }}
-          GIT_USER_EMAIL: ${{ inputs.git_user_email }}
-          PUSH_RETRIES: ${{ inputs.push_retries }}
-          RUNS_ON: ${{ inputs.runs_on }}
-          TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
-          DEFAULT_RUNNER: ${{ vars.DEFAULT_RUNNER }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-
-          config = json.loads(os.environ["CONFIG_SYNC"])
-          explicit_services = os.environ.get("SERVICES", "").strip()
-          services = explicit_services.split() if explicit_services else config["services"]
-          direct_call = bool(explicit_services)
-
-          def text(name, config_key):
-              return os.environ.get(name, "").strip() or str(config[config_key])
-
-          def number(name, config_key):
-              raw = os.environ.get(name, "").strip()
-              return int(raw) if raw and int(raw) > 0 else int(config[config_key])
-
-          def runner_value(value):
-              value = (value or "").strip()
-              default_runner = os.environ.get("DEFAULT_RUNNER", "").strip()
-              if value in {"DEFAULT_RUNNER", "vars.DEFAULT_RUNNER", "${{ vars.DEFAULT_RUNNER }}"}:
-                  return default_runner
-              return value
-
-          runs_on = runner_value(os.environ.get("RUNS_ON", "").strip())
-          if not runs_on:
-              if direct_call:
-                  runs_on = os.environ.get("DEFAULT_RUNNER", "").strip()
-              else:
-                  runs_on = runner_value(config.get("runs_on", ""))
-
-          resolved = {
-              "enabled": bool(services),
-              "services": services,
-              "mode": text("MODE", "mode"),
-              "generate_commit_message": (
-                  os.environ.get("GENERATE_COMMIT_MESSAGE", "true").strip().lower() not in {"false", "0"}
-              ),
-              "commit_message": text("COMMIT_MESSAGE", "commit_message"),
-              "fallback_commit_message": text("FALLBACK_COMMIT_MESSAGE", "fallback_commit_message"),
-              "git_user_name": text("GIT_USER_NAME", "git_user_name"),
-              "git_user_email": text("GIT_USER_EMAIL", "git_user_email"),
-              "push_retries": number("PUSH_RETRIES", "push_retries"),
-              "runs_on": runs_on,
-              "timeout_minutes": number("TIMEOUT_MINUTES", "timeout_minutes"),
-          }
-
-          if resolved["mode"] not in {"commit", "check"}:
-              raise SystemExit("sync mode must be 'commit' or 'check'")
-          if not 1 <= resolved["push_retries"] <= 10:
-              raise SystemExit("push_retries must be in 1-10")
-          if resolved["timeout_minutes"] < 1:
-              raise SystemExit("timeout_minutes must be positive")
-          if resolved["enabled"] and not resolved["runs_on"]:
-              raise SystemExit(
-                  "runs_on is required; set sync_files.runs_on, pass runs_on, "
-                  "or define vars.DEFAULT_RUNNER for an explicit-service call"
-              )
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"sync={json.dumps(resolved, separators=(',', ':'))}\n")
-          PY
-
-      - name: Validate selected runner
-        if: ${{ fromJson(steps.resolve.outputs.sync).enabled == true }}
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
-        with:
-          default_runner: ${{ fromJson(steps.resolve.outputs.sync).runs_on }}
-          runner_x64: ${{ vars.RUNNER_X64 }}
-          runner_arm64: ${{ vars.RUNNER_ARM64 }}
-
-  sync:
-    name: Sync managed files (${{ fromJson(needs.resolve-config.outputs.sync).mode }})
-    needs: resolve-config
-    if: >-
-      !cancelled()
-      && needs.resolve-config.result == 'success'
-      && fromJson(needs.resolve-config.outputs.sync).enabled == true
-    runs-on: ${{ fromJSON(startsWith(fromJson(needs.resolve-config.outputs.sync).runs_on, '[') && fromJson(needs.resolve-config.outputs.sync).runs_on || format('"{0}"', fromJson(needs.resolve-config.outputs.sync).runs_on)) }}
-    timeout-minutes: ${{ fromJson(needs.resolve-config.outputs.sync).timeout_minutes }}
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    timeout-minutes: ${{ inputs.timeout_minutes || 5 }}
     permissions:
       contents: write
-      models: read
     outputs:
       changed: ${{ steps.sync.outputs.changed }}
       changed_files: ${{ steps.sync.outputs.changed_files }}
@@ -230,141 +85,21 @@ jobs:
 
       - name: Sync configured services
         id: sync
-        uses: blackoutsecure/bos-automation-hub/.github/actions/sync-managed-files@main
+        uses: blackoutsecure/bos-managed-file-sync-action@v1
         with:
-          services: ${{ join(fromJson(needs.resolve-config.outputs.sync).services, ' ') }}
-          fail_on_drift: ${{ fromJson(needs.resolve-config.outputs.sync).mode == 'check' }}
-
-      - name: Resolve commit message
-        id: message
-        if: >-
-          fromJson(needs.resolve-config.outputs.sync).mode == 'commit'
-          && steps.sync.outputs.changed == 'true'
-        env:
-          EXPLICIT_COMMIT_MESSAGE: ${{ fromJson(needs.resolve-config.outputs.sync).commit_message }}
-          GENERATE_COMMIT_MESSAGE: ${{ fromJson(needs.resolve-config.outputs.sync).generate_commit_message }}
-          FALLBACK_COMMIT_MESSAGE: ${{ fromJson(needs.resolve-config.outputs.sync).fallback_commit_message }}
-          CHANGED_FILES: ${{ steps.sync.outputs.changed_files }}
-          MODELS_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          final_message="${FALLBACK_COMMIT_MESSAGE}"
-          if [ -n "${EXPLICIT_COMMIT_MESSAGE}" ]; then
-            final_message="${EXPLICIT_COMMIT_MESSAGE}"
-          elif [ "${GENERATE_COMMIT_MESSAGE}" = "true" ]; then
-            python3 - <<'PY'
-import json
-import os
-import subprocess
-import sys
-
-changed_files = os.environ.get('CHANGED_FILES', '').strip()
-files_text = changed_files.replace('\n', ' ') if changed_files else 'managed files'
-model = 'openai/gpt-4o-mini'
-prompt = (
-    'You are a GitHub automation maintainer. Write a single-line conventional commit message '
-    'for a managed-files sync job. Keep it concise, under 72 characters, and include the main intent. '
-    'Do not use markdown, quotes, or a trailing period.\n\nChanged files:\n'
-    f'{files_text}'
-)
-payload = json.dumps({
-    'model': model,
-    'temperature': 0.2,
-    'messages': [
-        {'role': 'system', 'content': 'Write concise conventional commit messages only.'},
-        {'role': 'user', 'content': prompt},
-    ],
-}, separators=(',', ':'))
-
-proc = subprocess.run([
-    'curl', '-sS',
-    '-H', 'Authorization: Bearer ' + os.environ.get('MODELS_TOKEN', ''),
-    '-H', 'Accept: application/vnd.github+json',
-    '-H', 'Content-Type: application/json',
-    '-H', 'X-GitHub-Api-Version: 2022-11-28',
-    '-d', payload,
-    'https://models.github.ai/inference/chat/completions',
-], capture_output=True, text=True)
-if proc.returncode != 0:
-    print(f'::warning::sync: AI commit generation request failed; using fallback message', file=sys.stderr)
-    sys.exit(0)
-try:
-    body = json.loads(proc.stdout or '{}')
-    content = body.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
-    if content:
-        cleaned = content.splitlines()[0].strip().strip('"\'')
-        if cleaned:
-            print(f"resolved_commit_message={cleaned}")
-            sys.stdout.flush()
-            raise SystemExit(0)
-except Exception:
-    pass
-print('::warning::sync: AI commit generation returned no usable content; using fallback message', file=sys.stderr)
-PY
-            if [ -f "${GITHUB_OUTPUT}" ]; then
-              resolved=$(grep '^resolved_commit_message=' "${GITHUB_OUTPUT}" | head -n 1 | cut -d= -f2- || true)
-              if [ -n "${resolved}" ]; then
-                final_message="${resolved}"
-              fi
-            fi
-          fi
-
-          printf 'commit_message=%s\n' "${final_message}" >> "${GITHUB_OUTPUT}"
+          config_path: .github/bos-universal-config.json
+          use_global_config: 'true'
+          global_config_path: .github/blackout-secure-managed-file-sync-global-config.json
+          services: ${{ inputs.services }}
+          fail_on_drift: ${{ (inputs.mode || 'commit') == 'check' }}
+          show_diff: 'true'
 
       - name: Commit and push
         id: commit
         if: >-
-          fromJson(needs.resolve-config.outputs.sync).mode == 'commit'
+          (inputs.mode || 'commit') == 'commit'
           && steps.sync.outputs.changed == 'true'
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/commit-and-push@main
         with:
           files: ${{ steps.sync.outputs.changed_files }}
-          message: ${{ steps.message.outputs.commit_message }}
-          git_user_name: ${{ fromJson(needs.resolve-config.outputs.sync).git_user_name }}
-          git_user_email: ${{ fromJson(needs.resolve-config.outputs.sync).git_user_email }}
-          push_retries: ${{ fromJson(needs.resolve-config.outputs.sync).push_retries }}
-
-      - name: Job summary
-        if: always()
-        env:
-          SYNC: ${{ needs.resolve-config.outputs.sync }}
-          CHANGED: ${{ steps.sync.outputs.changed }}
-          CHANGED_FILES: ${{ steps.sync.outputs.changed_files }}
-          COMMIT_SHA: ${{ steps.commit.outputs.commit_sha }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-
-          sync_raw = os.environ.get("SYNC", "")
-          sync_obj = {}
-
-          if sync_raw:
-              try:
-                  sync_obj = json.loads(sync_raw)
-              except json.JSONDecodeError:
-                  sync_obj = {}
-
-          mode = str(sync_obj.get("mode", "unknown"))
-          services = sync_obj.get("services", [])
-          services_text = " ".join(str(s) for s in services) if isinstance(services, list) else str(services or "")
-
-          changed = os.environ.get("CHANGED", "false")
-          commit_sha = os.environ.get("COMMIT_SHA", "").strip()
-          changed_files = os.environ.get("CHANGED_FILES", "")
-
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("## Sync managed files\n\n")
-              summary.write(f"- Mode: `{mode}`\n")
-              summary.write(f"- Services: `{services_text}`\n")
-              summary.write(f"- Changed: `{changed}`\n")
-              if commit_sha:
-                  summary.write(f"- Commit: `{commit_sha}`\n")
-              if changed == "true":
-                  summary.write("\n### Files\n")
-                  for file in changed_files.splitlines():
-                      if file.strip():
-                          summary.write(f"- `{file}`\n")
-          PY
+          message: "${{ inputs.commit_message || 'chore: sync managed files' }}"

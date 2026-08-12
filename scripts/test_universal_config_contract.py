@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import importlib.util
-import io
 import json
 import os
 import re
@@ -12,22 +10,11 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from contextlib import redirect_stderr
 from pathlib import Path
 from urllib.parse import unquote
 
 
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def load_sync_module():
-    path = ROOT / ".github/actions/sync-managed-files/sync.py"
-    spec = importlib.util.spec_from_file_location("sync_managed_files", path)
-    if spec is None or spec.loader is None:
-        raise AssertionError(f"could not load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def workflow_input_names(body: str) -> set[str]:
@@ -72,10 +59,11 @@ def run_universal_config_raw(raw_text: str) -> subprocess.CompletedProcess[str]:
     )[0]
     with tempfile.TemporaryDirectory() as temp_dir:
         temp = Path(temp_dir)
-        config_path = temp / "bos-universal-config.json"
+        config_path = temp / ".github/bos-universal-config.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(raw_text)
         env = os.environ | {
-            "CONFIG_PATH": config_path.name,
+            "CONFIG_PATH": ".github/bos-universal-config.json",
             "ALLOW_MISSING": "false",
             "GITHUB_OUTPUT": str(temp / "output"),
             "GITHUB_STEP_SUMMARY": str(temp / "summary"),
@@ -167,7 +155,6 @@ def main() -> None:
         run_universal_config(
             {
                 "security": {"enable_lint": True, "enable_shell_lint": True},
-                "sync": {"services": ["common"], "mode": "check"},
                 "launchpad": {
                     "upstream": {"repo": "owner/grouped"},
                     "docker": {"image_name": "grouped-image"},
@@ -180,7 +167,6 @@ def main() -> None:
         "enable_lint": True,
         "enable_shell_lint": True,
     }
-    assert grouped["sync_files"] == {"services": ["common"], "mode": "check"}
     assert grouped["upstream"]["repo"] == "owner/grouped"
     assert grouped["docker"]["image_name"] == "grouped-image"
     assert grouped["marketplace"]["enabled"] is True
@@ -225,9 +211,6 @@ def main() -> None:
     }
 
     assert "managed-files-guard:" not in kicker
-    assert "sync_managed_files:" not in kicker
-    assert "sync_mode:" not in kicker
-    assert "sync-managed-files.yml@main" not in workflow
     assert "bos-universal-sync.yml@main" not in workflow
     assert (
         "security_scan.enable != false" in kicker
@@ -239,94 +222,6 @@ def main() -> None:
     ].split("      include_github_metadata:\n", 1)[0]
     assert "        default: true\n" in dependabot_input
 
-    sync_path = ROOT / ".github/actions/sync-managed-files/sync.py"
-    sync_source = sync_path.read_text()
-    sync = load_sync_module()
-    dotfile_services = sync.parse_services("dotfiles common")
-    assert set(
-        [
-            "common",
-            "docker",
-            "balena",
-            "python",
-            "node",
-            "lf_line_endings",
-            "wranglerignore",
-            "shellcheckrc",
-            "markdownlint",
-            "prettier",
-        ]
-    ).issubset(set(dotfile_services))
-
-    services = sync.parse_services(
-        "bos_launchpad bos_universal_security bos_universal_config "
-        "bos_universal_marketplace bos_universal_sync"
-    )
-    with tempfile.TemporaryDirectory() as root:
-        _, drift = sync.sync_files(services, root)
-    generated_config = json.loads(sync.SERVICE_INIT_FILES["bos_universal_config"]["bos-universal-config.json"])
-    assert "security" in generated_config
-    assert "sync" in generated_config
-    assert "gate" not in generated_config
-    assert "sync_files" not in generated_config
-    assert generated_config["marketplace"]["enabled"] is False
-    assert generated_config["marketplace"]["target_branch"] == "main"
-    assert generated_config["marketplace"]["repo_metadata"] == {
-        "enable": False,
-    }
-    assert {change.path for change in drift} == {
-        ".github/workflows/bos-universal-launchpad-kicker.yml",
-        ".github/workflows/bos-universal-security-kicker.yml",
-        ".github/workflows/bos-universal-marketplace-kicker.yml",
-        ".github/workflows/bos-universal-sync-kicker.yml",
-        "bos-universal-config.json",
-    }
-    for removed_service in (
-        "bos_launchpad_gate",
-        "bos_marketplace",
-        "gha_lint_node",
-        "gha_lint_python",
-        "gha_lint_shell",
-        "license_apache2",
-        "bos_launchpad_sync_files",
-    ):
-        assert removed_service not in sync.KNOWN_SERVICES
-    sync_action = (
-        ROOT / ".github/actions/sync-managed-files/action.yml"
-    ).read_text()
-    for removed_service in (
-        "bos_launchpad_gate",
-        "bos_marketplace",
-        "gha_lint_node",
-        "gha_lint_python",
-        "gha_lint_shell",
-        "license_apache2",
-        "bos_launchpad_sync_files",
-    ):
-        assert removed_service not in sync_action
-    assert "bos_universal_security" in sync_action
-    assert "bos_universal_marketplace" in sync_action
-    assert "bos_universal_sync" in sync_action
-    assert "_GHA_LINT_NODE_YML" not in sync_source
-    assert "_BOS_LAUNCHPAD_CF_PAGES_YML" not in sync_source
-    assert not (
-        ROOT / ".github/actions/summarize-universal-config/action.yml"
-    ).exists()
-    managed_sync_caller = sync.SERVICE_FILES["bos_universal_sync"][
-        ".github/workflows/bos-universal-sync-kicker.yml"
-    ]
-    assert "github.event.repository.default_branch" in managed_sync_caller
-    assert "branches: [main]" not in managed_sync_caller
-    assert managed_sync_caller.count("bos-universal-sync.yml@main") == 1
-    assert "parse-config:" not in managed_sync_caller
-    assert "bos-universal-config.json" in managed_sync_caller
-    assert "bos-managed-files.yaml" not in managed_sync_caller
-    assert "workflows: write" not in managed_sync_caller
-    assert ".github/workflows/bos-universal-sync-kicker.yml" not in managed_sync_caller
-    assert sync.parse_services("bos_launchpad bos_universal_sync") == [
-        "bos_launchpad",
-        "bos_universal_sync",
-    ]
 
     gate_workflow = (ROOT / ".github/workflows/bos-universal-security.yml").read_text()
     security_kicker = (
@@ -379,40 +274,6 @@ def main() -> None:
     assert "outcome=${outcome}" in readme_header_action
     assert "RH001" in readme_header_action and "RH030" in readme_header_action
 
-    assert set(sync.SERVICE_FILES["org_defaults"]) == {
-        "CODE_OF_CONDUCT.md",
-        "CONTRIBUTING.md",
-        ".github/FUNDING.yml",
-        "SECURITY.md",
-        "SUPPORT.md",
-        ".github/PULL_REQUEST_TEMPLATE.md",
-        ".github/ISSUE_TEMPLATE/bug_report.md",
-        ".github/ISSUE_TEMPLATE/config.yml",
-        ".github/ISSUE_TEMPLATE/feature_request.md",
-        "profile/README.md",
-    }
-    assert sync.SERVICE_FILES["org_defaults"]["SECURITY.md"] == (
-        ROOT / "managed-files/community-health/SECURITY.md"
-    ).read_text()
-    assert sync.SERVICE_FILES["org_defaults"]["profile/README.md"] == (
-        ROOT / "managed-files/org-profile/README.md"
-    ).read_text()
-    with tempfile.TemporaryDirectory() as temp_dir:
-        with redirect_stderr(io.StringIO()):
-            try:
-                sync.sync_files(["org_defaults"], temp_dir)
-            except SystemExit as exc:
-                assert exc.code == 1
-            else:
-                raise AssertionError("org_defaults must reject consumer repositories")
-        Path(temp_dir, "bos-universal-config.json").write_text(
-            '{"general":{"target_repo_role":"org-default-repo"}}\n'
-        )
-        changes, _ = sync.sync_files(["org_defaults"], temp_dir)
-        assert {change.path for change in changes if change.changed} == set(
-            sync.SERVICE_FILES["org_defaults"]
-        )
-
     marketplace_kicker = (
         ROOT / "managed-files/workflows/bos-universal-marketplace-kicker.yml"
     ).read_text()
@@ -421,9 +282,6 @@ def main() -> None:
     ).glob("*.yml"):
         assert "\non:\n" not in managed_template.read_text()
         assert "\n\"on\":\n" in managed_template.read_text()
-    assert set(sync.SERVICE_FILES["bos_universal_marketplace"]) == {
-        ".github/workflows/bos-universal-marketplace-kicker.yml",
-    }
     assert not (ROOT / ".github/workflows/bos-launchpad-marketplace.yml").exists()
     assert not (
         ROOT / "managed-files/workflows/bos-launchpad-marketplace.yml"
@@ -462,34 +320,6 @@ def main() -> None:
     assert "inputs.checkout_ref || github.sha" in repo_metadata_workflow
     assert workflow.count("uses: ./.github/workflows/repo-metadata-sync.yml") == 1
     assert ".github/actions/repo-metadata@main" not in workflow
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-        workflow_dir = Path(temp_dir, ".github/workflows")
-        workflow_dir.mkdir(parents=True)
-        for legacy_path, legacy_service in (
-            ("bos-launchpad-sync-files.yml", "bos_launchpad_sync_files"),
-            ("bos-launchpad-gate.yml", "bos_launchpad_gate"),
-            ("bos-marketplace-guard.yml", "bos_marketplace"),
-            ("bos-marketplace-release.yml", "bos_marketplace"),
-        ):
-            Path(workflow_dir, legacy_path).write_text(
-                sync._make_whole_file(legacy_service, "name: legacy\n")
-            )
-        _, retirement_drift = sync.sync_files(
-            [
-                "bos_universal_sync",
-                "bos_universal_security",
-                "bos_universal_marketplace",
-            ],
-            temp_dir,
-        )
-        retired = {change.path for change in retirement_drift if change.delete}
-        assert retired == {
-            ".github/workflows/bos-launchpad-sync-files.yml",
-            ".github/workflows/bos-launchpad-gate.yml",
-            ".github/workflows/bos-marketplace-guard.yml",
-            ".github/workflows/bos-marketplace-release.yml",
-        }
 
     artifact_release = (ROOT / ".github/workflows/release.yml").read_text()
     marketplace_promote = (
@@ -612,16 +442,19 @@ def main() -> None:
         (kicker, {"main"}),
         (security_kicker, {"main", "dev"}),
         (marketplace_kicker, {"main", "dev"}),
-        (managed_sync_caller, {"main", "dev"}),
     ):
         refs = re.findall(r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)", managed_caller)
         assert refs and set(refs) == expected_refs, refs
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
-    hub_config_raw = json.loads((ROOT / "bos-universal-config.json").read_text())
-    assert set(hub_config_raw) == {"security", "launchpad", "sync"}
+    hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
+    assert set(hub_config_raw) == {"security", "launchpad"}
+    global_sync_config = json.loads(
+        (ROOT / ".github/blackout-secure-managed-file-sync-global-config.json").read_text()
+    )
+    assert set(global_sync_config) == {"managed_file_sync"}
     hub_config = cfg_from(
-        run_universal_config_raw((ROOT / "bos-universal-config.json").read_text())
+        run_universal_config_raw((ROOT / ".github/bos-universal-config.json").read_text())
     )
     assert hub_config["gate"] == {}
     assert hub_config["repo_metadata"] == {
@@ -634,36 +467,46 @@ def main() -> None:
         ),
     }
     assert "security_scan" not in hub_config
-    assert hub_config["sync_files"]["services"] == [
+    assert global_sync_config["managed_file_sync"]["services"] == [
         "common",
         "lf_line_endings",
-        "dependabot_actions",
+        "markdownlint",
         "dotfiles",
-        "bos_universal_config",
+        "dependabot_actions",
+        "shellcheck",
     ]
-    assert hub_config["sync_files"]["generate_commit_message"] is True
-    assert hub_config["sync_files"]["fallback_commit_message"] == (
-        "chore: sync managed files from bos-automation-hub"
-    )
-    assert hub_config["sync_files"]["runs_on"] == "DEFAULT_RUNNER"
+    assert global_sync_config["managed_file_sync"]["use_marketplace_config"] is True
+    assert global_sync_config["managed_file_sync"]["variables"] == {
+        "org_name": "Blackout Secure",
+        "support_email": "engineering@blackoutsecure.com",
+        "license": "Apache-2.0",
+    }
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" in sync_backend
     assert "  workflow_dispatch:" in sync_backend
-    assert "actions/shared/universal-config@main" in sync_backend
-    assert "actions/sync-managed-files@main" in sync_backend
+    assert ".github/blackout-secure-managed-file-sync-global-config.json" in sync_backend
+    assert "use_global_config: 'true'" in sync_backend
+    assert "config_path: .github/bos-universal-config.json" in sync_backend
+    assert "bos-managed-file-sync-action@v1" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert "workflows: write" not in sync_backend
-    assert managed_sync_caller.count("bos-universal-sync.yml@main") == 1
-    assert "parse-config:" not in managed_sync_caller
+    managed_sync_caller = (
+        ROOT / "managed-files/workflows/bos-universal-sync-kicker.yml"
+    ).read_text()
+    assert ".github/blackout-secure-managed-file-sync-global-config.json" in managed_sync_caller
+    assert "use_global_config: 'true'" in managed_sync_caller
+    assert "config_path: .github/bos-universal-config.json" in managed_sync_caller
+    assert "bos-managed-file-sync-action@v1" in managed_sync_caller
+    assert "bos-universal-sync.yml@" not in managed_sync_caller
+    assert "resolve-target:" not in managed_sync_caller
 
     assert_markdown_links_exist(ROOT / "README.md")
     assert_markdown_links_exist(ROOT / "managed-files/README.md")
 
     print(
         f"repository contract valid: {len(declared)} launchpad inputs, "
-        f"{len(gate_declared)} gate inputs, {len(reusable)} runtime workflows, "
-        f"{len(services) + 1} managed services"
+        f"{len(gate_declared)} gate inputs, {len(reusable)} runtime workflows"
     )
 
 

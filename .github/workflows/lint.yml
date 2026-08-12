@@ -28,7 +28,6 @@ on:
       - '**/*.sh'
       - '.shellcheckrc'
       - '.github/actions/repo-metadata/helper.py'
-      - '.github/actions/sync-managed-files/sync.py'
       - 'scripts/test_repo_metadata_helper.py'
       - 'scripts/test_universal_config_contract.py'
   pull_request:
@@ -39,7 +38,6 @@ on:
       - '**/*.sh'
       - '.shellcheckrc'
       - '.github/actions/repo-metadata/helper.py'
-      - '.github/actions/sync-managed-files/sync.py'
       - 'scripts/test_repo_metadata_helper.py'
       - 'scripts/test_universal_config_contract.py'
   workflow_dispatch:

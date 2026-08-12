@@ -1,7 +1,7 @@
 # Blackout Secure Launchpad — universal kicker (hub-managed).
-# Customize via `bos-universal-config.json` (repo root), not this file.
+# Customize via `.github/bos-universal-config.json`, not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
-# Required vars (names overridable via `bos-universal-config.json`):
+# Required vars (names overridable via `.github/bos-universal-config.json`):
 #   DOCKERHUB_NAMESPACE, BALENA_NAMESPACE
 # Required secrets:
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
@@ -14,7 +14,7 @@ run-name: >-
       || github.event_name == 'schedule'
       && 'scheduled'
       || 'push'
-  }} / ref:${{ github.ref_name }} / cf-env:${{ vars.CLOUDFLARE_DEPLOYMENT_ENV || 'from-bos-universal-config.json' }} / cf-domain:${{ vars.CLOUDFLARE_SITE_URL || 'from-bos-universal-config.json' }}
+  }} / ref:${{ github.ref_name }} / cf-env:${{ vars.CLOUDFLARE_DEPLOYMENT_ENV || 'from-.github/bos-universal-config.json' }} / cf-domain:${{ vars.CLOUDFLARE_SITE_URL || 'from-.github/bos-universal-config.json' }}
 
 "on":
   schedule:
@@ -28,7 +28,7 @@ run-name: >-
       - 'build/**'
       - 'scripts/**'
       - '.github/upstream/**'
-      - 'bos-universal-config.json'
+      - '.github/bos-universal-config.json'
       - '.github/workflows/bos-universal-launchpad-kicker.yml'
   workflow_dispatch:
     inputs:
