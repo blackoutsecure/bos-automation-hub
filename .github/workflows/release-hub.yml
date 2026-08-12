@@ -36,6 +36,9 @@
 #                                tree already matches `main` (tag-only).
 #   4. release                 — chain to `github-release.yml` to
 #                                publish the GitHub Release.
+#   5. metadata                — refresh the hub repository About box
+#                                from the released tag when enabled in
+#                                `bos-universal-config.json`.
 #
 # Trigger: `workflow_dispatch` ONLY. This workflow file is itself in
 # the runtime allowlist, so it lives ONLY on the development branch.
@@ -43,7 +46,9 @@
 # Token model: prefers `secrets.RELEASE_PAT` for the push + tag
 # (admin role / bypass for protected `main`). Falls back to
 # `GITHUB_TOKEN` when no PAT is wired — in which case `main`'s
-# branch protection must allow GitHub Actions to push.
+# branch protection must allow GitHub Actions to push. Repository
+# metadata writes prefer `REPO_ADMIN_PAT`, then reuse `RELEASE_PAT`;
+# without either token the post-release metadata stage soft-skips.
 name: Hub runtime release · promote default branch → main
 
 "on":
@@ -142,6 +147,7 @@ jobs:
       contents: read
     outputs:
       tag_name: ${{ steps.compute.outputs.tag_name }}
+      cfg: ${{ steps.config.outputs.cfg }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -149,6 +155,9 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Load universal config
+        id: config
+        uses: ./.github/actions/shared/universal-config
       - id: compute
         uses: ./.github/actions/shared/resolve-release-tag
         with:
@@ -407,3 +416,34 @@ jobs:
       source_branch:  ${{ github.event.repository.default_branch }}
       ai_changelog:   ${{ inputs.ai_changelog }}
       target_commitish: main
+
+  metadata:
+    name: Sync hub repository metadata
+    needs: [compute-tag, release]
+    if: >-
+      always()
+      && needs.compute-tag.result == 'success'
+      && needs.release.result == 'success'
+      && inputs.dry_run != true
+      && inputs.release_draft != true
+      && fromJson(needs.compute-tag.outputs.cfg).repo_metadata.enable == true
+    permissions:
+      contents: read
+      models: read
+    uses: ./.github/workflows/repo-metadata-sync.yml
+    with:
+      checkout_ref: ${{ needs.compute-tag.outputs.tag_name }}
+      description: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.description || '' }}
+      homepage: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.homepage || '' }}
+      topics: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.topics || '' }}
+      generate_topics: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.generate_topics == true }}
+      topics_fallback: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.topics_fallback || '' }}
+      ai_enabled: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.ai_enabled != false }}
+      ai_model: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.ai_model || 'openai/gpt-4o-mini' }}
+      show_releases: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.show_releases != false }}
+      show_deployments: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.show_deployments == true }}
+      show_packages: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.show_packages == true }}
+      dry_run: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.dry_run == true }}
+    secrets:
+      REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}
+      RELEASE_PAT: ${{ secrets.RELEASE_PAT }}

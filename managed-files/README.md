@@ -26,7 +26,8 @@ so the files in this directory are the normal authoring and review surface.
 - [`bos-universal-marketplace-kicker.yml`](workflows/bos-universal-marketplace-kicker.yml)
   is installed only in Marketplace Action repositories. One event-routed file
   owns Marketplace validation, trusted stable-branch guarding, name checks,
-  and manual promotion/releases.
+  manual promotion/releases, and opt-in post-release or manual repository
+  metadata refreshes.
 - [`bos-universal-sync-kicker.yml`](workflows/bos-universal-sync-kicker.yml)
   is the independent scheduled/manual managed-file caller. It contains only
   event routing and calls the config-aware sync backend, which reads the

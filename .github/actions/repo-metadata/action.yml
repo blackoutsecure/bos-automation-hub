@@ -1,14 +1,14 @@
-name: Marketplace repo-metadata sync
+name: Repository metadata sync
 description: >-
   Sync GitHub repository metadata (description, homepage, topics, and
   the "Include in the home page" sidebar widget toggles) from
   README-derived content or explicit caller-supplied values.
-  Intended to run as the last step of a Marketplace release so the
-  public-facing repo About box matches what was just published.
+  Intended to run after publication so the public-facing repo About
+  box matches what was just shipped.
 
-  Part of the `bos-marketplace-kit` toolkit. Companion to `promote`
-  (which publishes the tree + tag) and the launchpad release stage
-  (which publishes the GitHub Release body).
+  Shared by the automation hub's Launchpad and Marketplace metadata
+  workflow stages. Direct consumers may also pin this composite by
+  repository path.
 
   Precedence for every field (first non-empty wins):
     1. The explicit input (`description`, `homepage`, `topics`) \u2014
@@ -215,6 +215,7 @@ runs:
         # time; surfaces as `Unrecognized named-value: 'github'`).
         REPO:                ${{ inputs.repo || github.repository }}
         GH_TOKEN:            ${{ inputs.github_token }}
+        MODELS_TOKEN:        ${{ github.token || inputs.github_token }}
         README_PATH:         ${{ inputs.readme_path }}
         DESCRIPTION:         ${{ inputs.description }}
         DESCRIPTION_MAX_LEN: ${{ inputs.description_max_length }}

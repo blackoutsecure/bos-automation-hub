@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Marketplace repo-metadata sync — composite action body.
+# Repository metadata sync composite action body.
 #
 # Run as a child process by action.yml (`bash run.sh`). All inputs are
 # inherited from the step's `env:` block; shared helpers are sourced
@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-: "${ERR_TITLE:=Marketplace repo-metadata}"
+: "${ERR_TITLE:=Repository metadata sync}"
 
 # Shared helpers (die / require_var / validate_bool / ...). Sourced here
 # rather than relying on action.yml's source line, because run.sh runs
@@ -37,10 +37,12 @@ HELPER_PY="${GITHUB_ACTION_PATH}/helper.py"
 require_var REPO
 require_var GH_TOKEN
 require_var README_PATH
+MODELS_TOKEN="${MODELS_TOKEN:-${GH_TOKEN}}"
 
 case "${REPO}" in
+  */*/*|/*|*/|'') die "input 'repo' must be exactly 'owner/repo' (got: '${REPO}')" ;;
   */*) ;;
-  *) die "input 'repo' must be 'owner/repo' (got: '${REPO}')" ;;
+  *) die "input 'repo' must be exactly 'owner/repo' (got: '${REPO}')" ;;
 esac
 
 case "${DESCRIPTION_MAX_LEN}" in
@@ -115,7 +117,7 @@ else
         }' <<<"${PROMPT}")
         HTTP_CODE=$(curl -sS \
           -o "${AI_OUT}" -w '%{http_code}' \
-          -H "Authorization: Bearer ${GH_TOKEN}" \
+          -H "Authorization: Bearer ${MODELS_TOKEN}" \
           -H "Accept: application/vnd.github+json" \
           -H "Content-Type: application/json" \
           -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -179,7 +181,7 @@ elif [ "${GENERATE_TOPICS}" = "true" ]; then
       }' <<<"${PROMPT}")
       HTTP_CODE=$(curl -sS \
         -o "${AI_OUT}" -w '%{http_code}' \
-        -H "Authorization: Bearer ${GH_TOKEN}" \
+        -H "Authorization: Bearer ${MODELS_TOKEN}" \
         -H "Accept: application/vnd.github+json" \
         -H "Content-Type: application/json" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
@@ -336,7 +338,7 @@ fi
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
-    echo "### Marketplace repo-metadata sync"
+    echo "### Repository metadata sync"
     echo ""
     echo "| Field | Value | Source |"
     echo "|---|---|---|"

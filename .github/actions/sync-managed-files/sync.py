@@ -807,7 +807,10 @@ _BOS_UNIVERSAL_CONFIG_INIT_JSON = """\
   "marketplace": {
     "enabled": false,
     "target_branch": "main",
-    "allowlist_paths": "action.yml\\nREADME.md\\nLICENSE"
+        "allowlist_paths": "action.yml\\nREADME.md\\nLICENSE",
+        "repo_metadata": {
+            "enable": false
+        }
   },
     "sync": {
     "services": [

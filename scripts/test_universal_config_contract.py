@@ -101,6 +101,10 @@ def main() -> None:
                 "blocked_paths": ".github/workflows/\ntest/",
                 "required_paths": [],
                 "extra_sync_paths": ["NOTICE"],
+                "repo_metadata": {
+                    "enable": True,
+                    "topics_fallback": "github-actions security",
+                },
             }
         }
     )
@@ -113,6 +117,10 @@ def main() -> None:
     assert marketplace["blocked_paths"] == ".github/workflows/\ntest/"
     assert marketplace["required_paths"] == ""
     assert marketplace["extra_sync_paths"] == "NOTICE"
+    assert marketplace["repo_metadata"] == {
+        "enable": True,
+        "topics_fallback": "github-actions security",
+    }
     malformed = run_universal_config(
         {"marketplace": {"allowlist_paths": ["action.yml", 3]}}
     )
@@ -230,6 +238,9 @@ def main() -> None:
     assert "sync_files" not in generated_config
     assert generated_config["marketplace"]["enabled"] is False
     assert generated_config["marketplace"]["target_branch"] == "main"
+    assert generated_config["marketplace"]["repo_metadata"] == {
+        "enable": False,
+    }
     assert {change.path for change in drift} == {
         ".github/workflows/bos-universal-launchpad-kicker.yml",
         ".github/workflows/bos-universal-security-kicker.yml",
@@ -370,10 +381,37 @@ def main() -> None:
     assert marketplace_kicker.count("bos-universal-marketplace.yml@main") == 1
     assert marketplace_kicker.count("marketplace-repo-guard.yml@main") == 1
     assert marketplace_kicker.count("release-promote.yml@main") == 1
+    assert marketplace_kicker.count("repo-metadata-sync.yml@main") == 1
+    assert "options: [validate, name-check, release, metadata]" in marketplace_kicker
+    assert "needs.release.outputs.tag_name" in marketplace_kicker
+    assert "needs.release.result == 'success'" in marketplace_kicker
+    assert "&& !inputs.dry_run" in marketplace_kicker
+    assert "&& !inputs.draft" in marketplace_kicker
+    assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" in marketplace_kicker
+    assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" in marketplace_kicker
     assert "outputs.cfg" in marketplace_kicker
     assert "pull_request_target:" in marketplace_kicker
     assert "github.event.repository.default_branch" in marketplace_kicker
     assert not re.search(r"source_branch:\s+dev\b", marketplace_kicker)
+
+    repo_metadata_workflow = (
+        ROOT / ".github/workflows/repo-metadata-sync.yml"
+    ).read_text()
+    assert "  workflow_call:" in repo_metadata_workflow
+    assert "\n  release:\n" not in repo_metadata_workflow
+    assert repo_metadata_workflow.count(
+        "uses: blackoutsecure/bos-automation-hub/"
+        ".github/actions/repo-metadata@main"
+    ) == 1
+    assert "secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token" in repo_metadata_workflow
+    repo_metadata_action = (
+        ROOT / ".github/actions/repo-metadata/action.yml"
+    ).read_text()
+    assert "MODELS_TOKEN:        ${{ github.token || inputs.github_token }}" in repo_metadata_action
+    assert "group: repo-metadata-${{ github.repository }}" in repo_metadata_workflow
+    assert "inputs.checkout_ref || github.sha" in repo_metadata_workflow
+    assert workflow.count("uses: ./.github/workflows/repo-metadata-sync.yml") == 1
+    assert ".github/actions/repo-metadata@main" not in workflow
 
     with tempfile.TemporaryDirectory() as temp_dir:
         workflow_dir = Path(temp_dir, ".github/workflows")
@@ -471,6 +509,17 @@ def main() -> None:
     assert release_hub.count(
         "uses: ./.github/actions/shared/resolve-release-tag"
     ) == 1
+    assert release_hub.count(
+        "uses: ./.github/actions/shared/universal-config"
+    ) == 1
+    assert release_hub.count(
+        "uses: ./.github/workflows/repo-metadata-sync.yml"
+    ) == 1
+    assert "checkout_ref: ${{ needs.compute-tag.outputs.tag_name }}" in release_hub
+    assert "needs.release.result == 'success'" in release_hub
+    assert "inputs.release_draft != true" in release_hub
+    assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" in release_hub
+    assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" in release_hub
     assert "LATEST=\"$(git tag --list" not in release_hub
 
     balena_block = (
@@ -520,7 +569,7 @@ def main() -> None:
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
     hub_config_raw = json.loads((ROOT / "bos-universal-config.json").read_text())
-    assert set(hub_config_raw) == {"security", "sync"}
+    assert set(hub_config_raw) == {"security", "launchpad", "sync"}
     hub_config = cfg_from(
         run_universal_config_raw((ROOT / "bos-universal-config.json").read_text())
     )
@@ -538,6 +587,15 @@ def main() -> None:
         "pr_title_types": "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert",
         "enable_readme_header_check": True,
         "readme_header_profile": "generic",
+    }
+    assert hub_config["repo_metadata"] == {
+        "enable": True,
+        "homepage": "https://github.com/blackoutsecure/bos-automation-hub",
+        "generate_topics": True,
+        "topics_fallback": (
+            "github-actions automation reusable-workflows composite-actions "
+            "devops ci-cd workflow-automation"
+        ),
     }
     assert hub_config["sync_files"]["services"] == [
         "common",
