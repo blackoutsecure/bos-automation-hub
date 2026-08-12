@@ -15,6 +15,9 @@
     "readme_header_profile": "generic"
   },
   "launchpad": {
+    "security_scan": {
+      "use_advanced_pat": true
+    },
     "repo_metadata": {
       "enable": true,
       "homepage": "https://github.com/blackoutsecure/bos-automation-hub",

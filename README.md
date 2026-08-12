@@ -562,6 +562,42 @@ Common secrets are stage-dependent:
 - administration/scanning: `REPO_ADMIN_PAT`, `SCANNING_PAT`;
 - hub promotion: `RELEASE_PAT` when protected-branch bypass is required.
 
+### Elevated posture scanning (`SCANNING_PAT`)
+
+The code-scanning kit's posture probes (secret-scanning enablement, Dependabot
+alerts enablement, push-protection visibility, branch-protection drift) need
+Administration/security read access that the default `GITHUB_TOKEN` does not
+have; without it those probes report indeterminate rather than `pass`/`warn`/
+`fail`.
+
+1. Create a PAT for the repositories to audit.
+2. Preferred: a fine-grained PAT scoped only to the selected repositories.
+3. Grant read access for repository metadata plus the security and
+   administration surfaces the posture checks need (secret scanning alerts,
+   Dependabot alerts, administration).
+4. Fallback: a classic PAT with the `repo` scope.
+5. Store the token as an Actions secret named `SCANNING_PAT` at the
+   organization or repository level.
+6. Re-run the workflow and confirm the previously indeterminate rows now show
+   `pass`, `warn`, or `fail`.
+
+No consumer wiring is required beyond creating the secret:
+
+- [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)'s
+  `code-scan` job always passes
+  `github_token: ${{ secrets.scanning_pat || secrets.GITHUB_TOKEN }}`, and both
+  managed kickers already forward `secrets.SCANNING_PAT` unconditionally — the
+  PAT is used automatically the moment the secret exists, with no config
+  change needed.
+- [`bos-universal-launchpad.yml`](.github/workflows/bos-universal-launchpad.yml)'s
+  security-scan stage additionally requires
+  `launchpad.security_scan.use_advanced_pat: true` (or the flat
+  `security_scan.use_advanced_pat` equivalent) in
+  [`bos-universal-config.json`](bos-universal-config.json) — this hub ships
+  that flag enabled by default. It is a documented no-op when `SCANNING_PAT`
+  is absent (the kit transparently falls back to `GITHUB_TOKEN`), so enabling
+  it ahead of provisioning the secret is safe.
+
 ## Development and validation
 
 Run the repository contract before promotion:

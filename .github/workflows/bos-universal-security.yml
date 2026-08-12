@@ -160,6 +160,24 @@ on:
         type: string
         required: false
         default: auto
+      code_scan_fail_on:
+        description: >-
+          Forwarded to bos-code-scanning-kit's `fail_on` input. `fail`
+          (default) exits non-zero on any posture FAIL or scanner
+          finding. `never` collects findings but always exits 0 —
+          useful for a first-time rollout on a noisy repository.
+        type: string
+        required: false
+        default: fail
+      code_scan_http_timeout:
+        description: >-
+          Forwarded to bos-code-scanning-kit's `http_timeout` input:
+          per-request HTTP timeout (seconds) for the posture audit's
+          GitHub REST calls. Bump on self-hosted runners with slow
+          egress. Bare integer string; no unit.
+        type: string
+        required: false
+        default: '20'
       config_authoritative:
         description: Use bos-universal-config.json instead of direct gate inputs.
         type: boolean
@@ -219,6 +237,8 @@ jobs:
           INPUT_PR_TITLE_TYPES: ${{ inputs.pr_title_types }}
           INPUT_ENABLE_README: ${{ inputs.enable_readme_header_check }}
           INPUT_README_PROFILE: ${{ inputs.readme_header_profile }}
+          INPUT_CODE_SCAN_FAIL_ON: ${{ inputs.code_scan_fail_on }}
+          INPUT_CODE_SCAN_HTTP_TIMEOUT: ${{ inputs.code_scan_http_timeout }}
         shell: bash
         run: |
           set -euo pipefail
@@ -241,6 +261,8 @@ jobs:
               "pr_title_types": "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert",
               "enable_readme_header_check": True,
               "readme_header_profile": "auto",
+              "code_scan_fail_on": "fail",
+              "code_scan_http_timeout": "20",
           }
           configured = config.get("gate", {})
           if not isinstance(configured, dict):
@@ -269,6 +291,8 @@ jobs:
                   "pr_title_types": os.environ["INPUT_PR_TITLE_TYPES"] or gate["pr_title_types"],
                   "enable_readme_header_check": boolean("INPUT_ENABLE_README", True),
                   "readme_header_profile": os.environ["INPUT_README_PROFILE"] or "auto",
+                  "code_scan_fail_on": os.environ["INPUT_CODE_SCAN_FAIL_ON"] or "fail",
+                  "code_scan_http_timeout": os.environ["INPUT_CODE_SCAN_HTTP_TIMEOUT"] or "20",
               })
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("gate<<__BOS_GATE__\n")
@@ -445,7 +469,8 @@ jobs:
         uses: blackoutsecure/bos-code-scanning-kit@37ee8d5cf143be59b02dd9fcbb3070b174dc22e3 # v1
         with:
           github_token: ${{ secrets.scanning_pat || secrets.GITHUB_TOKEN }}
-          fail_on: fail
+          fail_on: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_fail_on }}
+          http_timeout: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_http_timeout }}
           enable_posture: 'true'
           enable_scanners: 'true'
           enable_upload: 'true'

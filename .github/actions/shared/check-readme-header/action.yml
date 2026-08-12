@@ -74,10 +74,28 @@ inputs:
     required: false
     default: 'false'
 
+outputs:
+  outcome:
+    description: >-
+      Severity-tier verdict for the run: `success` (every applicable
+      rule passed), `warn` (only warning-level findings), or `failure`
+      (at least one required header element failed).
+    value: ${{ steps.check.outputs.outcome }}
+  fail_count:
+    description: Number of failing (High) findings.
+    value: ${{ steps.check.outputs.fail_count }}
+  warn_count:
+    description: Number of warning findings.
+    value: ${{ steps.check.outputs.warn_count }}
+  pass_count:
+    description: Number of passing findings.
+    value: ${{ steps.check.outputs.pass_count }}
+
 runs:
   using: composite
   steps:
     - name: Validate README header
+      id: check
       shell: bash
       env:
         README_PATH:     ${{ inputs.readme_path }}
@@ -124,16 +142,25 @@ runs:
         # plenty for any of our header patterns).
         head_block="$(head -n 30 "$readme")"
 
-        errors=()
-        warnings=()
+        # ----------------------------------------------------------
+        # Findings ledger — parallel arrays of (rule, severity,
+        # control, evidence, remediation), mirroring the rule/finding
+        # model used by bos-code-scanning-kit's posture audit so every
+        # BlackOut Secure gate reports the same shape: a rule ID, a
+        # pass/warn/fail severity, and a fix-it remediation string.
+        # ----------------------------------------------------------
+        FIND_RULE=(); FIND_SEV=(); FIND_CONTROL=(); FIND_EVIDENCE=(); FIND_REMEDIATION=()
+        add_finding() {
+          FIND_RULE+=("$1"); FIND_SEV+=("$2"); FIND_CONTROL+=("$3")
+          FIND_EVIDENCE+=("$4"); FIND_REMEDIATION+=("$5")
+        }
 
-        # ----------------------------------------------------------
-        # Shared check: the "Made by BlackoutSecure" badge.
-        # Required for every profile so the org footprint is
-        # visible on every README in the org.
-        # ----------------------------------------------------------
-        if ! grep -qE '\[!\[Made by BlackoutSecure\]\(https://img\.shields\.io/badge/made%20by-BlackoutSecure-[0-9a-fA-F]{6}' <<<"$head_block"; then
-          errors+=("missing required badge: \`[![Made by BlackoutSecure](https://img.shields.io/badge/made%20by-BlackoutSecure-1f1f1f)](https://github.com/${EXPECTED_ORG})\`")
+        # RH00x — shared "Made by BlackoutSecure" badge (every profile).
+        if grep -qE '\[!\[Made by BlackoutSecure\]\(https://img\.shields\.io/badge/made%20by-BlackoutSecure-[0-9a-fA-F]{6}' <<<"$head_block"; then
+          add_finding "RH001" "pass" "Made by BlackoutSecure badge" "badge found in the header" "—"
+        else
+          add_finding "RH001" "fail" "Made by BlackoutSecure badge" "badge not found in the first 30 lines" \
+            "Add \`[![Made by BlackoutSecure](https://img.shields.io/badge/made%20by-BlackoutSecure-1f1f1f)](https://github.com/${EXPECTED_ORG})\`"
         fi
 
         case "$profile" in
@@ -141,30 +168,44 @@ runs:
           # Marketplace profile (bos-*-kit / Action repos).
           # ------------------------------------------------------
           marketplace)
-            # H1 must be "# Blackout Secure <Name>".
-            if ! grep -qE '^# Blackout Secure ' <<<"$head_block"; then
-              errors+=("first heading must be \`# Blackout Secure <Name>\` (Marketplace listing depends on the canonical org prefix)")
+            if grep -qE '^# Blackout Secure ' <<<"$head_block"; then
+              add_finding "RH010" "pass" "Canonical H1 heading" "first heading matches \`# Blackout Secure <Name>\`" "—"
+            else
+              add_finding "RH010" "fail" "Canonical H1 heading" "first heading does not match the required pattern" \
+                "Set the first heading to \`# Blackout Secure <Name>\` (Marketplace listing depends on the canonical org prefix)"
             fi
 
-            # Copyright line.
-            if ! grep -qE '^\*\*Copyright © [0-9]{4}(-[0-9]{4})? Blackout Secure \| Apache License 2\.0\*\*$' <<<"$head_block"; then
-              errors+=("missing copyright line: \`**Copyright © <year[-year]> Blackout Secure | Apache License 2.0**\`")
+            if grep -qE '^\*\*Copyright © [0-9]{4}(-[0-9]{4})? Blackout Secure \| Apache License 2\.0\*\*$' <<<"$head_block"; then
+              add_finding "RH011" "pass" "Copyright line" "copyright line present and correctly formatted" "—"
+            else
+              add_finding "RH011" "fail" "Copyright line" "copyright line missing or malformed" \
+                "Add \`**Copyright © <year[-year]> Blackout Secure | Apache License 2.0**\`"
             fi
 
-            # Each badge in order.
-            if ! grep -qE '\[!\[Marketplace\]\(https://img\.shields\.io/badge/GitHub%20Marketplace-blue\?logo=github\)\]\(https://github\.com/marketplace/actions/' <<<"$head_block"; then
-              errors+=("missing Marketplace badge: \`[![Marketplace](https://img.shields.io/badge/GitHub%20Marketplace-blue?logo=github)](https://github.com/marketplace/actions/<slug>)\`")
+            if grep -qE '\[!\[Marketplace\]\(https://img\.shields\.io/badge/GitHub%20Marketplace-blue\?logo=github\)\]\(https://github\.com/marketplace/actions/' <<<"$head_block"; then
+              add_finding "RH012" "pass" "Marketplace badge" "badge found" "—"
+            else
+              add_finding "RH012" "fail" "Marketplace badge" "badge not found" \
+                "Add \`[![Marketplace](https://img.shields.io/badge/GitHub%20Marketplace-blue?logo=github)](https://github.com/marketplace/actions/<slug>)\`"
             fi
-            if ! grep -qE '\[!\[GitHub release\]\(https://img\.shields\.io/github/v/release/'"${EXPECTED_ORG}"'/' <<<"$head_block"; then
-              errors+=("missing GitHub release badge: \`[![GitHub release](https://img.shields.io/github/v/release/${EXPECTED_ORG}/<repo>?sort=semver)](https://github.com/${EXPECTED_ORG}/<repo>/releases)\`")
+
+            if grep -qE '\[!\[GitHub release\]\(https://img\.shields\.io/github/v/release/'"${EXPECTED_ORG}"'/' <<<"$head_block"; then
+              add_finding "RH013" "pass" "GitHub release badge" "badge found" "—"
+            else
+              add_finding "RH013" "fail" "GitHub release badge" "badge not found" \
+                "Add \`[![GitHub release](https://img.shields.io/github/v/release/${EXPECTED_ORG}/<repo>?sort=semver)](https://github.com/${EXPECTED_ORG}/<repo>/releases)\`"
             fi
-            if ! grep -qE '\[!\[License\]\(https://img\.shields\.io/badge/license-Apache%202\.0-blue\)\]\(LICENSE\)' <<<"$head_block"; then
-              errors+=("missing License badge: \`[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)\`")
+
+            if grep -qE '\[!\[License\]\(https://img\.shields\.io/badge/license-Apache%202\.0-blue\)\]\(LICENSE\)' <<<"$head_block"; then
+              add_finding "RH014" "pass" "License badge" "badge found" "—"
+            else
+              add_finding "RH014" "fail" "License badge" "badge not found" \
+                "Add \`[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)\`"
             fi
 
             # Badge ORDER — find line numbers of each canonical badge
             # marker and verify monotonic. Out-of-order is a warning,
-            # not an error, because order is cosmetic.
+            # not a failure, because order is cosmetic.
             order_ok=1
             mp_line="$(grep -nE '^\[!\[Marketplace\]' "$readme" | head -n1 | cut -d: -f1 || true)"
             rel_line="$(grep -nE '^\[!\[GitHub release\]' "$readme" | head -n1 | cut -d: -f1 || true)"
@@ -178,8 +219,11 @@ runs:
                 order_ok=0
               fi
             done
-            if [[ "$order_ok" -eq 0 ]]; then
-              warnings+=("badges out of canonical order: expected \`Marketplace -> GitHub release -> License -> Made by BlackoutSecure\`")
+            if [[ "$order_ok" -eq 1 ]]; then
+              add_finding "RH015" "pass" "Badge order" "badges appear in canonical order" "—"
+            else
+              add_finding "RH015" "warn" "Badge order" "badges are out of canonical order" \
+                "Reorder badges to \`Marketplace -> GitHub release -> License -> Made by BlackoutSecure\`"
             fi
             ;;
 
@@ -187,32 +231,53 @@ runs:
           # Docker profile (docker-* repos).
           # ------------------------------------------------------
           docker)
-            # Centered logo block.
-            if ! grep -qE '^<p align="center">' <<<"$head_block"; then
-              errors+=("missing centered logo block: \`<p align=\"center\"><img src=\".../logo.png\" alt=\"<name> logo\" width=\"200\"></p>\`")
+            if grep -qE '^<p align="center">' <<<"$head_block"; then
+              add_finding "RH020" "pass" "Centered logo block" "logo block present" "—"
+            else
+              add_finding "RH020" "fail" "Centered logo block" "logo block missing" \
+                "Add \`<p align=\"center\"><img src=\".../logo.png\" alt=\"<name> logo\" width=\"200\"></p>\`"
             fi
-            # H1 must be "# blackoutsecure/<slug>".
-            if ! grep -qE '^# '"${EXPECTED_ORG}"'/[a-z0-9][a-z0-9._-]*$' <<<"$head_block"; then
-              errors+=("first heading must be \`# ${EXPECTED_ORG}/<service>\` (matches the published Docker Hub image name)")
+
+            if grep -qE '^# '"${EXPECTED_ORG}"'/[a-z0-9][a-z0-9._-]*$' <<<"$head_block"; then
+              add_finding "RH021" "pass" "Canonical H1 heading" "first heading matches \`# ${EXPECTED_ORG}/<service>\`" "—"
+            else
+              add_finding "RH021" "fail" "Canonical H1 heading" "first heading does not match the required pattern" \
+                "Set the first heading to \`# ${EXPECTED_ORG}/<service>\` (matches the published Docker Hub image name)"
             fi
+
             # Brand color (E7931D) and style (flat-square) are
             # enforced INSIDE each canonical-badge regex below — that
             # way author-added non-canonical badges (e.g. a GPLv3
             # license shield in blue, or vendor SVGs like the Balena
             # deploy button) don't trip a global brand-color sweep.
-            if ! grep -qE '\[!\[GitHub Stars\]\(https://img\.shields\.io/github/stars/'"${EXPECTED_ORG}"'/[^)]*style=flat-square[^)]*color=E7931D' <<<"$head_block"; then
-              errors+=("missing GitHub Stars badge: \`[![GitHub Stars](https://img.shields.io/github/stars/${EXPECTED_ORG}/<repo>?style=flat-square&color=E7931D&logo=github)](.../stargazers)\`")
+            if grep -qE '\[!\[GitHub Stars\]\(https://img\.shields\.io/github/stars/'"${EXPECTED_ORG}"'/[^)]*style=flat-square[^)]*color=E7931D' <<<"$head_block"; then
+              add_finding "RH022" "pass" "GitHub Stars badge" "badge found with the correct brand color" "—"
+            else
+              add_finding "RH022" "fail" "GitHub Stars badge" "badge not found, or missing the E7931D brand color" \
+                "Add \`[![GitHub Stars](https://img.shields.io/github/stars/${EXPECTED_ORG}/<repo>?style=flat-square&color=E7931D&logo=github)](.../stargazers)\`"
             fi
-            if ! grep -qE '\[!\[Docker Pulls\]\(https://img\.shields\.io/docker/pulls/'"${EXPECTED_ORG}"'/[^)]*style=flat-square[^)]*color=E7931D' <<<"$head_block"; then
-              errors+=("missing Docker Pulls badge: \`[![Docker Pulls](https://img.shields.io/docker/pulls/${EXPECTED_ORG}/<image>?style=flat-square&color=E7931D&logo=docker&logoColor=FFFFFF)](https://hub.docker.com/r/${EXPECTED_ORG}/<image>)\`")
+
+            if grep -qE '\[!\[Docker Pulls\]\(https://img\.shields\.io/docker/pulls/'"${EXPECTED_ORG}"'/[^)]*style=flat-square[^)]*color=E7931D' <<<"$head_block"; then
+              add_finding "RH023" "pass" "Docker Pulls badge" "badge found with the correct brand color" "—"
+            else
+              add_finding "RH023" "fail" "Docker Pulls badge" "badge not found, or missing the E7931D brand color" \
+                "Add \`[![Docker Pulls](https://img.shields.io/docker/pulls/${EXPECTED_ORG}/<image>?style=flat-square&color=E7931D&logo=docker&logoColor=FFFFFF)](https://hub.docker.com/r/${EXPECTED_ORG}/<image>)\`"
             fi
-            if ! grep -qE '\[!\[GitHub Release\]\(https://img\.shields\.io/github/release/'"${EXPECTED_ORG}"'/[^)]*style=flat-square[^)]*color=E7931D' <<<"$head_block"; then
-              errors+=("missing GitHub Release badge: \`[![GitHub Release](https://img.shields.io/github/release/${EXPECTED_ORG}/<repo>.svg?style=flat-square&color=E7931D&logo=github&logoColor=FFFFFF)](.../releases)\`")
+
+            if grep -qE '\[!\[GitHub Release\]\(https://img\.shields\.io/github/release/'"${EXPECTED_ORG}"'/[^)]*style=flat-square[^)]*color=E7931D' <<<"$head_block"; then
+              add_finding "RH024" "pass" "GitHub Release badge" "badge found with the correct brand color" "—"
+            else
+              add_finding "RH024" "fail" "GitHub Release badge" "badge not found, or missing the E7931D brand color" \
+                "Add \`[![GitHub Release](https://img.shields.io/github/release/${EXPECTED_ORG}/<repo>.svg?style=flat-square&color=E7931D&logo=github&logoColor=FFFFFF)](.../releases)\`"
             fi
+
             # Launchpad OR Balena Hub badge is acceptable as the 4th.
             # Both must carry the brand color when present.
-            if ! grep -qE '\[!\[Blackout Secure Launchpad\]\([^)]*color=E7931D|\[!\[Balena Hub\]\([^)]*-E7931D' <<<"$head_block"; then
-              errors+=("missing Launchpad-or-Balena badge: \`[![Blackout Secure Launchpad](.../bos-universal-launchpad-kicker.yml?style=flat-square&label=blackout%20secure%20launchpad&color=E7931D)](.../bos-universal-launchpad-kicker.yml)\` OR \`[![Balena Hub](https://img.shields.io/badge/balena%20hub-<name>-E7931D?style=flat-square&logo=balena&logoColor=FFFFFF)](https://hub.balena.io/blocks/<id>/<name>)\`")
+            if grep -qE '\[!\[Blackout Secure Launchpad\]\([^)]*color=E7931D|\[!\[Balena Hub\]\([^)]*-E7931D' <<<"$head_block"; then
+              add_finding "RH025" "pass" "Launchpad-or-Balena badge" "badge found with the correct brand color" "—"
+            else
+              add_finding "RH025" "fail" "Launchpad-or-Balena badge" "badge not found, or missing the brand color" \
+                "Add \`[![Blackout Secure Launchpad](.../bos-universal-launchpad-kicker.yml?style=flat-square&label=blackout%20secure%20launchpad&color=E7931D)](.../bos-universal-launchpad-kicker.yml)\` OR \`[![Balena Hub](https://img.shields.io/badge/balena%20hub-<name>-E7931D?style=flat-square&logo=balena&logoColor=FFFFFF)](https://hub.balena.io/blocks/<id>/<name>)\`"
             fi
             ;;
 
@@ -221,52 +286,155 @@ runs:
           # publishing surface).
           # ------------------------------------------------------
           generic)
-            if ! grep -qE '^# ' <<<"$head_block"; then
-              errors+=("first heading must be a level-1 \`# <Title>\`")
+            if grep -qE '^# ' <<<"$head_block"; then
+              add_finding "RH030" "pass" "Level-1 heading" "a level-1 heading is present" "—"
+            else
+              add_finding "RH030" "fail" "Level-1 heading" "no level-1 heading found" \
+                "Add a first heading \`# <Title>\`"
             fi
             ;;
         esac
 
         # ----------------------------------------------------------
-        # Emit findings to the workflow log + step summary.
+        # Roll up totals + verdict, mirroring
+        # bos-code-scanning-kit's posture-audit report: a `Verdict`
+        # line, a severity-count table, recommended actions, and a
+        # per-family findings table with Rule / Severity / Control /
+        # Evidence / Recommended Remediation columns.
         # ----------------------------------------------------------
+        fails=0; warns=0; passes=0
+        for sev in "${FIND_SEV[@]}"; do
+          case "$sev" in
+            fail) fails=$((fails + 1)) ;;
+            warn) warns=$((warns + 1)) ;;
+            pass) passes=$((passes + 1)) ;;
+          esac
+        done
+
+        if (( fails > 0 )); then
+          outcome="failure"
+          verdict="Action required"
+          verdict_detail="One or more required header elements did not meet the canonical \`${profile}\` pattern."
+        elif (( warns > 0 )); then
+          outcome="warn"
+          verdict="Advisory review recommended"
+          verdict_detail="No blocking failures were detected, but one or more elements should be reviewed."
+        else
+          outcome="success"
+          verdict="Controls passed"
+          verdict_detail="No failing or warning-level header findings were detected."
+        fi
+
+        actions=()
+        (( fails > 0 )) && actions+=("Fix the High findings below; the canonical header is required for the \`${profile}\` profile.")
+        (( warns > 0 )) && actions+=("Review the Warning findings during the next documentation pass.")
+        if (( fails == 0 && warns == 0 )); then
+          actions+=("Maintain the current header — no changes needed.")
+        fi
+        actions+=("Re-run this check after editing the README to confirm the fix.")
+
+        severity_label() {
+          case "$1" in
+            pass) echo "Pass" ;;
+            warn) echo "Warning" ;;
+            fail) echo "High" ;;
+            *)    echo "$1" ;;
+          esac
+        }
+
+        # ─── Console echo ──────────────────────────────────────────
+        echo ""
+        echo "━━ Blackout Secure README Header Audit — outcome: ${outcome} ━━"
+        for i in "${!FIND_RULE[@]}"; do
+          printf '  %-6s %-8s %s: %s\n' "${FIND_RULE[$i]}" "${FIND_SEV[$i]}" \
+            "${FIND_CONTROL[$i]}" "${FIND_EVIDENCE[$i]}"
+        done
+        echo "  verdict: ${verdict} — ${verdict_detail}"
+        echo ""
+
+        # ─── Step summary (audit-report format) ────────────────────
         {
-          echo "## README header check"
+          echo "# Blackout Secure README Header Audit"
+          echo ""
+          echo "**Provided by [Blackout Secure](https://blackoutsecure.app)**"
+          echo ""
+          echo "## Summary"
           echo ""
           echo "**Profile:** \`${profile}\`  "
           echo "**README:** \`${readme}\`"
           echo ""
-          if [[ ${#errors[@]} -eq 0 && ${#warnings[@]} -eq 0 ]]; then
-            echo "All canonical header elements present."
-          fi
-          if [[ ${#errors[@]} -gt 0 ]]; then
-            echo "### Errors"
-            for e in "${errors[@]}"; do
-              echo "- ${e}"
+          echo "**Verdict:** ${verdict}"
+          echo ""
+          echo "${verdict_detail}"
+          echo ""
+          echo "**Totals:** ${passes} pass · ${warns} warning · ${fails} high"
+          echo ""
+          echo "| Severity | Count | Meaning |"
+          echo "| -------- | ----- | ------- |"
+          echo "| Pass | ${passes} | Header element matches the canonical pattern. |"
+          echo "| Warning | ${warns} | Cosmetic drift; review recommended but not blocking by itself. |"
+          echo "| High | ${fails} | Required header element is missing or incorrect. |"
+          echo ""
+          echo "## Recommended Actions"
+          echo ""
+          for action in "${actions[@]}"; do
+            echo "- ${action}"
+          done
+          echo ""
+          echo "## Detailed Findings"
+          echo ""
+          for prefix in RH00 RH01 RH02 RH03; do
+            rows=()
+            for i in "${!FIND_RULE[@]}"; do
+              if [[ "${FIND_RULE[$i]:0:4}" == "$prefix" ]]; then
+                rows+=("$i")
+              fi
+            done
+            [[ ${#rows[@]} -eq 0 ]] && continue
+            case "$prefix" in
+              RH00) header="Shared badge";      blurb="Present in every generated README regardless of profile" ;;
+              RH01) header="Marketplace header"; blurb="Canonical BlackOut Secure Marketplace Action header" ;;
+              RH02) header="Docker header";      blurb="Canonical BlackOut Secure Docker Hub header" ;;
+              RH03) header="Generic header";     blurb="Minimum heading requirement for repos with no publishing surface" ;;
+            esac
+            echo "### ${header}"
+            echo "_${blurb}_"
+            echo ""
+            echo "| Rule | Severity | Control | Evidence | Recommended Remediation |"
+            echo "| ---- | -------- | ------- | -------- | ------------------------ |"
+            for i in "${rows[@]}"; do
+              sev_label="$(severity_label "${FIND_SEV[$i]}")"
+              echo "| \`${FIND_RULE[$i]}\` | ${sev_label} | ${FIND_CONTROL[$i]} | ${FIND_EVIDENCE[$i]} | ${FIND_REMEDIATION[$i]} |"
             done
             echo ""
-          fi
-          if [[ ${#warnings[@]} -gt 0 ]]; then
-            echo "### Warnings"
-            for w in "${warnings[@]}"; do
-              echo "- ${w}"
-            done
-            echo ""
-          fi
+          done
+          echo "---"
+          echo ""
+          echo "_This report was generated by the Blackout Secure README header check, part of \`bos-universal-security.yml\`._"
         } >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-        for e in "${errors[@]:-}"; do
-          [[ -z "$e" ]] && continue
-          echo "::error title=README header check,file=${readme}::${e}"
-        done
-        for w in "${warnings[@]:-}"; do
-          [[ -z "$w" ]] && continue
-          echo "::warning title=README header check,file=${readme}::${w}"
+        # ─── Workflow annotations ───────────────────────────────────
+        for i in "${!FIND_RULE[@]}"; do
+          case "${FIND_SEV[$i]}" in
+            fail)
+              echo "::error title=README header check,file=${readme}::${FIND_CONTROL[$i]}: ${FIND_EVIDENCE[$i]} — ${FIND_REMEDIATION[$i]}"
+              ;;
+            warn)
+              echo "::warning title=README header check,file=${readme}::${FIND_CONTROL[$i]}: ${FIND_EVIDENCE[$i]} — ${FIND_REMEDIATION[$i]}"
+              ;;
+          esac
         done
 
-        if [[ ${#errors[@]} -gt 0 ]]; then
+        {
+          echo "outcome=${outcome}"
+          echo "fail_count=${fails}"
+          echo "warn_count=${warns}"
+          echo "pass_count=${passes}"
+        } >>"${GITHUB_OUTPUT:-/dev/null}"
+
+        if (( fails > 0 )); then
           exit 1
         fi
-        if [[ "${FAIL_ON_WARNING}" == "true" && ${#warnings[@]} -gt 0 ]]; then
+        if [[ "${FAIL_ON_WARNING}" == "true" && "${warns}" -gt 0 ]]; then
           exit 1
         fi

@@ -319,6 +319,17 @@ def main() -> None:
     assert "enable_baseline:" not in gate_workflow
     assert "needs.resolve-config.outputs.gate" in gate_workflow
     assert "actions/shared/universal-config@main" in gate_workflow
+    assert "code_scan_fail_on:" in gate_workflow
+    assert "code_scan_http_timeout:" in gate_workflow
+    assert (
+        "fail_on: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_fail_on }}"
+        in gate_workflow
+    )
+    assert (
+        "http_timeout: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_http_timeout }}"
+        in gate_workflow
+    )
+    assert "github_token: ${{ secrets.scanning_pat || secrets.GITHUB_TOKEN }}" in gate_workflow
 
     readme = (ROOT / "README.md").read_text()
     readme_header_action = (
@@ -327,8 +338,13 @@ def main() -> None:
     assert "enable_baseline" not in readme
     assert "## Universal sync" in readme
     assert "never traverses the release" in readme
+    assert "### Elevated posture scanning (`SCANNING_PAT`)" in readme
+    assert "security_scan.use_advanced_pat" in readme
     assert "bos-launchpad-release.yml" not in readme_header_action
     assert "bos-universal-launchpad-kicker.yml" in readme_header_action
+    assert "# Blackout Secure README Header Audit" in readme_header_action
+    assert "outcome=${outcome}" in readme_header_action
+    assert "RH001" in readme_header_action and "RH030" in readme_header_action
 
     assert set(sync.SERVICE_FILES["org_defaults"]) == {
         "CODE_OF_CONDUCT.md",
@@ -598,6 +614,7 @@ def main() -> None:
             "devops ci-cd workflow-automation"
         ),
     }
+    assert hub_config["security_scan"] == {"use_advanced_pat": True}
     assert hub_config["sync_files"]["services"] == [
         "common",
         "lf_line_endings",
