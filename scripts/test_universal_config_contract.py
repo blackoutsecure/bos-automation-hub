@@ -468,14 +468,11 @@ def main() -> None:
     }
     assert "security_scan" not in hub_config
     assert global_sync_config["managed_file_sync"]["services"] == [
-        "common",
-        "lf_line_endings",
-        "markdownlint",
         "dotfiles",
         "dependabot_actions",
         "shellcheck",
     ]
-    assert global_sync_config["managed_file_sync"]["use_marketplace_config"] is True
+    assert "use_marketplace_config" not in global_sync_config["managed_file_sync"]
     assert global_sync_config["managed_file_sync"]["variables"] == {
         "org_name": "Blackout Secure",
         "support_email": "engineering@blackoutsecure.com",

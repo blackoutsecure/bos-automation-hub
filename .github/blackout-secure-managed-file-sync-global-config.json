@@ -1,11 +1,7 @@
 {
   "managed_file_sync": {
     "description": "Org/hub-level defaults for repos using bos-managed-file-sync-action. Merged as tier 1 (after marketplace tier 0). Repo configs override these.",
-    "use_marketplace_config": true,
     "services": [
-      "common",
-      "lf_line_endings",
-      "markdownlint",
       "dotfiles",
       "dependabot_actions",
       "shellcheck"

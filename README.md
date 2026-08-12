@@ -241,12 +241,7 @@ configuration can enable only the required stages:
     }
   },
   "managed_file_sync": {
-    "services": [
-      "common",
-      "lf_line_endings",
-      "dependabot_actions",
-      "dotfiles"
-    ]
+    "services": ["dotfiles"]
   }
 }
 ```
@@ -305,7 +300,7 @@ For example, the sample above can equivalently be written grouped:
     "allowlist_paths": ["action.yml", "README.md", "LICENSE"]
   },
   "managed_file_sync": {
-    "services": ["common", "lf_line_endings", "dependabot_actions"]
+    "services": ["prettier"]
   },
   "general": {
     "action_test": { "python_versions": ["3.11", "3.12"] }
@@ -322,7 +317,8 @@ The published action reads the `managed_file_sync` block from
 [`.github/bos-universal-config.json`](.github/bos-universal-config.json), resolves its catalog,
 and reconciles the working tree. Canonical hub templates live under
 [`managed-files/`](managed-files/); this repository no longer contains a local
-sync engine or service registry.
+sync engine or service registry. Marketplace services are inherited automatically;
+global and repo configs should list only additional services or overrides.
 
 Service ownership modes:
 
