@@ -288,6 +288,7 @@ def main() -> None:
     assert "parse-config:" not in managed_sync_caller
     assert "bos-universal-config.json" in managed_sync_caller
     assert "bos-managed-files.yaml" not in managed_sync_caller
+    assert "workflows: write" not in managed_sync_caller
     assert ".github/workflows/bos-universal-sync-kicker.yml" not in managed_sync_caller
     assert sync.parse_services("bos_launchpad bos_universal_sync") == [
         "bos_launchpad",
@@ -612,6 +613,7 @@ def main() -> None:
     assert "actions/shared/universal-config@main" in sync_backend
     assert "actions/sync-managed-files@main" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
+    assert "workflows: write" not in sync_backend
     assert managed_sync_caller.count("bos-universal-sync.yml@main") == 1
     assert "parse-config:" not in managed_sync_caller
 
