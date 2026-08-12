@@ -27,6 +27,7 @@ run-name: >-
 
 permissions:
   contents: read
+  workflows: write
 
 jobs:
   resolve-target:
