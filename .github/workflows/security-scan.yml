@@ -165,7 +165,7 @@ name: Security Scan (reusable)
         default: ''
       use_advanced_pat:
         description: >-
-          When `true` AND the caller forwards a non-empty `scanning_pat`
+          When `true` AND the caller forwards a non-empty `SCANNING_PAT`
           secret, pass that PAT to the kit composite as `github_token`.
           Enables the kit's advanced posture probes (PS002 secret-scanning
           posture, PS003 Dependabot posture) which require `repo` + admin
@@ -184,7 +184,7 @@ name: Security Scan (reusable)
         type: string
         default: '20'
     secrets:
-      scanning_pat:
+      SCANNING_PAT:
         description: >-
           PAT with `repo` + admin scope, used by the kit composite for
           advanced posture probes (PS002/PS003). Optional. Ignored
@@ -237,7 +237,7 @@ jobs:
         name: Resolve language matrix
         env:
           INPUT_LANGUAGES: ${{ inputs.codeql_languages }}
-          GH_TOKEN: ${{ (inputs.use_advanced_pat && secrets.scanning_pat != '') && secrets.scanning_pat || github.token }}
+          GH_TOKEN: ${{ (inputs.use_advanced_pat && secrets.SCANNING_PAT != '') && secrets.SCANNING_PAT || github.token }}
           REPO: ${{ github.repository }}
         shell: bash
         run: |
@@ -337,7 +337,7 @@ jobs:
         name: Run BOS Code Scanning Kit
         uses: blackoutsecure/bos-code-scanning-kit@37ee8d5cf143be59b02dd9fcbb3070b174dc22e3 # v1
         with:
-          github_token: ${{ (inputs.use_advanced_pat && secrets.scanning_pat != '') && secrets.scanning_pat || github.token }}
+          github_token: ${{ (inputs.use_advanced_pat && secrets.SCANNING_PAT != '') && secrets.SCANNING_PAT || github.token }}
           enable_posture: ${{ inputs.enable_posture }}
           enable_scanners: ${{ inputs.enable_scanners }}
           enable_upload: ${{ inputs.enable_upload }}

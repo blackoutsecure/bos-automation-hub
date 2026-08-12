@@ -944,7 +944,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       security_scan_use_advanced_pat:
         description: >-
           Forwarded to the kit composite as `use_advanced_pat`. When `true`
-          AND `secrets.scanning_pat` is non-empty, the elevated posture
+          AND `secrets.SCANNING_PAT` is non-empty, the elevated posture
           probes (PS001 code-scanning default-setup, PS002 secret-scanning
           enablement, PS003 Dependabot alerts) authenticate with the
           forwarded PAT instead of the default `GITHUB_TOKEN` — they
@@ -1114,7 +1114,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           **private** repo outside the caller. See that workflow for scope
           details. Falls back to `GITHUB_TOKEN`.
         required: false
-      scanning_pat:
+      SCANNING_PAT:
         description: >-
           Optional PAT forwarded to the consolidated security-scan stage's
           kit composite for the elevated posture probes PS001/PS002/PS003
@@ -1269,7 +1269,7 @@ jobs:
       # is explicit. Callers forward via `secrets: inherit` at the OUTER
       # `uses:` block, which is what makes `secrets.scanning_pat`
       # resolvable here.
-      scanning_pat: ${{ secrets.scanning_pat }}
+      SCANNING_PAT: ${{ secrets.SCANNING_PAT }}
 
   # ---------------------------------------------------------------------------
   # Stage 1 — detect upstream change (commits tracking file on the default branch).

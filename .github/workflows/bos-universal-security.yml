@@ -468,7 +468,7 @@ jobs:
       - name: Run bos-code-scanning-kit
         uses: blackoutsecure/bos-code-scanning-kit@37ee8d5cf143be59b02dd9fcbb3070b174dc22e3 # v1
         with:
-          github_token: ${{ secrets.scanning_pat || secrets.GITHUB_TOKEN }}
+          github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}
           fail_on: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_fail_on }}
           http_timeout: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_http_timeout }}
           enable_posture: 'true'

@@ -32,10 +32,24 @@ name: Blackout Secure universal sync (reusable)
         type: string
         default: ''
       commit_message:
-        description: Optional commit message override.
+        description: Optional explicit commit message override.
         required: false
         type: string
         default: ''
+      generate_commit_message:
+        description: >-
+          When `true` (default), generate a concise sync commit message via
+          GitHub Models when possible and fall back to `fallback_commit_message`
+          if generation is unavailable. When `false`, skip AI generation and use
+          the explicit `commit_message` or the configured fallback message.
+        required: false
+        type: boolean
+        default: true
+      fallback_commit_message:
+        description: Deterministic commit message used when AI generation is disabled or fails.
+        required: false
+        type: string
+        default: chore: sync managed files from bos-automation-hub
       git_user_name:
         description: Optional Git author name override.
         required: false
@@ -111,6 +125,8 @@ jobs:
           SERVICES: ${{ inputs.services }}
           MODE: ${{ inputs.mode }}
           COMMIT_MESSAGE: ${{ inputs.commit_message }}
+          GENERATE_COMMIT_MESSAGE: ${{ inputs.generate_commit_message }}
+          FALLBACK_COMMIT_MESSAGE: ${{ inputs.fallback_commit_message }}
           GIT_USER_NAME: ${{ inputs.git_user_name }}
           GIT_USER_EMAIL: ${{ inputs.git_user_email }}
           PUSH_RETRIES: ${{ inputs.push_retries }}
@@ -147,7 +163,11 @@ jobs:
               "enabled": bool(services),
               "services": services,
               "mode": text("MODE", "mode"),
+              "generate_commit_message": (
+                  os.environ.get("GENERATE_COMMIT_MESSAGE", "true").strip().lower() not in {"false", "0"}
+              ),
               "commit_message": text("COMMIT_MESSAGE", "commit_message"),
+              "fallback_commit_message": text("FALLBACK_COMMIT_MESSAGE", "fallback_commit_message"),
               "git_user_name": text("GIT_USER_NAME", "git_user_name"),
               "git_user_email": text("GIT_USER_EMAIL", "git_user_email"),
               "push_retries": number("PUSH_RETRIES", "push_retries"),
@@ -190,6 +210,7 @@ jobs:
     timeout-minutes: ${{ fromJson(needs.resolve-config.outputs.sync).timeout_minutes }}
     permissions:
       contents: write
+      models: read
     outputs:
       changed: ${{ steps.sync.outputs.changed }}
       changed_files: ${{ steps.sync.outputs.changed_files }}
@@ -208,6 +229,84 @@ jobs:
           services: ${{ join(fromJson(needs.resolve-config.outputs.sync).services, ' ') }}
           fail_on_drift: ${{ fromJson(needs.resolve-config.outputs.sync).mode == 'check' }}
 
+      - name: Resolve commit message
+        id: message
+        if: >-
+          fromJson(needs.resolve-config.outputs.sync).mode == 'commit'
+          && steps.sync.outputs.changed == 'true'
+        env:
+          EXPLICIT_COMMIT_MESSAGE: ${{ fromJson(needs.resolve-config.outputs.sync).commit_message }}
+          GENERATE_COMMIT_MESSAGE: ${{ fromJson(needs.resolve-config.outputs.sync).generate_commit_message }}
+          FALLBACK_COMMIT_MESSAGE: ${{ fromJson(needs.resolve-config.outputs.sync).fallback_commit_message }}
+          CHANGED_FILES: ${{ steps.sync.outputs.changed_files }}
+          MODELS_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          final_message="${FALLBACK_COMMIT_MESSAGE}"
+          if [ -n "${EXPLICIT_COMMIT_MESSAGE}" ]; then
+            final_message="${EXPLICIT_COMMIT_MESSAGE}"
+          elif [ "${GENERATE_COMMIT_MESSAGE}" = "true" ]; then
+            python3 - <<'PY'
+import json
+import os
+import subprocess
+import sys
+
+changed_files = os.environ.get('CHANGED_FILES', '').strip()
+files_text = changed_files.replace('\n', ' ') if changed_files else 'managed files'
+model = 'openai/gpt-4o-mini'
+prompt = (
+    'You are a GitHub automation maintainer. Write a single-line conventional commit message '
+    'for a managed-files sync job. Keep it concise, under 72 characters, and include the main intent. '
+    'Do not use markdown, quotes, or a trailing period.\n\nChanged files:\n'
+    f'{files_text}'
+)
+payload = json.dumps({
+    'model': model,
+    'temperature': 0.2,
+    'messages': [
+        {'role': 'system', 'content': 'Write concise conventional commit messages only.'},
+        {'role': 'user', 'content': prompt},
+    ],
+}, separators=(',', ':'))
+
+proc = subprocess.run([
+    'curl', '-sS',
+    '-H', 'Authorization: Bearer ' + os.environ.get('MODELS_TOKEN', ''),
+    '-H', 'Accept: application/vnd.github+json',
+    '-H', 'Content-Type: application/json',
+    '-H', 'X-GitHub-Api-Version: 2022-11-28',
+    '-d', payload,
+    'https://models.github.ai/inference/chat/completions',
+], capture_output=True, text=True)
+if proc.returncode != 0:
+    print(f'::warning::sync: AI commit generation request failed; using fallback message', file=sys.stderr)
+    sys.exit(0)
+try:
+    body = json.loads(proc.stdout or '{}')
+    content = body.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+    if content:
+        cleaned = content.splitlines()[0].strip().strip('"\'')
+        if cleaned:
+            print(f"resolved_commit_message={cleaned}")
+            sys.stdout.flush()
+            raise SystemExit(0)
+except Exception:
+    pass
+print('::warning::sync: AI commit generation returned no usable content; using fallback message', file=sys.stderr)
+PY
+            if [ -f "${GITHUB_OUTPUT}" ]; then
+              resolved=$(grep '^resolved_commit_message=' "${GITHUB_OUTPUT}" | head -n 1 | cut -d= -f2- || true)
+              if [ -n "${resolved}" ]; then
+                final_message="${resolved}"
+              fi
+            fi
+          fi
+
+          printf 'commit_message=%s\n' "${final_message}" >> "${GITHUB_OUTPUT}"
+
       - name: Commit and push
         id: commit
         if: >-
@@ -216,7 +315,7 @@ jobs:
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/commit-and-push@main
         with:
           files: ${{ steps.sync.outputs.changed_files }}
-          message: ${{ fromJson(needs.resolve-config.outputs.sync).commit_message }}
+          message: ${{ steps.message.outputs.commit_message }}
           git_user_name: ${{ fromJson(needs.resolve-config.outputs.sync).git_user_name }}
           git_user_email: ${{ fromJson(needs.resolve-config.outputs.sync).git_user_email }}
           push_retries: ${{ fromJson(needs.resolve-config.outputs.sync).push_retries }}

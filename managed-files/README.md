@@ -40,7 +40,9 @@ them directly.
 Enable `bos_universal_sync` alongside whichever other managed callers the
 repository needs. GitHub still requires one event-trigger workflow per
 repository; `bos-universal-config.json` controls sync behavior and is the
-only repo-level config used by the sync service.
+only repo-level config used by the sync service. The convenience alias
+`dotfiles` is supported in `sync.services` and expands to the standard
+managed-dotfile bundle defined in the sync registry.
 
 ## Ownership modes
 

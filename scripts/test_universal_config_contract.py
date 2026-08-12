@@ -225,6 +225,22 @@ def main() -> None:
     sync_path = ROOT / ".github/actions/sync-managed-files/sync.py"
     sync_source = sync_path.read_text()
     sync = load_sync_module()
+    dotfile_services = sync.parse_services("dotfiles common")
+    assert set(
+        [
+            "common",
+            "docker",
+            "balena",
+            "python",
+            "node",
+            "lf_line_endings",
+            "wranglerignore",
+            "shellcheckrc",
+            "markdownlint",
+            "prettier",
+        ]
+    ).issubset(set(dotfile_services))
+
     services = sync.parse_services(
         "bos_launchpad bos_universal_security bos_universal_config "
         "bos_universal_marketplace bos_universal_sync"
@@ -329,7 +345,7 @@ def main() -> None:
         "http_timeout: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_http_timeout }}"
         in gate_workflow
     )
-    assert "github_token: ${{ secrets.scanning_pat || secrets.GITHUB_TOKEN }}" in gate_workflow
+    assert "github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}" in gate_workflow
 
     readme = (ROOT / "README.md").read_text()
     readme_header_action = (
@@ -590,21 +606,7 @@ def main() -> None:
     hub_config = cfg_from(
         run_universal_config_raw((ROOT / "bos-universal-config.json").read_text())
     )
-    assert hub_config["gate"] == {
-        "enable_lint": False,
-        "enable_node_lint": False,
-        "node_version": "20",
-        "enable_python_lint": False,
-        "python_version": "3.11",
-        "enable_shell_lint": False,
-        "enable_dependency_review": True,
-        "enable_code_scan": True,
-        "enable_pinned_actions_check": True,
-        "enable_pr_title_check": True,
-        "pr_title_types": "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert",
-        "enable_readme_header_check": True,
-        "readme_header_profile": "generic",
-    }
+    assert hub_config["gate"] == {}
     assert hub_config["repo_metadata"] == {
         "enable": True,
         "homepage": "https://github.com/blackoutsecure/bos-automation-hub",
@@ -614,15 +616,18 @@ def main() -> None:
             "devops ci-cd workflow-automation"
         ),
     }
-    assert hub_config["security_scan"] == {"use_advanced_pat": True}
+    assert "security_scan" not in hub_config
     assert hub_config["sync_files"]["services"] == [
         "common",
         "lf_line_endings",
         "dependabot_actions",
-        "markdownlint",
-        "shellcheckrc",
+        "dotfiles",
         "bos_universal_config",
     ]
+    assert hub_config["sync_files"]["generate_commit_message"] is True
+    assert hub_config["sync_files"]["fallback_commit_message"] == (
+        "chore: sync managed files from bos-automation-hub"
+    )
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" in sync_backend

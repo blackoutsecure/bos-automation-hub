@@ -2006,10 +2006,26 @@ SERVICE_INIT_FILES: Dict[str, Dict[str, str]] = {
     },
 }
 
+_DOTFILES_SERVICE_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "dotfiles": (
+        "common",
+        "docker",
+        "balena",
+        "python",
+        "node",
+        "lf_line_endings",
+        "wranglerignore",
+        "shellcheckrc",
+        "markdownlint",
+        "prettier",
+    ),
+}
+
 KNOWN_SERVICES = (
     list(SERVICE_BLOCKS.keys())
     + list(SERVICE_FILES.keys())
     + list(SERVICE_INIT_FILES.keys())
+    + list(_DOTFILES_SERVICE_ALIASES.keys())
 )
 
 # Cross-registry path conflicts: a single file path may only be claimed
@@ -2148,6 +2164,11 @@ def parse_services(raw: str) -> List[str]:
     blank lines and `#` comment lines (whole-line only, not inline).
     Preserve order; dedupe.
 
+    `dotfiles` is a convenience alias that expands to the default managed
+    dotfile bundle (`common`, `lf_line_endings`, `wranglerignore`,
+    `shellcheckrc`, `markdownlint`, etc.) so callers can opt into dotfile
+    governance without enumerating each underlying service.
+
     Additionally enforces that at most ONE whole-file service AND at
     most ONE init-if-missing service may target a given path per repo,
     AND that no two services listed in `_SEMANTIC_MUTEX_GROUPS` are
@@ -2175,10 +2196,12 @@ def parse_services(raw: str) -> List[str]:
                     f"unknown service '{tok}'. "
                     f"Known: {', '.join(KNOWN_SERVICES)}"
                 )
-            if tok in seen:
-                continue
-            seen.add(tok)
-            result.append(tok)
+            expanded = _DOTFILES_SERVICE_ALIASES.get(tok, (tok,))
+            for svc in expanded:
+                if svc in seen:
+                    continue
+                seen.add(svc)
+                result.append(svc)
     if not result:
         die("input 'services' resolved to zero entries")
 
@@ -2554,11 +2577,23 @@ def sync_files(
     check at import time ensures no path can appear in more than one
     bucket here.
 
+    `dotfiles` is an alias for the standard managed-dotfile bundle. We
+    expand it here, too, so direct callers that bypass
+    `parse_services()` still receive the expected behavior.
+
     Init-if-missing semantics: if the target file already exists, the
     service contributes NO change (before == after). If missing, the
     file is created with the rendered body. The hub never overwrites
     a file once present — that's the whole point of the mode.
     """
+    expanded_services: List[str] = []
+    for svc in services:
+        if svc == "dotfiles":
+            expanded_services.extend(_DOTFILES_SERVICE_ALIASES["dotfiles"])
+        else:
+            expanded_services.append(svc)
+    services = list(dict.fromkeys(expanded_services))
+
     # ------- Per-repo config -------
     # Load `bos-universal-config.json` ONCE per sync run if ANY enabled
     # service is templated (section OR init-if-missing). Values are

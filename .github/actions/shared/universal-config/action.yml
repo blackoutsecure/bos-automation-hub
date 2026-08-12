@@ -293,7 +293,12 @@ runs:
             "enabled": bool(sync_services),
             "services": sync_services,
             "mode": str(sync_raw.get("mode") or "commit"),
-            "commit_message": str(sync_raw.get("commit_message") or "chore: sync managed files from bos-automation-hub"),
+            "generate_commit_message": sync_raw.get("generate_commit_message") is not False,
+            "commit_message": str(sync_raw.get("commit_message") or ""),
+            "fallback_commit_message": str(
+                sync_raw.get("fallback_commit_message")
+                or "chore: sync managed files from bos-automation-hub"
+            ),
             "git_user_name": str(sync_raw.get("git_user_name") or "github-actions[bot]"),
             "git_user_email": str(sync_raw.get("git_user_email") or "41898282+github-actions[bot]@users.noreply.github.com"),
             "push_retries": as_int(sync_raw.get("push_retries"), 3),

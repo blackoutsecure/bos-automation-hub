@@ -328,22 +328,27 @@ Service ownership modes:
 - **Whole-file:** continuously enforces a canonical file.
 - **Init-if-missing:** creates a starter once and leaves later edits alone.
 
-Primary services include:
+### Supported sync services
 
-- repository policy: `common`, `docker`, `balena`, `node`, `python`,
-  `lf_line_endings`;
-- dependency automation: `dependabot_actions`, `dependabot_npm`,
-  `dependabot_pip`;
-- canonical files: `logger`, `shellcheckrc`, `markdownlint`, `prettier`,
-  `wranglerignore`, `humans`;
-- universal callers: `bos_launchpad`, `bos_universal_security`,
-  `bos_universal_marketplace`, `bos_universal_sync`,
-  `bos_universal_action_test`;
-- initialization: `bos_universal_config`, `gha_sync_drift_check`, `license`,
-  `notice_apache2`, `codeowners`;
-- organization repository only: `org_defaults`, gated by
-  `target_repo_role: "org-default-repo"` in the repo-root
-  `bos-universal-config.json`.
+The authoritative list lives in [`sync.py`](.github/actions/sync-managed-files/sync.py). The service names are:
+
+- Section services: `common`, `docker`, `balena`, `node`, `python`,
+  `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
+  `dependabot_pip`, `wranglerignore`
+- Whole-file services: `logger`, `shellcheckrc`, `markdownlint`, `humans`,
+  `prettier`, `bos_launchpad`, `bos_universal_sync`,
+  `bos_universal_security`, `bos_universal_marketplace`,
+  `bos_universal_action_test`, `org_defaults`
+- Init-if-missing services: `gha_sync_drift_check`, `license`,
+  `notice_apache2`, `codeowners`, `bos_universal_config`
+- Convenience alias: `dotfiles` expands to the standard managed-dotfile
+  bundle (`common`, `docker`, `balena`, `python`, `node`, `lf_line_endings`,
+  `wranglerignore`, `shellcheckrc`, `markdownlint`, `prettier`)
+
+This is the full supported set for the sync registry. A repo can enable any
+combination of services that do not conflict on the same file path; the sync
+parser enforces path-level and semantic mutual-exclusion checks before it
+writes anything.
 
 See [`managed-files/README.md`](managed-files/README.md) for template ownership
 and branch policy.
@@ -585,7 +590,7 @@ No consumer wiring is required beyond creating the secret:
 
 - [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)'s
   `code-scan` job always passes
-  `github_token: ${{ secrets.scanning_pat || secrets.GITHUB_TOKEN }}`, and both
+  `github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}`, and both
   managed kickers already forward `secrets.SCANNING_PAT` unconditionally — the
   PAT is used automatically the moment the secret exists, with no config
   change needed.

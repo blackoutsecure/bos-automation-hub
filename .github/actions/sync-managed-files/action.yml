@@ -32,8 +32,11 @@ inputs:
       Newline- or whitespace-separated list of enabled services.
       Section: `common`, `docker`, `balena`, `node`, `python`,
       `lf_line_endings`, `dependabot_actions`, `dependabot_npm`,
-      `dependabot_pip`. Whole-file: `logger`, `prettier`,
-      `bos_launchpad`, `bos_universal_sync`,
+      `dependabot_pip`, plus the convenience alias `dotfiles` (expands
+      to the standard dotfile bundle: `common`, `docker`, `balena`,
+      `python`, `node`, `lf_line_endings`, `wranglerignore`,
+      `shellcheckrc`, `markdownlint`, `prettier`). Whole-file:
+      `logger`, `prettier`, `bos_launchpad`, `bos_universal_sync`,
       `bos_universal_security`, `bos_universal_marketplace`,
       `bos_universal_action_test`,
       `org_defaults` (only for the organization `.github` repository;
