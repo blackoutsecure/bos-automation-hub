@@ -9,7 +9,6 @@ name: Blackout Secure universal sync (reusable)
   push:
     paths:
       - bos-universal-config.json
-      - bos-managed-files.yaml
       - .github/workflows/bos-universal-sync.yml
   workflow_dispatch:
     inputs:

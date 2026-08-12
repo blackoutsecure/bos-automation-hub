@@ -331,7 +331,8 @@ Primary services include:
 - initialization: `bos_universal_config`, `gha_sync_drift_check`, `license`,
   `notice_apache2`, `codeowners`;
 - organization repository only: `org_defaults`, gated by
-  `target_repo_role: org-default-repo` in `bos-managed-files.yaml`.
+  `target_repo_role: "org-default-repo"` in the repo-root
+  `bos-universal-config.json`.
 
 See [`managed-files/README.md`](managed-files/README.md) for template ownership
 and branch policy.

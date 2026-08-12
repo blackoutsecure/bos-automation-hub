@@ -29,7 +29,6 @@ run-name: >-
       - 'scripts/**'
       - '.github/upstream/**'
       - 'bos-universal-config.json'
-      - 'bos-managed-files.yaml'
       - '.github/workflows/bos-universal-launchpad-kicker.yml'
   workflow_dispatch:
     inputs:

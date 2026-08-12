@@ -19,10 +19,10 @@ description: >-
   `license` / `notice_apache2` which are
   committed verbatim so license-detection tools recognize them).
   Templated init services (`license`, `notice_apache2`, `codeowners`)
-  render `{{KEY}}` placeholders from per-repo
-  `bos-managed-files.yaml` at sync time. The `license` service
+  render `{{KEY}}` placeholders from the repo-root
+  `bos-universal-config.json` at sync time. The `license` service
   additionally resolves its canonical text from `_LICENSE_REGISTRY`
-  based on `license_type:` in that config file (apache-2.0 / mit /
+  based on `license_type:` in that JSON config (apache-2.0 / mit /
   bsd-3-clause / isc). Disabled services are skipped entirely —
   existing blocks / files for them are NOT touched.
 
@@ -41,7 +41,7 @@ inputs:
       Init-if-missing: `gha_sync_drift_check`, `bos_universal_config`
       (`bos-universal-config.json`), `license` (multi-license; picks
       from `_LICENSE_REGISTRY` by `license_type:` in
-      `bos-managed-files.yaml`, supports apache-2.0 / mit /
+      `bos-universal-config.json`, supports apache-2.0 / mit /
       bsd-3-clause / isc),
       `notice_apache2` (Apache 2.0 NOTICE; requires `license_type:
       apache-2.0` when used with `license`), `codeowners`
@@ -49,11 +49,11 @@ inputs:
       license/notice/codeowners services render
       `{{COPYRIGHT_HOLDER}}` / `{{COPYRIGHT_YEAR_RANGE}}` /
       `{{MAINTAINERS_TEAM}}` / `{{REPO_NAME}}` / `{{REPO_OWNER}}`
-      placeholders from optional `bos-managed-files.yaml` at the
-      repo root (all keys default to org-canonical values when
-      absent). The `dependabot_*` section services additionally
-      consume an optional `dependabot_target_branch:` knob from
-      the same config file — when set (e.g. to `dev` for
+      placeholders from the repo-root `bos-universal-config.json`
+      (all keys default to org-canonical values when absent). The
+      `dependabot_*` section services additionally consume an optional
+      `dependabot_target_branch:` knob from that JSON config — when
+      set (e.g. to `dev` for
       Marketplace Action repos using the dev/main split), every
       enabled ecosystem block gets a `target-branch:` override so
       Dependabot opens PRs against that branch instead of the
@@ -84,12 +84,20 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Load repository config
+      id: config
+      uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+      with:
+        allow_missing: 'true'
+        config_path: bos-universal-config.json
+
     - id: sync
       shell: bash
       env:
         SERVICES: ${{ inputs.services }}
         DRY_RUN: ${{ inputs.dry_run }}
         FAIL_ON_DRIFT: ${{ inputs.fail_on_drift }}
+        CONFIG_JSON: ${{ steps.config.outputs.cfg }}
       run: |
         set -euo pipefail
         die() {

@@ -276,7 +276,7 @@ def main() -> None:
     assert managed_sync_caller.count("bos-universal-sync.yml@main") == 1
     assert "parse-config:" not in managed_sync_caller
     assert "bos-universal-config.json" in managed_sync_caller
-    assert "bos-managed-files.yaml" in managed_sync_caller
+    assert "bos-managed-files.yaml" not in managed_sync_caller
     assert ".github/workflows/bos-universal-sync-kicker.yml" not in managed_sync_caller
     assert sync.parse_services("bos_launchpad bos_universal_sync") == [
         "bos_launchpad",
@@ -344,8 +344,8 @@ def main() -> None:
                 assert exc.code == 1
             else:
                 raise AssertionError("org_defaults must reject consumer repositories")
-        Path(temp_dir, "bos-managed-files.yaml").write_text(
-            "target_repo_role: org-default-repo\n"
+        Path(temp_dir, "bos-universal-config.json").write_text(
+            '{"general":{"target_repo_role":"org-default-repo"}}\n'
         )
         changes, _ = sync.sync_files(["org_defaults"], temp_dir)
         assert {change.path for change in changes if change.changed} == set(
