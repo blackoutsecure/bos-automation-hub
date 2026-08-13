@@ -82,9 +82,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Checkout canonical hub workflow templates
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}
+          path: sync-files
+          fetch-depth: 1
+          persist-credentials: false
+
       - name: Sync configured services
         id: sync
-        uses: blackoutsecure/bos-managed-file-sync-action@v1.0.4
+        uses: blackoutsecure/bos-managed-file-sync-action@v1.0.5
         with:
           config_path: .github/bos-universal-config.json
           global_config_json: >-
@@ -92,11 +101,24 @@ jobs:
               "managed_file_sync": {
                 "services": [
                   "dotfiles",
-                  "shellcheck"
+                  "shellcheck",
+                  "bos_universal_action_test_kicker",
+                  "bos_universal_launchpad_kicker",
+                  "bos_universal_marketplace_kicker",
+                  "bos_universal_security_kicker",
+                  "bos_universal_sync_kicker"
                 ],
                 "exclude_services": [
                   "dependabot_actions"
                 ],
+                "managed_files_path": "sync-files/sync-files/workflows",
+                "service_definitions": {
+                  "bos_universal_action_test_kicker": {"mode": "update", "files": [{"path": ".github/workflows/bos-universal-action-test-kicker.yml", "content_file": "bos-universal-action-test-kicker.yml"}]},
+                  "bos_universal_launchpad_kicker": {"mode": "update", "files": [{"path": ".github/workflows/bos-universal-launchpad-kicker.yml", "content_file": "bos-universal-launchpad-kicker.yml"}]},
+                  "bos_universal_marketplace_kicker": {"mode": "update", "files": [{"path": ".github/workflows/bos-universal-marketplace-kicker.yml", "content_file": "bos-universal-marketplace-kicker.yml"}]},
+                  "bos_universal_security_kicker": {"mode": "update", "files": [{"path": ".github/workflows/bos-universal-security-kicker.yml", "content_file": "bos-universal-security-kicker.yml"}]},
+                  "bos_universal_sync_kicker": {"mode": "update", "files": [{"path": ".github/workflows/bos-universal-sync-kicker.yml", "content_file": "bos-universal-sync-kicker.yml"}]}
+                },
                 "variables": {
                   "org_name": "Blackout Secure",
                   "support_email": "engineering@blackoutsecure.com",

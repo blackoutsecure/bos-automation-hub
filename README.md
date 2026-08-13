@@ -27,7 +27,7 @@ managed templates, `LICENSE`, this README, and every workflow declaring
 
 [`bos-universal-launchpad.yml`](.github/workflows/bos-universal-launchpad.yml)
 is the release and deployment orchestrator. Its managed consumer caller is
-[`bos-universal-launchpad-kicker.yml`](managed-files/workflows/bos-universal-launchpad-kicker.yml).
+[`bos-universal-launchpad-kicker.yml`](sync-files/workflows/bos-universal-launchpad-kicker.yml).
 
 The launchpad can compose:
 
@@ -47,7 +47,7 @@ workflow files are not edited in consumer repositories.
 [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml) is
 the reusable universal PR and merge-queue security/policy workflow. Its
 managed caller is
-[`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml).
+[`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml).
 
 The required check is `security (dev) / Security summary` or
 `security (main) / Security summary`, depending on which branch a run
@@ -68,13 +68,13 @@ The hub itself runs
 directly. Use **Actions → Blackout Secure universal security (reusable) → Run
 workflow** on `dev` for a manual scan; it loads the current `security` section
 from `.github/bos-universal-config.json`, just like the sync backend. The managed
-[`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml)
+[`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml)
 is retained for consumer repositories, but the hub does not install a local
 kicker for this workflow.
 
 Marketplace-specific validation is intentionally excluded. Marketplace Action
 repositories add the managed
-[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml),
+[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml),
 which owns Marketplace validation, stable-branch guarding, promotion, and
 opt-in post-release repository metadata synchronization.
 
@@ -85,7 +85,7 @@ wrapper around the published
 [`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
 It handles this hub's local schedule, config-change, and manual events. Its
 consumer front door is
-[`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml).
+[`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml).
 It runs independently on config changes, schedule, or manual dispatch and
 never traverses the release, security, or Marketplace workflows.
 For this repository, sync defaults are passed inline through the wrappers'
@@ -96,7 +96,7 @@ For this repository, sync defaults are passed inline through the wrappers'
 [`bos-universal-action-test.yml`](.github/workflows/bos-universal-action-test.yml)
 is a reusable pytest matrix plus an optional live-upstream smoke test for
 Actions repositories with a Python implementation. Its managed caller is
-[`bos-universal-action-test-kicker.yml`](managed-files/workflows/bos-universal-action-test-kicker.yml).
+[`bos-universal-action-test-kicker.yml`](sync-files/workflows/bos-universal-action-test-kicker.yml).
 
 It complements `bos-universal-security.yml`'s single-OS/Python `python-lint`
 job (Ruff + pytest, part of the PR security gate) rather than replacing it:
@@ -154,7 +154,7 @@ Release entry points are already owned by the workflow that has enough context
 and authority to start them: Universal Launchpad calls
 [`release.yml`](.github/workflows/release.yml) for artifact publication,
 Marketplace repos use
-[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml)
+[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml)
 for operator-driven promotion, and this hub uses
 [`release-hub.yml`](.github/workflows/release-hub.yml) for its own runtime
 promotion. A generic release kicker would either duplicate those front doors
@@ -172,7 +172,7 @@ version tag).
 
 For a Marketplace Action consumer, the production path is a manual
 `operation: release` dispatch of the managed
-[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml)
+[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml)
 from the source branch. It validates trusted configuration, calls
 [`release-promote.yml`](.github/workflows/release-promote.yml) to promote the
 allowlist to the stable branch, publishes the GitHub Release, and optionally
@@ -315,7 +315,7 @@ event and commit wrapper around the published
 The published action reads the `managed_file_sync` block from
 [`.github/bos-universal-config.json`](.github/bos-universal-config.json), resolves its catalog,
 and reconciles the working tree. Canonical hub templates live under
-[`managed-files/`](managed-files/); this repository no longer contains a local
+[`sync-files/`](sync-files/); this repository no longer contains a local
 sync engine or service registry. Marketplace services are inherited automatically;
 global and repo configs should list only additional services or overrides.
 
@@ -334,7 +334,7 @@ Repos can extend or override the catalog with `service_definitions` or a
 separate catalog file; the published action validates service conflicts before
 writing anything.
 
-See [`managed-files/README.md`](managed-files/README.md) for template ownership
+See [`sync-files/README.md`](sync-files/README.md) for template ownership
 and branch policy.
 
 ### Minimum sync workflow policy
@@ -448,10 +448,10 @@ granting repository-administration authority.
 ## Workflow API
 
 Consumer repositories normally need only the managed
-[`bos-universal-launchpad-kicker.yml`](managed-files/workflows/bos-universal-launchpad-kicker.yml),
-[`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml),
-[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml),
-and [`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml)
+[`bos-universal-launchpad-kicker.yml`](sync-files/workflows/bos-universal-launchpad-kicker.yml),
+[`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml),
+[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml),
+and [`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml)
 callers. They read `.github/bos-universal-config.json` and invoke independent hub
 entry points:
 

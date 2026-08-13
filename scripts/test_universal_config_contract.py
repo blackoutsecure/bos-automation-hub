@@ -200,7 +200,7 @@ def main() -> None:
 
     workflow = (ROOT / ".github/workflows/bos-universal-launchpad.yml").read_text()
     kicker = (
-        ROOT / "managed-files/workflows/bos-universal-launchpad-kicker.yml"
+        ROOT / "sync-files/workflows/bos-universal-launchpad-kicker.yml"
     ).read_text()
 
     declared = workflow_input_names(workflow)
@@ -225,7 +225,7 @@ def main() -> None:
 
     gate_workflow = (ROOT / ".github/workflows/bos-universal-security.yml").read_text()
     security_kicker = (
-        ROOT / "managed-files/workflows/bos-universal-security-kicker.yml"
+        ROOT / "sync-files/workflows/bos-universal-security-kicker.yml"
     ).read_text()
     gate_declared = workflow_input_names(gate_workflow)
     security_job = security_kicker.split(
@@ -275,16 +275,16 @@ def main() -> None:
     assert "RH001" in readme_header_action and "RH030" in readme_header_action
 
     marketplace_kicker = (
-        ROOT / "managed-files/workflows/bos-universal-marketplace-kicker.yml"
+        ROOT / "sync-files/workflows/bos-universal-marketplace-kicker.yml"
     ).read_text()
     for managed_template in (
-        ROOT / "managed-files/workflows"
+        ROOT / "sync-files/workflows"
     ).glob("*.yml"):
         assert "\non:\n" not in managed_template.read_text()
         assert "\n\"on\":\n" in managed_template.read_text()
     assert not (ROOT / ".github/workflows/bos-launchpad-marketplace.yml").exists()
     assert not (
-        ROOT / "managed-files/workflows/bos-launchpad-marketplace.yml"
+        ROOT / "sync-files/workflows/bos-launchpad-marketplace.yml"
     ).exists()
     assert marketplace_kicker.count("bos-universal-marketplace.yml@main") == 1
     assert marketplace_kicker.count("marketplace-repo-guard.yml@main") == 1
@@ -478,23 +478,27 @@ def main() -> None:
     assert '"shellcheck"' in sync_backend
     assert '"exclude_services": [' in sync_backend
     assert '"dependabot_actions"' in sync_backend
+    assert '"bos_universal_action_test_kicker"' in sync_backend
+    assert '"mode": "update"' in sync_backend
+    assert '"managed_files_path": "sync-files/sync-files/workflows"' in sync_backend
+    assert "ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}" in sync_backend
     assert '"support_email": "engineering@blackoutsecure.com"' in sync_backend
     assert "global_config_path:" not in sync_backend
     assert "config_path: .github/bos-universal-config.json" in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
-    assert "bos-managed-file-sync-action@v1.0.4" in sync_backend
+    assert "bos-managed-file-sync-action@v1.0.5" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert "workflows: write" not in sync_backend
     hub_sync_kicker = (
         ROOT / ".github/workflows/bos-universal-sync-kicker.yml"
     ).read_text()
-    assert "bos-managed-file-sync-action@v1.0.4" in hub_sync_kicker
+    assert "bos-managed-file-sync-action@v1.0.5" in hub_sync_kicker
     assert 'global_config_json: >-' in hub_sync_kicker
     assert "config_path: .github/bos-universal-config.json" in hub_sync_kicker
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in hub_sync_kicker
     assert "actions/shared/commit-and-push@main" in hub_sync_kicker
     managed_sync_caller = (
-        ROOT / "managed-files/workflows/bos-universal-sync-kicker.yml"
+        ROOT / "sync-files/workflows/bos-universal-sync-kicker.yml"
     ).read_text()
     assert 'global_config_json: >-' in managed_sync_caller
     assert '"services": [' in managed_sync_caller
@@ -502,16 +506,20 @@ def main() -> None:
     assert '"shellcheck"' in managed_sync_caller
     assert '"exclude_services": [' in managed_sync_caller
     assert '"dependabot_actions"' in managed_sync_caller
+    assert '"bos_universal_action_test_kicker"' in managed_sync_caller
+    assert '"mode": "update"' in managed_sync_caller
+    assert '"managed_files_path": "sync-files/sync-files/workflows"' in managed_sync_caller
+    assert "ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}" in managed_sync_caller
     assert '"support_email": "engineering@blackoutsecure.com"' in managed_sync_caller
     assert "global_config_path:" not in managed_sync_caller
     assert "config_path: .github/bos-universal-config.json" in managed_sync_caller
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in managed_sync_caller
-    assert "bos-managed-file-sync-action@v1.0.4" in managed_sync_caller
+    assert "bos-managed-file-sync-action@v1.0.5" in managed_sync_caller
     assert "bos-universal-sync.yml@" not in managed_sync_caller
     assert "resolve-target:" not in managed_sync_caller
 
     assert_markdown_links_exist(ROOT / "README.md")
-    assert_markdown_links_exist(ROOT / "managed-files/README.md")
+    assert_markdown_links_exist(ROOT / "sync-files/README.md")
 
     print(
         f"repository contract valid: {len(declared)} launchpad inputs, "
