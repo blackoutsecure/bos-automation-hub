@@ -9,7 +9,8 @@
       "bos_universal_launchpad_kicker",
       "bos_universal_marketplace_kicker",
       "bos_universal_security_kicker",
-      "bos_universal_sync_kicker"
+      "bos_universal_sync_kicker",
+      "shellcheck"
     ],
     "service_definitions": {
       "bos_universal_action_test_kicker": {

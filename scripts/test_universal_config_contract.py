@@ -478,6 +478,7 @@ def main() -> None:
         "bos_universal_marketplace_kicker",
         "bos_universal_security_kicker",
         "bos_universal_sync_kicker",
+        "shellcheck",
     }
     assert all(
         definition["mode"] == "update"
