@@ -487,10 +487,6 @@ def main() -> None:
     assert "use_global_config: 'true'" in sync_backend
     assert "config_path: .github/bos-universal-config.json" in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
-    assert "value: ${{ jobs.sync.outputs.changed_count }}" in sync_backend
-    assert "changed_count: ${{ steps.sync.outputs.changed_count }}" in sync_backend
-    assert "value: ${{ jobs.sync.outputs.changed_files_json }}" in sync_backend
-    assert "changed_files_json: ${{ steps.sync.outputs.changed_files_json }}" in sync_backend
     assert "bos-managed-file-sync-action@v1" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert "workflows: write" not in sync_backend
@@ -500,7 +496,6 @@ def main() -> None:
     assert ".github/blackout-secure-managed-file-sync-global-config.json" in managed_sync_caller
     assert "use_global_config: 'true'" in managed_sync_caller
     assert "config_path: .github/bos-universal-config.json" in managed_sync_caller
-    assert "group: bos-universal-sync-${{ github.repository }}-${{ github.ref }}" in managed_sync_caller
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in managed_sync_caller
     assert "bos-managed-file-sync-action@v1" in managed_sync_caller
     assert "bos-universal-sync.yml@" not in managed_sync_caller

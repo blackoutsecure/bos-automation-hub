@@ -30,10 +30,6 @@ run-name: >-
 permissions:
   contents: read
 
-concurrency:
-  group: bos-universal-sync-${{ github.repository }}-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   sync:
     name: Sync managed files (${{ inputs.mode || 'commit' }})

@@ -48,15 +48,9 @@ name: Blackout Secure universal sync (reusable)
       changed:
         description: '`true` when files changed or would change.'
         value: ${{ jobs.sync.outputs.changed }}
-      changed_count:
-        description: Number of changed files.
-        value: ${{ jobs.sync.outputs.changed_count }}
       changed_files:
         description: Newline-separated changed file list.
         value: ${{ jobs.sync.outputs.changed_files }}
-      changed_files_json:
-        description: JSON array of changed file paths.
-        value: ${{ jobs.sync.outputs.changed_files_json }}
       commit_sha:
         description: Created commit SHA, when applicable.
         value: ${{ jobs.sync.outputs.commit_sha }}
@@ -80,9 +74,7 @@ jobs:
       contents: write
     outputs:
       changed: ${{ steps.sync.outputs.changed }}
-      changed_count: ${{ steps.sync.outputs.changed_count }}
       changed_files: ${{ steps.sync.outputs.changed_files }}
-      changed_files_json: ${{ steps.sync.outputs.changed_files_json }}
       commit_sha: ${{ steps.commit.outputs.commit_sha }}
     steps:
       - name: Checkout
