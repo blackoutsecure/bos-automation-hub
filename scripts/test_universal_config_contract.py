@@ -491,7 +491,8 @@ def main() -> None:
         (ROOT / ".github/blackout-secure-managed-file-sync-global-config.json").read_text()
     )
     sync_policy = global_sync_config["managed_file_sync"]
-    assert sync_policy["exclude_services"] == ["dependabot_actions"]
+    assert "exclude_services" not in sync_policy
+    assert "exclude_sevices" not in sync_policy
     assert sync_policy["take_over_managed_files"] is True
     # The hub is checked out into `sync-files/`, and its canonical template
     # directory is itself `sync-files/workflows/`.
