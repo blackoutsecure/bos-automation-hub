@@ -1,0 +1,67 @@
+{
+  "managed_file_sync": {
+    "exclude_services": [
+      "dependabot_actions"
+    ],
+    "managed_files_path": "sync-files/sync-files/workflows",
+    "services": [
+      "bos_universal_action_test_kicker",
+      "bos_universal_launchpad_kicker",
+      "bos_universal_marketplace_kicker",
+      "bos_universal_security_kicker",
+      "bos_universal_sync_kicker"
+    ],
+    "service_definitions": {
+      "bos_universal_action_test_kicker": {
+        "mode": "update",
+        "files": [
+          {
+            "path": ".github/workflows/bos-universal-action-test-kicker.yml",
+            "content_file": "bos-universal-action-test-kicker.yml"
+          }
+        ]
+      },
+      "bos_universal_launchpad_kicker": {
+        "mode": "update",
+        "files": [
+          {
+            "path": ".github/workflows/bos-universal-launchpad-kicker.yml",
+            "content_file": "bos-universal-launchpad-kicker.yml"
+          }
+        ]
+      },
+      "bos_universal_marketplace_kicker": {
+        "mode": "update",
+        "files": [
+          {
+            "path": ".github/workflows/bos-universal-marketplace-kicker.yml",
+            "content_file": "bos-universal-marketplace-kicker.yml"
+          }
+        ]
+      },
+      "bos_universal_security_kicker": {
+        "mode": "update",
+        "files": [
+          {
+            "path": ".github/workflows/bos-universal-security-kicker.yml",
+            "content_file": "bos-universal-security-kicker.yml"
+          }
+        ]
+      },
+      "bos_universal_sync_kicker": {
+        "mode": "update",
+        "files": [
+          {
+            "path": ".github/workflows/bos-universal-sync-kicker.yml",
+            "content_file": "bos-universal-sync-kicker.yml"
+          }
+        ]
+      }
+    },
+    "variables": {
+      "org_name": "Blackout Secure",
+      "support_email": "engineering@blackoutsecure.com",
+      "license": "Apache-2.0"
+    }
+  }
+}

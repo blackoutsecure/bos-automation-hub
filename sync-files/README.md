@@ -34,8 +34,9 @@ review surface for hub-specific release content.
   metadata refreshes.
 - [`bos-universal-sync-kicker.yml`](workflows/bos-universal-sync-kicker.yml)
   is the independent scheduled/manual managed-file caller. It contains only
-  event routing and calls the published managed-file sync action. Repository
-  maintenance never starts the delivery workflow.
+  event routing and ref resolution, then delegates to the promoted hub
+  `bos-universal-sync.yml@dev`/`@main`. Repository maintenance never starts
+  the delivery workflow.
 
 These workflows are whole-file managed. Consumer repositories must not edit
 them directly.

@@ -86,10 +86,16 @@ wrapper around the published
 It handles this hub's local schedule, config-change, and manual events. Its
 consumer front door is
 [`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml).
-It runs independently on config changes, schedule, or manual dispatch and
-never traverses the release, security, or Marketplace workflows.
-For this repository, sync defaults are passed inline through the wrappers'
-`global_config_json` input, so no separate global config file is required.
+The kicker resolves the target hub branch and delegates to
+`bos-universal-sync.yml`, the same pattern used by the launchpad, security, and
+Marketplace kickers. It runs independently on config changes, schedule, or
+manual dispatch and never traverses the release, security, or Marketplace
+workflows. This hub does not install a local copy of the kicker:
+`bos-universal-sync.yml` already self-triggers directly. Sync defaults live in
+[.github/blackout-secure-managed-file-sync-global-config.json](.github/blackout-secure-managed-file-sync-global-config.json),
+a hub-authored file. `bos-universal-sync.yml` checks out this hub alongside
+the consumer repo and passes `global_config_path` at the checked-out copy, so
+the policy stays a real, editable JSON file instead of an inline blob.
 
 ## Universal action test
 
@@ -133,7 +139,7 @@ different trust and permission boundaries:
 | `bos-universal-security.yml` (universal security) | Pull request / merge queue; read-mostly | Lint, tests, dependency review, code scanning, and policy checks before merge. |
 | `bos-universal-marketplace-kicker.yml` | Marketplace PR, trusted-target PR, or manual release/metadata operation | Validate Actions, guard the workflow-free stable branch, promote releases, and refresh the repository About box. |
 | `bos-universal-launchpad.yml` | Push, schedule, or manual caller; publish permissions | Monitor upstreams, run the release-blocking security scan, and coordinate delivery. |
-| `bos-universal-sync-kicker.yml` | Config push, schedule, or manual dispatch; repository contents write | Invoke the published managed-file sync action for configured services. |
+| `bos-universal-sync-kicker.yml` | Config push, schedule, or manual dispatch; repository contents write | Resolve the target hub branch and invoke the reusable sync workflow. |
 | `release.yml` (artifact release) | Called by Universal or another trusted workflow | Publish Docker, Balena, and GitHub Release artifacts for an already-approved version. |
 | `release-promote.yml` (Marketplace promotion) | Operator-driven Marketplace caller | Promote an allowlisted source tree to the workflow-free stable branch and release it. |
 | `release-hub.yml` (hub runtime release) | Hub-only manual workflow | Promote this hub's reusable runtime from the default branch to `main` and tag it. |
