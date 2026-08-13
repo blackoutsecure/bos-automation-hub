@@ -117,6 +117,7 @@ jobs:
         id: config
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
         with:
+          config_path: .github/bos-universal-config.json
           allow_missing: 'false'
 
   pytest:
@@ -195,7 +196,9 @@ jobs:
 
       - id: action-under-test
         uses: ./
-        with: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config }}
+        with:
+          source: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config.source || '' }}
+          package_name: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config.package_name || '' }}
 
       - name: Verify action outputs
         shell: bash

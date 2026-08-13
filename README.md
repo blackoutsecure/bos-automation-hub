@@ -125,8 +125,9 @@ in `.github/bos-universal-config.json`:
 ```
 
 The smoke-test job checks out the calling repo, invokes it as an action
-(`uses: ./`), and asserts its declared `version` output is non-empty; it
-requires an `action.yml` at the repo root. `smoke_trigger` defaults to
+(`uses: ./`) with the configured `source` and `package_name` inputs, and
+asserts its declared `version` output is non-empty; it requires an
+`action.yml` at the repo root. `smoke_trigger` defaults to
 `push-dev` so live-upstream calls don't run on untrusted PR heads.
 
 ## Workflow boundaries

@@ -199,6 +199,11 @@ def main() -> None:
     assert general["upstream"]["repo"] == "owner/flat-wins"
 
     workflow = (ROOT / ".github/workflows/bos-universal-launchpad.yml").read_text()
+    action_test_workflow = (
+        ROOT / ".github/workflows/bos-universal-action-test.yml"
+    ).read_text()
+    assert "source: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config.source || '' }}" in action_test_workflow
+    assert "package_name: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config.package_name || '' }}" in action_test_workflow
     kicker = (
         ROOT / "sync-files/workflows/bos-universal-launchpad-kicker.yml"
     ).read_text()
@@ -209,6 +214,8 @@ def main() -> None:
         "missing": sorted(declared - forwarded),
         "unknown": sorted(forwarded - declared),
     }
+    assert "config_path: .github/bos-universal-config.json" in kicker
+    assert "config_path: .github/bos-universal-config.json" in action_test_workflow
 
     assert "managed-files-guard:" not in kicker
     assert "bos-universal-sync.yml@main" not in workflow
@@ -300,15 +307,26 @@ def main() -> None:
     assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" not in marketplace_kicker
     assert "outputs.cfg" in marketplace_kicker
     assert "`.github/bos-universal-config.json`" in marketplace_kicker
+    assert "config_path: .github/bos-universal-config.json" in marketplace_kicker
     assert "pull_request_target:" in marketplace_kicker
     assert "github.event.repository.default_branch" in marketplace_kicker
     assert not re.search(r"source_branch:\s+dev\b", marketplace_kicker)
+
+    for kicker_path in (
+        ROOT / "sync-files/workflows/bos-universal-action-test-kicker.yml",
+        ROOT / "sync-files/workflows/bos-universal-marketplace-kicker.yml",
+        ROOT / "sync-files/workflows/bos-universal-security-kicker.yml",
+        ROOT / "sync-files/workflows/bos-universal-sync-kicker.yml",
+    ):
+        kicker_body = kicker_path.read_text()
+        assert "parse-config" not in kicker_body
+        assert "target-ref" not in kicker_body
 
     sync_kicker = (
         ROOT / "sync-files/workflows/bos-universal-sync-kicker.yml"
     ).read_text()
     assert not (ROOT / ".github/workflows/bos-universal-sync-kicker.yml").exists()
-    assert "parse-config:" in sync_kicker
+    assert "parse_config:" in sync_kicker
     assert "resolve-target:" not in sync_kicker
     assert "bos-universal-sync.yml@dev" in sync_kicker
     assert "bos-universal-sync.yml@main" in sync_kicker
