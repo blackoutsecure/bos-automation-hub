@@ -490,7 +490,9 @@ def main() -> None:
     )
     sync_policy = global_sync_config["managed_file_sync"]
     assert sync_policy["exclude_services"] == ["dependabot_actions"]
-    assert sync_policy["managed_files_path"] == "sync-files/workflows"
+    # The hub is checked out into `sync-files/`, and its canonical template
+    # directory is itself `sync-files/workflows/`.
+    assert sync_policy["managed_files_path"] == "sync-files/sync-files/workflows"
     assert sync_policy["services"] == [
         "shellcheck",
         "bos_universal_security_kicker",

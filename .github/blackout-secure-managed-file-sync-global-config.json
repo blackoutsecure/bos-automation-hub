@@ -3,7 +3,7 @@
     "exclude_services": [
       "dependabot_actions"
     ],
-    "managed_files_path": "sync-files/workflows",
+    "managed_files_path": "sync-files/sync-files/workflows",
     "services": [
       "shellcheck",
       "bos_universal_security_kicker",
