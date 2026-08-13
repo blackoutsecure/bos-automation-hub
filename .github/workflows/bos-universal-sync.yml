@@ -110,7 +110,7 @@ jobs:
 
       - name: Sync configured services
         id: sync
-        uses: blackoutsecure/bos-managed-file-sync-action@v1.0.7
+        uses: blackoutsecure/bos-managed-file-sync-action@v1.0.8
         with:
           config_path: .github/bos-universal-config.json
           global_config_path: sync-files/.github/blackout-secure-managed-file-sync-global-config.json

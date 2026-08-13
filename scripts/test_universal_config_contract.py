@@ -303,6 +303,7 @@ def main() -> None:
     assert "&& !inputs.dry_run" in marketplace_kicker
     assert "&& !inputs.draft" in marketplace_kicker
     assert "secrets: inherit" in marketplace_kicker
+    assert "secrets: inherit" in marketplace_kicker
     assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" not in marketplace_kicker
     assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" not in marketplace_kicker
     assert "outputs.cfg" in marketplace_kicker
@@ -529,7 +530,7 @@ def main() -> None:
     assert "ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}" in sync_backend
     assert "config_path: .github/bos-universal-config.json" in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
-    assert "bos-managed-file-sync-action@v1.0.7" in sync_backend
+    assert "bos-managed-file-sync-action@v1.0.8" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend
