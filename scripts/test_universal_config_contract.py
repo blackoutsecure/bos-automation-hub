@@ -242,7 +242,7 @@ def main() -> None:
     )[1]
     assert "      config_authoritative: true\n" in security_job
     assert "  workflow_dispatch:" in gate_workflow
-    assert not (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
+    assert (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
     assert "name: Blackout Secure universal security (reusable)" in gate_workflow
     assert "name: security" in security_kicker
     assert "name: Security summary" in gate_workflow
@@ -326,7 +326,7 @@ def main() -> None:
     sync_kicker = (
         ROOT / "sync-files/workflows/bos-universal-sync-kicker.yml"
     ).read_text()
-    assert not (ROOT / ".github/workflows/bos-universal-sync-kicker.yml").exists()
+    assert (ROOT / ".github/workflows/bos-universal-sync-kicker.yml").exists()
     assert "parse_config:" in sync_kicker
     assert "resolve-target:" not in sync_kicker
     assert "bos-universal-sync.yml@dev" in sync_kicker
@@ -409,6 +409,8 @@ def main() -> None:
         "lint.yml",
         "openwrt-readsb-wiedehopf-bump.yml",
         "release-hub.yml",
+        "bos-universal-security-kicker.yml",
+        "bos-universal-sync-kicker.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -530,7 +532,7 @@ def main() -> None:
     assert "ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}" in sync_backend
     assert "config_path: .github/bos-universal-config.json" in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
-    assert "bos-managed-file-sync-action@v1.0.9" in sync_backend
+    assert "bos-managed-file-sync-action@v1.0.10" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend
