@@ -23,7 +23,7 @@ updates:
           - "actions/*"
 
 # >>> managed-file-sync:dependabot_actions >>>
-# Managed by Blackout Secure. Best practices applied via marketplace config, customized in the sync workflow's inline global policy and .github/bos-universal-config.json.
+# Managed by Blackout Secure. Best practices applied via marketplace config, customized in .github/blackout-secure-managed-file-sync-global-config.json and .github/bos-universal-config.json.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
