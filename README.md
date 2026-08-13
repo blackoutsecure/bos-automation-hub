@@ -83,15 +83,13 @@ opt-in post-release repository metadata synchronization.
 [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) is a thin
 wrapper around the published
 [`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
-It handles this hub's local schedule, config-change, and manual events. Its
-consumer front door is
+It is callable only through the managed
 [`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml).
-The kicker resolves the target hub branch and delegates to
+That kicker owns the schedule, config-change, and manual events. Its
+consumer front door resolves the target hub branch and delegates to
 `bos-universal-sync.yml`, the same pattern used by the launchpad, security, and
-Marketplace kickers. It runs independently on config changes, schedule, or
-manual dispatch and never traverses the release, security, or Marketplace
-workflows. This hub does not install a local copy of the kicker:
-`bos-universal-sync.yml` already self-triggers directly. Sync defaults live in
+Marketplace kickers. The reusable workflow never self-triggers and never
+traverses the release, security, or Marketplace workflows. Sync defaults live in
 [.github/blackout-secure-managed-file-sync-global-config.json](.github/blackout-secure-managed-file-sync-global-config.json),
 a hub-authored file. `bos-universal-sync.yml` checks out this hub alongside
 the consumer repo and passes `global_config_path` at the checked-out copy, so
@@ -357,9 +355,9 @@ workflows.
 - delivery repositories can use the published action independently of
   `bos_launchpad`;
 - repositories without delivery use the same managed-file sync wrapper;
-- this hub runs the published action through its thin
-  [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) wrapper
-  on its own events.
+- this hub uses the managed Sync kicker as the event front door, which calls
+  the reusable [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml)
+  workflow.
 
 Removing every consumer workflow would require a separate organization-wide
 GitHub App or PAT-backed controller with write access to all repositories. That

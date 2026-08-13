@@ -114,8 +114,8 @@ targeting is resolved ahead of time and encoded as static per-branch jobs:
   and does not depend on a hub runtime branch;
 - the launchpad kicker only ever fires on `main` pushes, so it has no `dev`
   variant and always calls `@main`;
-- `bos-universal-sync.yml` is the hub's event wrapper and reusable caller for
-  the published sync action;
+- `bos-universal-sync.yml` is the hub's callable-only reusable workflow for
+  the published sync action; `bos-universal-sync-kicker.yml` owns all events;
 - `release-hub.yml` cannot reference `@main` without breaking
   self-validation, so it uses local `./.github/...` references instead;
 - the hub uses the published action for generic managed-file synchronization;

@@ -272,7 +272,7 @@ def main() -> None:
     ).read_text()
     assert "enable_baseline" not in readme
     assert "## Universal sync" in readme
-    assert "never traverses the release" in readme
+    assert "The reusable workflow never self-triggers" in readme
     assert "### Elevated posture scanning (`SCANNING_PAT`)" in readme
     assert "security_scan.use_advanced_pat" in readme
     assert "bos-launchpad-release.yml" not in readme_header_action
@@ -520,8 +520,8 @@ def main() -> None:
     assert "security_scan" not in hub_config
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend
-    assert "  schedule:" in sync_backend
-    assert "  workflow_dispatch:" in sync_backend
+    assert "  schedule:" not in sync_backend
+    assert "  workflow_dispatch:" not in sync_backend
     assert "global_config_json" not in sync_backend
     assert (
         "global_config_path: sync-files/.github/blackout-secure-managed-file-sync-global-config.json"
