@@ -54,7 +54,22 @@ jobs:
         with:
           config_path: .github/bos-universal-config.json
           global_config_json: >-
-            {"managed_file_sync":{"services":["dotfiles","dependabot_actions","shellcheck"],"variables":{"org_name":"Blackout Secure","support_email":"engineering@blackoutsecure.com","license":"Apache-2.0"}}}
+            {
+              "managed_file_sync": {
+                "services": [
+                  "dotfiles",
+                  "shellcheck"
+                ],
+                "exclude_services": [
+                  "dependabot_actions"
+                ],
+                "variables": {
+                  "org_name": "Blackout Secure",
+                  "support_email": "engineering@blackoutsecure.com",
+                  "license": "Apache-2.0"
+                }
+              }
+            }
           dry_run: ${{ (inputs.mode || 'commit') == 'check' }}
           fail_on_drift: ${{ (inputs.mode || 'commit') == 'check' }}
           show_diff: 'true'

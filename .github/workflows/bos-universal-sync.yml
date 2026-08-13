@@ -1,0 +1,120 @@
+# Hub-local event wrapper for the published managed-file sync action.
+# The sync engine and service catalog live in bos-managed-file-sync-action.
+name: Blackout Secure universal sync (reusable)
+
+"on":
+  schedule:
+    - cron: '11 14 * * 1'
+  push:
+    paths:
+      - .github/bos-universal-config.json
+      - .github/workflows/bos-universal-sync.yml
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run mode.
+        type: choice
+        options: [commit, check]
+        default: commit
+  workflow_call:
+    inputs:
+      services:
+        description: Optional service override passed to the published sync action.
+        required: false
+        type: string
+        default: ''
+      mode:
+        description: Optional `commit` or `check` override.
+        required: false
+        type: string
+        default: ''
+      commit_message:
+        description: Optional explicit commit message override.
+        required: false
+        type: string
+        default: 'chore: sync managed files'
+      runs_on:
+        description: Optional runner override. Defaults to `vars.DEFAULT_RUNNER`.
+        required: false
+        type: string
+        default: ''
+      timeout_minutes:
+        description: Optional per-job timeout override.
+        required: false
+        type: number
+        default: 5
+    outputs:
+      changed:
+        description: '`true` when files changed or would change.'
+        value: ${{ jobs.sync.outputs.changed }}
+      changed_files:
+        description: Newline-separated changed file list.
+        value: ${{ jobs.sync.outputs.changed_files }}
+      commit_sha:
+        description: Created commit SHA, when applicable.
+        value: ${{ jobs.sync.outputs.commit_sha }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bos-universal-sync-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync managed files (${{ inputs.mode || 'commit' }})
+    if: >-
+      github.event_name != 'push'
+      || github.ref_name == github.event.repository.default_branch
+    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    timeout-minutes: ${{ inputs.timeout_minutes || 5 }}
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.sync.outputs.changed }}
+      changed_files: ${{ steps.sync.outputs.changed_files }}
+      commit_sha: ${{ steps.commit.outputs.commit_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Sync configured services
+        id: sync
+        uses: blackoutsecure/bos-managed-file-sync-action@v1.0.4
+        with:
+          config_path: .github/bos-universal-config.json
+          global_config_json: >-
+            {
+              "managed_file_sync": {
+                "services": [
+                  "dotfiles",
+                  "shellcheck"
+                ],
+                "exclude_services": [
+                  "dependabot_actions"
+                ],
+                "variables": {
+                  "org_name": "Blackout Secure",
+                  "support_email": "engineering@blackoutsecure.com",
+                  "license": "Apache-2.0"
+                }
+              }
+            }
+          services: ${{ inputs.services }}
+          dry_run: ${{ (inputs.mode || 'commit') == 'check' }}
+          fail_on_drift: ${{ (inputs.mode || 'commit') == 'check' }}
+          show_diff: 'true'
+
+      - name: Commit and push
+        id: commit
+        if: >-
+          (inputs.mode || 'commit') == 'commit'
+          && steps.sync.outputs.changed == 'true'
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/commit-and-push@main
+        with:
+          files: ${{ steps.sync.outputs.changed_files }}
+          message: "${{ inputs.commit_message || 'chore: sync managed files' }}"
