@@ -1,6 +1,5 @@
 # Blackout Secure universal sync kicker (hub-managed).
-# Customize sync defaults via
-# `.github/blackout-secure-managed-file-sync-global-config.json`.
+# Customize sync defaults in the `global_config_json` input below.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 name: Blackout Secure universal sync (kicker)
 run-name: >-
@@ -18,7 +17,6 @@ run-name: >-
   push:
     paths:
       - '.github/bos-universal-config.json'
-      - '.github/blackout-secure-managed-file-sync-global-config.json'
   workflow_dispatch:
     inputs:
       mode:
@@ -55,8 +53,8 @@ jobs:
         uses: blackoutsecure/bos-managed-file-sync-action@v1
         with:
           config_path: .github/bos-universal-config.json
-          use_global_config: 'true'
-          global_config_path: .github/blackout-secure-managed-file-sync-global-config.json
+          global_config_json: >-
+            {"managed_file_sync":{"services":["dotfiles","dependabot_actions","shellcheck"],"variables":{"org_name":"Blackout Secure","support_email":"engineering@blackoutsecure.com","license":"Apache-2.0"}}}
           dry_run: ${{ (inputs.mode || 'commit') == 'check' }}
           fail_on_drift: ${{ (inputs.mode || 'commit') == 'check' }}
           show_diff: 'true'

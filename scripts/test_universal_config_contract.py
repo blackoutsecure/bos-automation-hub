@@ -483,8 +483,10 @@ def main() -> None:
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" in sync_backend
     assert "  workflow_dispatch:" in sync_backend
-    assert ".github/blackout-secure-managed-file-sync-global-config.json" in sync_backend
-    assert "use_global_config: 'true'" in sync_backend
+    assert 'global_config_json: >-' in sync_backend
+    assert '"services":["dotfiles","dependabot_actions","shellcheck"]' in sync_backend
+    assert '"support_email":"engineering@blackoutsecure.com"' in sync_backend
+    assert "global_config_path:" not in sync_backend
     assert "config_path: .github/bos-universal-config.json" in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
     assert "bos-managed-file-sync-action@v1" in sync_backend
@@ -493,8 +495,10 @@ def main() -> None:
     managed_sync_caller = (
         ROOT / "managed-files/workflows/bos-universal-sync-kicker.yml"
     ).read_text()
-    assert ".github/blackout-secure-managed-file-sync-global-config.json" in managed_sync_caller
-    assert "use_global_config: 'true'" in managed_sync_caller
+    assert 'global_config_json: >-' in managed_sync_caller
+    assert '"services":["dotfiles","dependabot_actions","shellcheck"]' in managed_sync_caller
+    assert '"support_email":"engineering@blackoutsecure.com"' in managed_sync_caller
+    assert "global_config_path:" not in managed_sync_caller
     assert "config_path: .github/bos-universal-config.json" in managed_sync_caller
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in managed_sync_caller
     assert "bos-managed-file-sync-action@v1" in managed_sync_caller

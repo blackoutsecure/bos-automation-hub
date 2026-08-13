@@ -8,7 +8,6 @@ name: Blackout Secure universal sync (reusable)
   push:
     paths:
       - .github/bos-universal-config.json
-      - .github/blackout-secure-managed-file-sync-global-config.json
       - .github/workflows/bos-universal-sync.yml
   workflow_dispatch:
     inputs:
@@ -88,8 +87,8 @@ jobs:
         uses: blackoutsecure/bos-managed-file-sync-action@v1
         with:
           config_path: .github/bos-universal-config.json
-          use_global_config: 'true'
-          global_config_path: .github/blackout-secure-managed-file-sync-global-config.json
+          global_config_json: >-
+            {"managed_file_sync":{"services":["dotfiles","dependabot_actions","shellcheck"],"variables":{"org_name":"Blackout Secure","support_email":"engineering@blackoutsecure.com","license":"Apache-2.0"}}}
           services: ${{ inputs.services }}
           dry_run: ${{ (inputs.mode || 'commit') == 'check' }}
           fail_on_drift: ${{ (inputs.mode || 'commit') == 'check' }}
