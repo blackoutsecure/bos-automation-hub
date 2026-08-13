@@ -30,6 +30,10 @@ run-name: >-
 permissions:
   contents: read
 
+concurrency:
+  group: bos-universal-sync-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   sync:
     name: Sync managed files (${{ inputs.mode || 'commit' }})
@@ -57,6 +61,7 @@ jobs:
           config_path: .github/bos-universal-config.json
           use_global_config: 'true'
           global_config_path: .github/blackout-secure-managed-file-sync-global-config.json
+          dry_run: ${{ (inputs.mode || 'commit') == 'check' }}
           fail_on_drift: ${{ (inputs.mode || 'commit') == 'check' }}
           show_diff: 'true'
 
