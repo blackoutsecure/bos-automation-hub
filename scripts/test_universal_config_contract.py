@@ -492,6 +492,7 @@ def main() -> None:
     )
     sync_policy = global_sync_config["managed_file_sync"]
     assert sync_policy["exclude_services"] == ["dependabot_actions"]
+    assert sync_policy["take_over_managed_files"] is True
     # The hub is checked out into `sync-files/`, and its canonical template
     # directory is itself `sync-files/workflows/`.
     assert sync_policy["managed_files_path"] == "sync-files/sync-files/workflows"
@@ -532,7 +533,7 @@ def main() -> None:
     assert "ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}" in sync_backend
     assert "config_path: .github/bos-universal-config.json" in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
-    assert "bos-managed-file-sync-action@v1.0.10" in sync_backend
+    assert "bos-managed-file-sync-action@v1.0.11" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend

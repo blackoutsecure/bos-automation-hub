@@ -7,7 +7,9 @@ Consumer repositories select its services in the `managed_file_sync` section
 of `.github/bos-universal-config.json`. The global policy enables
 organization-wide `shellcheck`, Security kicker, and Sync kicker defaults;
 repository-specific kickers remain available as global service definitions
-and must be selected by repositories that need them.
+and must be selected by repositories that need them. The global policy also
+sets `take_over_managed_files: true` so organization-owned blocks can replace
+competing managed blocks.
 This repository's own sync wrappers use `.github/bos-universal-config.json` as
 the repo layer and pass the shared global sync policy inline through
 `global_config_json`.

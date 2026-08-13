@@ -3,6 +3,7 @@
     "exclude_services": [
       "dependabot_actions"
     ],
+    "take_over_managed_files": true,
     "managed_files_path": "sync-files/sync-files/workflows",
     "services": [
       "shellcheck",

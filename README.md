@@ -324,7 +324,9 @@ and reconciles the working tree. Canonical hub templates live under
 sync engine or service registry. The global hub policy enables the
 organization-wide `shellcheck`, Security kicker, and Sync kicker defaults;
 repository-specific kicker definitions are available globally but must be
-selected by each repository that needs them.
+selected by each repository that needs them. It also sets
+`take_over_managed_files: true`, allowing organization-owned managed blocks to
+replace competing managed blocks from another namespace.
 
 Service ownership modes:
 
