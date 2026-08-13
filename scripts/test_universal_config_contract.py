@@ -375,6 +375,7 @@ def main() -> None:
         "lint.yml",
         "openwrt-readsb-wiedehopf-bump.yml",
         "release-hub.yml",
+        "bos-universal-sync-kicker.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -450,10 +451,9 @@ def main() -> None:
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
     hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
     assert set(hub_config_raw) == {"security", "launchpad"}
-    global_sync_config = json.loads(
-        (ROOT / ".github/blackout-secure-managed-file-sync-global-config.json").read_text()
-    )
-    assert set(global_sync_config) == {"managed_file_sync"}
+    assert not (
+        ROOT / ".github/blackout-secure-managed-file-sync-global-config.json"
+    ).exists()
     hub_config = cfg_from(
         run_universal_config_raw((ROOT / ".github/bos-universal-config.json").read_text())
     )
@@ -468,17 +468,6 @@ def main() -> None:
         ),
     }
     assert "security_scan" not in hub_config
-    assert global_sync_config["managed_file_sync"]["services"] == [
-        "dotfiles",
-        "dependabot_actions",
-        "shellcheck",
-    ]
-    assert "use_marketplace_config" not in global_sync_config["managed_file_sync"]
-    assert global_sync_config["managed_file_sync"]["variables"] == {
-        "org_name": "Blackout Secure",
-        "support_email": "engineering@blackoutsecure.com",
-        "license": "Apache-2.0",
-    }
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" in sync_backend
@@ -489,9 +478,17 @@ def main() -> None:
     assert "global_config_path:" not in sync_backend
     assert "config_path: .github/bos-universal-config.json" in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
-    assert "bos-managed-file-sync-action@v1" in sync_backend
+    assert "bos-managed-file-sync-action@v1.0.4" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert "workflows: write" not in sync_backend
+    hub_sync_kicker = (
+        ROOT / ".github/workflows/bos-universal-sync-kicker.yml"
+    ).read_text()
+    assert "bos-managed-file-sync-action@v1.0.4" in hub_sync_kicker
+    assert 'global_config_json: >-' in hub_sync_kicker
+    assert "config_path: .github/bos-universal-config.json" in hub_sync_kicker
+    assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in hub_sync_kicker
+    assert "actions/shared/commit-and-push@main" in hub_sync_kicker
     managed_sync_caller = (
         ROOT / "managed-files/workflows/bos-universal-sync-kicker.yml"
     ).read_text()
@@ -501,7 +498,7 @@ def main() -> None:
     assert "global_config_path:" not in managed_sync_caller
     assert "config_path: .github/bos-universal-config.json" in managed_sync_caller
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in managed_sync_caller
-    assert "bos-managed-file-sync-action@v1" in managed_sync_caller
+    assert "bos-managed-file-sync-action@v1.0.4" in managed_sync_caller
     assert "bos-universal-sync.yml@" not in managed_sync_caller
     assert "resolve-target:" not in managed_sync_caller
 

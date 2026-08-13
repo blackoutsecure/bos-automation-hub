@@ -88,9 +88,8 @@ consumer front door is
 [`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml).
 It runs independently on config changes, schedule, or manual dispatch and
 never traverses the release, security, or Marketplace workflows.
-For this repository, sync defaults live in
-[.github/blackout-secure-managed-file-sync-global-config.json](.github/blackout-secure-managed-file-sync-global-config.json),
-which the sync wrappers pass as `config_path`.
+For this repository, sync defaults are passed inline through the wrappers'
+`global_config_json` input, so no separate global config file is required.
 
 ## Universal action test
 

@@ -6,9 +6,8 @@ Managed-file synchronization is provided by
 Consumer repositories select its services in the `managed_file_sync` section
 of `.github/bos-universal-config.json`.
 This repository's own sync wrappers use `.github/bos-universal-config.json` as
-the repo layer and explicitly merge
-`.github/blackout-secure-managed-file-sync-global-config.json` as the global
-layer.
+the repo layer and pass the shared global sync policy inline through
+`global_config_json`.
 Settings may be authored as flat top-level keys or grouped under a named
 section per service (`launchpad`, `marketplace`, `security`, plus a
 `general` catch-all for anything else) — see the ["Config sections"](../README.md#config-sections)
