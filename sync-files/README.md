@@ -4,7 +4,10 @@ This directory contains canonical hub templates published with the repository.
 Managed-file synchronization is provided by
 [`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
 Consumer repositories select its services in the `managed_file_sync` section
-of `.github/bos-universal-config.json`.
+of `.github/bos-universal-config.json`. The global policy enables
+organization-wide `shellcheck`, Security kicker, and Sync kicker defaults;
+repository-specific kickers remain available as global service definitions
+and must be selected by repositories that need them.
 This repository's own sync wrappers use `.github/bos-universal-config.json` as
 the repo layer and pass the shared global sync policy inline through
 `global_config_json`.
@@ -38,8 +41,18 @@ review surface for hub-specific release content.
   `bos-universal-sync.yml@dev`/`@main`. Repository maintenance never starts
   the delivery workflow.
 
-These workflows are whole-file managed. Consumer repositories must not edit
-them directly.
+These workflows are file-owned managed. Consumer repositories must not edit
+them directly. A repository opts into the callers it needs, for example:
+
+```json
+{
+  "managed_file_sync": {
+    "services": [
+      "shellcheck"
+    ]
+  }
+}
+```
 
 Enable the published managed-file sync action alongside whichever other
 managed callers the repository needs. GitHub still requires one event-trigger

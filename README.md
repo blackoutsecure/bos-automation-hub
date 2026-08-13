@@ -323,13 +323,15 @@ The published action reads the `managed_file_sync` block from
 [`.github/bos-universal-config.json`](.github/bos-universal-config.json), resolves its catalog,
 and reconciles the working tree. Canonical hub templates live under
 [`sync-files/`](sync-files/); this repository no longer contains a local
-sync engine or service registry. Marketplace services are inherited automatically;
-global and repo configs should list only additional services or overrides.
+sync engine or service registry. The global hub policy enables the
+organization-wide `shellcheck`, Security kicker, and Sync kicker defaults;
+repository-specific kicker definitions are available globally but must be
+selected by each repository that needs them.
 
 Service ownership modes:
 
 - **Section:** preserves user content outside managed markers.
-- **Whole-file:** continuously enforces a canonical file.
+- **File:** continuously replaces a file with its canonical template.
 - **Init-if-missing:** creates a starter once and leaves later edits alone.
 
 ### Supported sync services
@@ -416,7 +418,8 @@ Use this consumer configuration:
       "common",
       "lf_line_endings",
       "dependabot_actions",
-      "dotfiles"
+      "dotfiles",
+      "shellcheck"
     ]
   }
 }

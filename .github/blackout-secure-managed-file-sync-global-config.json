@@ -3,18 +3,15 @@
     "exclude_services": [
       "dependabot_actions"
     ],
-    "managed_files_path": "sync-files/sync-files/workflows",
+    "managed_files_path": "sync-files/workflows",
     "services": [
-      "bos_universal_action_test_kicker",
-      "bos_universal_launchpad_kicker",
-      "bos_universal_marketplace_kicker",
+      "shellcheck",
       "bos_universal_security_kicker",
-      "bos_universal_sync_kicker",
-      "shellcheck"
+      "bos_universal_sync_kicker"
     ],
     "service_definitions": {
       "bos_universal_action_test_kicker": {
-        "mode": "update",
+        "mode": "file",
         "files": [
           {
             "path": ".github/workflows/bos-universal-action-test-kicker.yml",
@@ -23,7 +20,7 @@
         ]
       },
       "bos_universal_launchpad_kicker": {
-        "mode": "update",
+        "mode": "file",
         "files": [
           {
             "path": ".github/workflows/bos-universal-launchpad-kicker.yml",
@@ -32,7 +29,7 @@
         ]
       },
       "bos_universal_marketplace_kicker": {
-        "mode": "update",
+        "mode": "file",
         "files": [
           {
             "path": ".github/workflows/bos-universal-marketplace-kicker.yml",
@@ -41,7 +38,7 @@
         ]
       },
       "bos_universal_security_kicker": {
-        "mode": "update",
+        "mode": "file",
         "files": [
           {
             "path": ".github/workflows/bos-universal-security-kicker.yml",
@@ -50,7 +47,7 @@
         ]
       },
       "bos_universal_sync_kicker": {
-        "mode": "update",
+        "mode": "file",
         "files": [
           {
             "path": ".github/workflows/bos-universal-sync-kicker.yml",

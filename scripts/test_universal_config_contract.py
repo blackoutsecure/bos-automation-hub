@@ -490,18 +490,16 @@ def main() -> None:
     )
     sync_policy = global_sync_config["managed_file_sync"]
     assert sync_policy["exclude_services"] == ["dependabot_actions"]
-    assert sync_policy["managed_files_path"] == "sync-files/sync-files/workflows"
-    assert set(sync_policy["services"]) == {
-        "bos_universal_action_test_kicker",
-        "bos_universal_launchpad_kicker",
-        "bos_universal_marketplace_kicker",
+    assert sync_policy["managed_files_path"] == "sync-files/workflows"
+    assert sync_policy["services"] == [
+        "shellcheck",
         "bos_universal_security_kicker",
         "bos_universal_sync_kicker",
-        "shellcheck",
-    }
+    ]
     assert all(
-        definition["mode"] == "update"
-        for definition in sync_policy["service_definitions"].values()
+        definition["mode"] == "file"
+        for name, definition in sync_policy["service_definitions"].items()
+        if name.startswith("bos_universal_")
     )
     assert sync_policy["variables"]["support_email"] == "engineering@blackoutsecure.com"
     hub_config = cfg_from(
