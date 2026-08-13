@@ -43,6 +43,16 @@ name: Blackout Secure universal sync (reusable)
         required: false
         type: number
         default: 5
+    secrets:
+      workflow_sync_pat:
+        description: >-
+          Optional PAT with the Workflows: write permission. The default
+          GITHUB_TOKEN can never push changes to .github/workflows/**
+          (a hard GitHub platform restriction, not a `permissions:`
+          setting). Without this secret, the five managed kicker
+          workflow files are skipped; every other managed file still
+          syncs normally with GITHUB_TOKEN.
+        required: false
     outputs:
       changed:
         description: '`true` when files changed or would change.'
@@ -76,9 +86,16 @@ jobs:
       changed_files: ${{ steps.sync.outputs.changed_files }}
       commit_sha: ${{ steps.commit.outputs.commit_sha }}
     steps:
+      - name: Resolve workflow sync capability
+        id: workflow-pat
+        env:
+          HAS_WORKFLOW_PAT: ${{ secrets.WORKFLOW_SYNC_PAT != '' && 'true' || 'false' }}
+        run: echo "has_pat=${HAS_WORKFLOW_PAT}" >> "${GITHUB_OUTPUT}"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}
           fetch-depth: 0
           persist-credentials: true
 
@@ -97,10 +114,21 @@ jobs:
         with:
           config_path: .github/bos-universal-config.json
           global_config_path: sync-files/.github/blackout-secure-managed-file-sync-global-config.json
+          config_json: >-
+            ${{
+              steps.workflow-pat.outputs.has_pat != 'true'
+              && '{"managed_file_sync":{"disabled_services":["bos_universal_action_test_kicker","bos_universal_launchpad_kicker","bos_universal_marketplace_kicker","bos_universal_security_kicker","bos_universal_sync_kicker"]}}'
+              || ''
+            }}
           services: ${{ inputs.services }}
           dry_run: ${{ (inputs.mode || 'commit') == 'check' }}
           fail_on_drift: ${{ (inputs.mode || 'commit') == 'check' }}
           show_diff: 'true'
+
+      - name: Note workflow sync skip
+        if: steps.workflow-pat.outputs.has_pat != 'true'
+        run: |
+          echo "::notice::Managed kicker workflow files were not updated because \`workflow_sync_pat\` was not provided. GITHUB_TOKEN can never write to .github/workflows/**; other managed files still synced normally."
 
       - name: Commit and push
         id: commit

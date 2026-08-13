@@ -512,12 +512,18 @@ def main() -> None:
     assert "bos-managed-file-sync-action@v1.0.5" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert "workflows: write" not in sync_backend
+    assert "workflow_sync_pat:" in sync_backend
+    assert "token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}" in sync_backend
+    assert "secrets.WORKFLOW_SYNC_PAT != '' && 'true' || 'false'" in sync_backend
+    assert "disabled_services" in sync_backend
+    assert "bos_universal_sync_kicker" in sync_backend
     managed_sync_caller = sync_kicker
     assert "name: Blackout Secure universal sync (kicker)" in managed_sync_caller
     assert "name: Resolve target hub ref" in managed_sync_caller
     assert "sync-dev:" in managed_sync_caller
     assert "sync-main:" in managed_sync_caller
     assert "contents: write" in managed_sync_caller
+    assert managed_sync_caller.count("workflow_sync_pat: ${{ secrets.WORKFLOW_SYNC_PAT }}") == 2
 
     assert_markdown_links_exist(ROOT / "README.md")
     assert_markdown_links_exist(ROOT / "sync-files/README.md")

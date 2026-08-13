@@ -549,6 +549,7 @@ Common secrets are stage-dependent:
 - Cloudflare: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, optionally
   `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_PAGES_ADMIN_TOKEN`;
 - administration/scanning: `REPO_ADMIN_PAT`, `SCANNING_PAT`;
+- workflow-file propagation: `WORKFLOW_SYNC_PAT`;
 - hub promotion: `RELEASE_PAT` when protected-branch bypass is required.
 
 ### Elevated posture scanning (`SCANNING_PAT`)
@@ -586,6 +587,25 @@ No consumer wiring is required beyond creating the secret:
   that flag enabled by default. It is a documented no-op when `SCANNING_PAT`
   is absent (the kit transparently falls back to `GITHUB_TOKEN`), so enabling
   it ahead of provisioning the secret is safe.
+
+### Workflow-file propagation (`WORKFLOW_SYNC_PAT`)
+
+`GITHUB_TOKEN` can never push changes to `.github/workflows/**` — this is a
+hard GitHub platform restriction, not something a workflow's `permissions:`
+block can grant. Without a PAT, `bos-universal-sync.yml` skips the five
+managed kicker workflow files
+(`bos-universal-action-test-kicker.yml`, `bos-universal-launchpad-kicker.yml`,
+`bos-universal-marketplace-kicker.yml`, `bos-universal-security-kicker.yml`,
+`bos-universal-sync-kicker.yml`) and syncs every other managed file normally.
+
+1. Create a fine-grained PAT scoped to the repositories that install the
+   kicker workflows, with the **Workflows** repository permission set to
+   **Read and write** (a classic PAT with the `workflow` scope also works).
+2. Store it as an Actions secret named `WORKFLOW_SYNC_PAT` at the
+   organization or repository level.
+3. No further wiring is required: the sync kicker already forwards
+   `secrets.WORKFLOW_SYNC_PAT` unconditionally, and the reusable workflow
+   starts propagating the kicker files as soon as the secret exists.
 
 ## Development and validation
 
