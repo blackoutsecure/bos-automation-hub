@@ -247,7 +247,7 @@ configuration can enable only the required stages:
     }
   },
   "managed_file_sync": {
-    "services": ["dotfiles"]
+    "services": ["editorconfig"]
   }
 }
 ```
@@ -337,7 +337,7 @@ Service ownership modes:
 ### Supported sync services
 
 The published action's default catalog currently includes `baseline`,
-`codeowners`, `common`, `dependabot_actions`, `dotfiles`, `lf_line_endings`,
+`codeowners`, `common`, `dependabot_actions`, `editorconfig`, `lf_line_endings`,
 `license`, `markdownlint`, `notice_apache2`, `prettier`, and `shellcheck`.
 Repos can extend or override the catalog with `service_definitions` or a
 separate catalog file; the published action validates service conflicts before
@@ -418,7 +418,7 @@ Use this consumer configuration:
       "common",
       "lf_line_endings",
       "dependabot_actions",
-      "dotfiles",
+      "editorconfig",
       "shellcheck"
     ]
   }

@@ -528,7 +528,7 @@ def main() -> None:
     assert "ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}" in sync_backend
     assert "config_path: .github/bos-universal-config.json" in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
-    assert "bos-managed-file-sync-action@v1.0.8" in sync_backend
+    assert "bos-managed-file-sync-action@v1.0.9" in sync_backend
     assert "actions/shared/commit-and-push@main" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend

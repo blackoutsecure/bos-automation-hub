@@ -57,8 +57,9 @@ them directly. A repository opts into the callers it needs, for example:
 Enable the published managed-file sync action alongside whichever other
 managed callers the repository needs. GitHub still requires one event-trigger
 workflow per repository; `.github/bos-universal-config.json` controls sync behavior
-through `managed_file_sync`. The `dotfiles` bundle is provided by the
-published action's default catalog.
+through `managed_file_sync`. The `editorconfig` service is provided by the
+published action's default catalog; hub-specific templates remain under the
+local `dotfiles/` source directory.
 
 ## Ownership modes
 
