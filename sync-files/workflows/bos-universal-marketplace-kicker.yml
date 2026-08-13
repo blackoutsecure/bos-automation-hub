@@ -209,6 +209,4 @@ jobs:
       show_deployments: ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.repo_metadata.show_deployments == true }}
       show_packages: ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.repo_metadata.show_packages == true }}
       dry_run: ${{ inputs.dry_run || fromJson(needs.parse-config.outputs.cfg).marketplace.repo_metadata.dry_run == true }}
-    secrets:
-      REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}
-      RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+    secrets: inherit

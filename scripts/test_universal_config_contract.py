@@ -295,8 +295,9 @@ def main() -> None:
     assert "needs.release.result == 'success'" in marketplace_kicker
     assert "&& !inputs.dry_run" in marketplace_kicker
     assert "&& !inputs.draft" in marketplace_kicker
-    assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" in marketplace_kicker
-    assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" in marketplace_kicker
+    assert "secrets: inherit" in marketplace_kicker
+    assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" not in marketplace_kicker
+    assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" not in marketplace_kicker
     assert "outputs.cfg" in marketplace_kicker
     assert "`.github/bos-universal-config.json`" in marketplace_kicker
     assert "pull_request_target:" in marketplace_kicker
@@ -523,7 +524,22 @@ def main() -> None:
     assert "sync-dev:" in managed_sync_caller
     assert "sync-main:" in managed_sync_caller
     assert "contents: write" in managed_sync_caller
-    assert managed_sync_caller.count("workflow_sync_pat: ${{ secrets.WORKFLOW_SYNC_PAT }}") == 2
+    assert managed_sync_caller.count("secrets: inherit") == 2
+    assert "workflow_sync_pat: ${{ secrets.WORKFLOW_SYNC_PAT }}" not in managed_sync_caller
+
+    assert security_kicker.count("secrets: inherit") == 2
+    assert "scanning_pat: ${{ secrets.SCANNING_PAT }}" not in security_kicker
+
+    launchpad_workflow = (
+        ROOT / ".github/workflows/bos-universal-launchpad.yml"
+    ).read_text()
+    assert "secrets: inherit" in kicker
+    assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" not in kicker
+    assert (
+        "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT }}"
+        in launchpad_workflow
+    )
+    assert "RELEASE_PAT:\n        description:" in launchpad_workflow
 
     assert_markdown_links_exist(ROOT / "README.md")
     assert_markdown_links_exist(ROOT / "sync-files/README.md")

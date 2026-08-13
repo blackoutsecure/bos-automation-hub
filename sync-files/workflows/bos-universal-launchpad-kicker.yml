@@ -237,14 +237,4 @@ jobs:
       repo_metadata_show_deployments: ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.show_deployments == true }}
       repo_metadata_show_packages:   ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.show_packages == true }}
       repo_metadata_dry_run:         ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.dry_run == true }}
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN:    ${{ secrets.DOCKERHUB_TOKEN }}
-      BALENA_API_TOKEN:   ${{ secrets.BALENA_API_TOKEN }}
-      UPSTREAM_TOKEN:     ${{ secrets.UPSTREAM_TOKEN }}
-      CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_PAGES_ADMIN_TOKEN: ${{ secrets.CLOUDFLARE_PAGES_ADMIN_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CLOUDFLARE_ZONE_ID:    ${{ secrets.CLOUDFLARE_ZONE_ID }}
-      scanning_pat:       ${{ secrets.SCANNING_PAT }}
-      REPO_ADMIN_PAT:     ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT }}
+    secrets: inherit

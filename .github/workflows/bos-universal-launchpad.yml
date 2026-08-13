@@ -1143,13 +1143,20 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           `permissions: { contents: write }` (the `/repos` PATCH and
           `/topics` PUT endpoints require `Administration: write`, which
           is not in `GITHUB_TOKEN`'s grantable scope set). When this
-          secret is empty the stage SKIPS with a `::warning::` rather
-          than hard-failing. Forward a single resolved value from the
-          caller, e.g. `REPO_ADMIN_PAT:` set to
-          `secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT`.
+          secret and `RELEASE_PAT` are both empty the stage SKIPS with a
+          `::warning::` rather than hard-failing. Forward via
+          `secrets: inherit` on the caller's `uses:` block; this
+          workflow resolves `REPO_ADMIN_PAT || RELEASE_PAT` itself.
           Fine-grained PAT minimum permissions on the target repo:
           `Administration: Write` + `Metadata: Read`. Classic PAT
           equivalent: the `repo` scope.
+        required: false
+      RELEASE_PAT:
+        description: >-
+          Fallback PAT for the repo-metadata stage when `REPO_ADMIN_PAT`
+          is not set. Same required permissions as `REPO_ADMIN_PAT`.
+          Typically already provisioned for hub/Marketplace promotion;
+          reused here so repos don't need a second dedicated secret.
         required: false
 
     outputs:
@@ -1646,8 +1653,9 @@ jobs:
   #
   # Runs in parallel with every other stage and delegates token handling,
   # checkout, concurrency, and the composite invocation to the shared
-  # reusable workflow. The caller already resolves REPO_ADMIN_PAT from its
-  # dedicated secret or RELEASE_PAT fallback.
+  # reusable workflow. This workflow resolves REPO_ADMIN_PAT with a
+  # RELEASE_PAT fallback itself, since a nested reusable-to-reusable
+  # `secrets:` block cannot use `secrets: inherit`.
   # ---------------------------------------------------------------------------
   repo-metadata:
     name: Sync About box
@@ -1669,4 +1677,4 @@ jobs:
       show_packages: ${{ inputs.repo_metadata_show_packages }}
       dry_run: ${{ inputs.repo_metadata_dry_run }}
     secrets:
-      REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}
+      REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT }}
