@@ -129,7 +129,7 @@ jobs:
         with:
           repository: blackoutsecure/bos-automation-hub
           ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
-          path: sync-files
+          path: hub-source
           fetch-depth: 1
           persist-credentials: false
 
@@ -137,10 +137,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          config_path="sync-files/config/managed-file-sync-global-config.json"
+          config_path="hub-source/config/managed-file-sync-global-config.json"
           if [[ ! -f "${config_path}" ]]; then
             mkdir -p "$(dirname "${config_path}")"
-            git -C sync-files show "HEAD:config/managed-file-sync-global-config.json" > "${config_path}"
+            git -C hub-source show "HEAD:config/managed-file-sync-global-config.json" > "${config_path}"
           fi
           test -s "${config_path}"
 
@@ -150,7 +150,8 @@ jobs:
         with:
           # The action auto-discovers .github/bos-universal-config.json.
           use_global_config: 'true'
-          global_config_path: sync-files/config/managed-file-sync-global-config.json
+          global_config_path: hub-source/config/managed-file-sync-global-config.json
+          managed_files_path: hub-source/sync-files/workflows
           config_json: >-
             ${{
               steps.workflow-pat.outputs.has_pat != 'true'
@@ -172,7 +173,7 @@ jobs:
         if: >-
           (inputs.mode || 'commit') == 'commit'
           && steps.sync.outputs.changed == 'true'
-        uses: ./sync-files/.github/actions/shared/commit-and-push
+        uses: ./hub-source/.github/actions/shared/commit-and-push
         with:
           files: ${{ steps.sync.outputs.changed_files }}
           message: "${{ inputs.commit_message || 'chore: sync managed files' }}"
@@ -312,7 +313,7 @@ jobs:
 
       - name: Publish managed file sync report
         if: ${{ always() }}
-        uses: ./sync-files/.github/actions/shared/job-report
+        uses: ./hub-source/.github/actions/shared/job-report
         with:
           title: Blackout Secure Managed File Sync Report
           subject: >-

@@ -595,7 +595,7 @@ def main() -> None:
 
     report_refs = {
         "uses: ./hub-runtime/.github/actions/shared/job-report",
-        "uses: ./sync-files/.github/actions/shared/job-report",
+        "uses: ./hub-source/.github/actions/shared/job-report",
     }
     for reporting_workflow in (gate_workflow, sync_backend):
         assert any(ref in reporting_workflow for ref in report_refs)
@@ -722,20 +722,21 @@ def main() -> None:
     assert "  workflow_dispatch:" not in sync_backend
     assert "global_config_json" not in sync_backend
     assert (
-        "global_config_path: sync-files/config/managed-file-sync-global-config.json"
+        "global_config_path: hub-source/config/managed-file-sync-global-config.json"
         in sync_backend
     )
     assert "Ensure managed-file-sync global config is available" in sync_backend
     assert (
-        'git -C sync-files show "HEAD:config/managed-file-sync-global-config.json"'
+        'git -C hub-source show "HEAD:config/managed-file-sync-global-config.json"'
         in sync_backend
     )
+    assert "managed_files_path: hub-source/sync-files/workflows" in sync_backend
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
     assert "use_global_config: 'true'" in sync_backend
     assert "bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a" in sync_backend
-    assert "uses: ./sync-files/.github/actions/shared/commit-and-push" in sync_backend
+    assert "uses: ./hub-source/.github/actions/shared/commit-and-push" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend
     assert "token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}" in sync_backend
