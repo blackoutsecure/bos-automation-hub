@@ -271,7 +271,7 @@ def main() -> None:
         ROOT / ".github/actions/shared/check-readme-header/action.yml"
     ).read_text()
     assert "enable_baseline" not in readme
-    assert "## Universal sync" in readme
+    assert "## Managed file sync" in readme
     assert "The reusable workflow never self-triggers" in readme
     assert "### Elevated posture scanning (`SCANNING_PAT`)" in readme
     assert "security_scan.use_advanced_pat" in readme
@@ -485,8 +485,21 @@ def main() -> None:
         assert refs and set(refs) == expected_refs, refs
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
+    assert "name: Blackout Secure managed file sync (reusable)" in sync_backend
     hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
-    assert set(hub_config_raw) == {"security", "launchpad"}
+    assert set(hub_config_raw) == {"security", "launchpad", "code_scanning"}
+    assert hub_config_raw["code_scanning"] == {"project_name": "bos-automation-hub"}
+
+    global_code_scan_config = json.loads(
+        (ROOT / ".github/blackout-secure-code-scanning-kit-global-config.json").read_text()
+    )
+    assert global_code_scan_config["code_scanning"]["owner"] == "blackoutsecure"
+
+    assert (
+        "global_config_path: hub-config/.github/blackout-secure-code-scanning-kit-global-config.json"
+        in gate_workflow
+    )
+    assert "use_global_config: 'auto'" in gate_workflow
     global_sync_config = json.loads(
         (ROOT / ".github/blackout-secure-managed-file-sync-global-config.json").read_text()
     )
@@ -543,7 +556,7 @@ def main() -> None:
     assert "disabled_services" in sync_backend
     assert "bos_universal_sync_kicker" in sync_backend
     managed_sync_caller = sync_kicker
-    assert "name: Blackout Secure universal sync (kicker)" in managed_sync_caller
+    assert "name: Blackout Secure managed file sync (kicker)" in managed_sync_caller
     assert "name: Resolve target hub ref" in managed_sync_caller
     assert "sync-dev:" in managed_sync_caller
     assert "sync-main:" in managed_sync_caller

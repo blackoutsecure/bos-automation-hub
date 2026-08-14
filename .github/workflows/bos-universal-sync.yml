@@ -1,6 +1,8 @@
 # Hub-local reusable workflow for the published managed-file sync action.
 # The sync engine and service catalog live in bos-managed-file-sync-action.
-name: Blackout Secure universal sync (reusable)
+# Named "managed file sync", not "universal", since it only ever does one
+# thing; filename stays bos-universal-sync.yml to keep uses: refs stable.
+name: Blackout Secure managed file sync (reusable)
 
 "on":
   workflow_call:

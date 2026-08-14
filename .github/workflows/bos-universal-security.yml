@@ -91,6 +91,16 @@
 #   https://github.com/blackoutsecure/bos-marketplace-kit
 # - bos-code-scanning-kit (umbrella scanner + posture audit):
 #   https://github.com/blackoutsecure/bos-code-scanning-kit
+#
+# Code-scanning config layering
+# ------------------------------
+# The code-scan job forwards an org-wide policy tier to the kit via
+# `global_config_path`, sourced from this hub's own
+# `.github/blackout-secure-code-scanning-kit-global-config.json` (checked
+# out alongside the caller repo, mirroring the `bos-universal-sync.yml`
+# pattern). Per-repository overrides remain opt-in through a `code_scanning`
+# block in the caller's own `.github/bos-universal-config.json`, which the
+# kit discovers automatically as its repository-tier config.
 
 name: Blackout Secure universal security (reusable)
 
@@ -481,6 +491,16 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout canonical hub code-scanning global config
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ github.event.repository.default_branch == 'dev' && 'dev' || 'main' }}
+          path: hub-config
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/blackout-secure-code-scanning-kit-global-config.json
+          sparse-checkout-cone-mode: false
       - name: Run bos-code-scanning-kit
         uses: blackoutsecure/bos-code-scanning-kit@37ee8d5cf143be59b02dd9fcbb3070b174dc22e3 # v1
         with:
@@ -490,6 +510,8 @@ jobs:
           enable_posture: 'true'
           enable_scanners: 'true'
           enable_upload: 'true'
+          use_global_config: 'auto'
+          global_config_path: hub-config/.github/blackout-secure-code-scanning-kit-global-config.json
 
   # -----------------------------------------------------------------
   # 5. Pinned actions — ensures every third-party `uses:` reference in

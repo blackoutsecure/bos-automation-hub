@@ -1,0 +1,40 @@
+{
+  "code_scanning": {
+    "owner": "blackoutsecure",
+    "posture": {
+      "ghas": {
+        "require_code_scanning": "warn",
+        "require_secret_scanning": "warn",
+        "require_dependabot_alerts": "warn",
+        "require_push_protection": "warn"
+      },
+      "workflows": {
+        "require_permissions_block": "fail",
+        "forbid_write_all": "fail",
+        "require_pinned_actions": "fail",
+        "allow_tag_pin": []
+      },
+      "branches": {
+        "main": {
+          "required_reviews": 1,
+          "restrict_force_push": true,
+          "require_status_checks": true,
+          "require_conversation_resolution": true,
+          "severity": "fail"
+        },
+        "dev": {
+          "required_reviews": 1,
+          "severity": "warn"
+        }
+      },
+      "codeowners": {
+        "require_file": "warn",
+        "validate_users_exist": false
+      }
+    },
+    "remediation": {
+      "enable_ai_findings_summary": false,
+      "local_heuristic_fallback": true
+    }
+  }
+}

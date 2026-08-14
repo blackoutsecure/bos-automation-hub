@@ -78,12 +78,24 @@ repositories add the managed
 which owns Marketplace validation, stable-branch guarding, promotion, and
 opt-in post-release repository metadata synchronization.
 
-## Universal sync
+Code-scan policy layers the same way sync policy does. Org-wide defaults live in
+[.github/blackout-secure-code-scanning-kit-global-config.json](.github/blackout-secure-code-scanning-kit-global-config.json),
+a hub-authored file the code-scan job checks out alongside the caller repo and
+passes via `global_config_path`. A repository can layer its own overrides with
+a `code_scanning` block in its own `.github/bos-universal-config.json`, which
+`bos-code-scanning-kit` discovers automatically as its repository-tier config —
+no workflow input is required for that layer.
+
+## Managed file sync
 
 [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) is a thin
 wrapper around the published
 [`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
-It is callable only through the managed
+Unlike the other reusable entry points, this workflow only ever does one
+thing (managed-file sync), so its display name and run name read "Blackout
+Secure managed file sync" rather than "universal" — the `bos-universal-sync*`
+filenames are unchanged to keep existing `uses:` references stable. It is
+callable only through the managed
 [`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml).
 That kicker owns the schedule, config-change, and manual events. Its
 consumer front door resolves the target hub branch and delegates to

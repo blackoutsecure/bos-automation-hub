@@ -1,9 +1,9 @@
-# Blackout Secure universal sync kicker (hub-managed).
+# Blackout Secure managed file sync kicker (hub-managed).
 # Customize via `.github/bos-universal-config.json`, not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
-name: Blackout Secure universal sync (kicker)
+name: Blackout Secure managed file sync (kicker)
 run-name: >-
-  Blackout Secure universal sync / ${{
+  Blackout Secure managed file sync / ${{
     github.event_name == 'workflow_dispatch'
       && format('manual ({0})', inputs.mode)
       || github.event_name == 'schedule'
