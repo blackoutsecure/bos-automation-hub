@@ -1,5 +1,5 @@
 # Blackout Secure universal Marketplace kicker (hub-managed).
-# Customize via `.github/workflow-configs/bos-universal-config.json`, not this file.
+# Customize via `bos-universal-config.json`, not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 name: Blackout Secure Universal Marketplace
 run-name: >-
@@ -73,7 +73,7 @@ jobs:
         id: config
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
         with:
-          config_path: .github/workflow-configs/bos-universal-config.json
+          config_path: bos-universal-config.json
           allow_missing: 'false'
           require_marketplace_enabled: 'true'
       # `uses:` refs cannot be dynamic, so resolve which hub branch this

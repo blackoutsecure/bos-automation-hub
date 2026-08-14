@@ -172,7 +172,7 @@ runs:
           echo '# blackoutsecure/bos-automation-hub. DO NOT EDIT BY HAND — your changes'
           echo '# will be overwritten on the next deploy. To change rules, update the'
           echo '# `cloudflare_redirects_*` inputs (or the `cloudflare.redirects.*` block in'
-          echo '# `.github/workflow-configs/bos-universal-config.json` when called through the launchpad).'
+          echo '# `bos-universal-config.json` when called through the launchpad).'
           echo '# Built-in defaults: canonical host redirect and /security.txt redirect.'
           echo '#'
           echo '# Format reference:'

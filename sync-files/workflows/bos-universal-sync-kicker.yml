@@ -1,5 +1,5 @@
 # Blackout Secure managed file sync kicker (hub-managed).
-# Customize via `.github/workflow-configs/bos-universal-config.json`, not this file.
+# Customize via `bos-universal-config.json`, not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 name: Blackout Secure managed file sync (kicker)
 run-name: >-
@@ -16,7 +16,7 @@ run-name: >-
     - cron: '29 14 * * 1'
   push:
     paths:
-      - '.github/workflow-configs/bos-universal-config.json'
+      - 'bos-universal-config.json'
   workflow_dispatch:
     inputs:
       mode:

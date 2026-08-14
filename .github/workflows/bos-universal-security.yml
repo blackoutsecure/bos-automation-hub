@@ -99,7 +99,7 @@
 # `.github/workflow-configs/code-scanning-kit-global-config.json` (checked
 # out alongside the caller repo, mirroring the `bos-universal-sync.yml`
 # pattern). Per-repository overrides remain opt-in through a `code_scanning`
-# block in the caller's own `.github/workflow-configs/bos-universal-config.json`, which the
+# block in the caller's own `bos-universal-config.json`, which the
 # kit discovers automatically as its repository-tier config.
 
 name: Blackout Secure universal security (reusable)
@@ -189,7 +189,7 @@ on:
         required: false
         default: '20'
       config_authoritative:
-        description: Use .github/workflow-configs/bos-universal-config.json instead of direct gate inputs.
+        description: Use bos-universal-config.json instead of direct gate inputs.
         type: boolean
         required: false
         default: false
@@ -512,7 +512,7 @@ jobs:
           enable_upload: 'true'
           use_global_config: 'true'
           global_config_path: hub-config/.github/workflow-configs/code-scanning-kit-global-config.json
-          config: .github/workflow-configs/bos-universal-config.json
+          config: bos-universal-config.json
 
   # -----------------------------------------------------------------
   # 5. Pinned actions — ensures every third-party `uses:` reference in
@@ -586,7 +586,7 @@ jobs:
           subjectPatternError: |
             PR title subject must be at least 3 characters after the
             `<type>:` prefix. Examples:
-              feat(sync): add target_repo_role to .github/workflow-configs/bos-universal-config.json
+              feat(sync): add target_repo_role to bos-universal-config.json
               fix(lint): allow `truthy: on/off` in yamllint default
 
   # -----------------------------------------------------------------

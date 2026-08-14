@@ -355,7 +355,7 @@ jobs:
           http_timeout: ${{ inputs.kit_http_timeout }}
           use_global_config: 'true'
           global_config_path: hub-config/.github/workflow-configs/code-scanning-kit-global-config.json
-          config: .github/workflow-configs/bos-universal-config.json
+          config: bos-universal-config.json
 
   codeql:
     name: Analyze (${{ matrix.language }})
