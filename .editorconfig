@@ -1,4 +1,4 @@
-# Managed by Blackout Secure. Best practices applied via marketplace config, customized in .github/workflow-configs/managed-file-sync-global-config.json and bos-universal-config.json.
+# Managed by Blackout Secure. Best practices applied via marketplace config, customized in sync-files/config/managed-file-sync-global-config.json and .github/bos-universal-config.json.
 # Starter template, safe to customize. This file is only ever created, never overwritten.
 root = true
 
@@ -20,7 +20,7 @@ trim_trailing_whitespace = false
 indent_style = tab
 
 # >>> managed-file-sync:editorconfig >>>
-# Managed by Blackout Secure Managed File Sync — configure services in bos-universal-config.json.
+# Managed by Blackout Secure Managed File Sync — configure services in .github/bos-universal-config.json.
 [*]
 charset = utf-8
 end_of_line = lf

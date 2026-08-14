@@ -4,15 +4,15 @@ This directory contains canonical hub templates published with the repository.
 Managed-file synchronization is provided by
 [`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
 Consumer repositories select its services in the `managed_file_sync` section
-of `bos-universal-config.json`. The global policy enables
+of `.github/bos-universal-config.json`. The global policy enables
 organization-wide `shellcheck`, Security kicker, and Sync kicker defaults;
 repository-specific kickers remain available as global service definitions
 and must be selected by repositories that need them. The global policy also
 sets `take_over_managed_files: true` so organization-owned blocks can replace
 competing managed blocks.
-This repository's own sync wrappers use `bos-universal-config.json` as
+This repository's own sync wrappers use `.github/bos-universal-config.json` as
 the repo layer and check out the shared global policy at
-`.github/workflow-configs/managed-file-sync-global-config.json`.
+`sync-files/config/managed-file-sync-global-config.json`.
 Settings may be authored as flat top-level keys or grouped under a named
 section per service (`launchpad`, `marketplace`, `security`, plus a
 `general` catch-all for anything else) — see the ["Config sections"](../README.md#config-sections)
@@ -25,7 +25,7 @@ and [`dotfiles/`](dotfiles/). These files remain the normal authoring and
 review surface for hub-specific release content.
 
 - [`bos-universal-launchpad-kicker.yml`](workflows/bos-universal-launchpad-kicker.yml)
-  is the managed release/deploy caller. It reads `bos-universal-config.json`
+  is the managed release/deploy caller. It reads `.github/bos-universal-config.json`
   and calls the promoted hub runtime on `@main`.
 - [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
   is the managed PR and merge-queue caller for shared lint, dependency review,
@@ -58,7 +58,7 @@ them directly. A repository opts into the callers it needs, for example:
 
 Enable the published managed-file sync action alongside whichever other
 managed callers the repository needs. GitHub still requires one event-trigger
-workflow per repository; `bos-universal-config.json` controls sync behavior
+workflow per repository; `.github/bos-universal-config.json` controls sync behavior
 through `managed_file_sync`. The `editorconfig` service is provided by the
 published action's default catalog; hub-specific templates remain under the
 local `dotfiles/` source directory.

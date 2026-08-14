@@ -355,7 +355,7 @@ jobs:
           path: hub-config
           fetch-depth: 1
           persist-credentials: false
-          sparse-checkout: .github/workflow-configs/marketplace-kit-global-config.json
+          sparse-checkout: config/marketplace-kit-global-config.json
           sparse-checkout-cone-mode: false
 
       - name: Marketplace pre-publish check
@@ -366,8 +366,8 @@ jobs:
         uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@5fc9b4088c962cd45b52c9928443c5f5496a41d1 # v0.1.11
         with:
           use_global_config:       'true'
-          global_config_path:      hub-config/.github/workflow-configs/marketplace-kit-global-config.json
-          config_path:             bos-universal-config.json
+          global_config_path:      hub-config/config/marketplace-kit-global-config.json
+          config_path:             .github/bos-universal-config.json
           action_yml_path:        ${{ inputs.action_yml_path }}
           fail_on_warning:        ${{ inputs.fail_on_warning && 'true' || '' }}
           skip_checks:            ${{ inputs.skip_checks }}

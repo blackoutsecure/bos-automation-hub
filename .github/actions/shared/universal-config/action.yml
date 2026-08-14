@@ -1,11 +1,11 @@
 name: Universal config
-description: Universal config reader for bos-universal-config.json.
+description: Universal config reader for .github/bos-universal-config.json.
 
 inputs:
   config_path:
     description: Path to the config JSON file.
     required: false
-    default: bos-universal-config.json
+    default: .github/bos-universal-config.json
   allow_missing:
     description: Emit {} when config file is missing instead of failing.
     required: false
@@ -34,7 +34,7 @@ runs:
         import os
         import sys
 
-        config_path = os.environ.get("CONFIG_PATH") or "bos-universal-config.json"
+        config_path = os.environ.get("CONFIG_PATH") or ".github/bos-universal-config.json"
         allow_missing = (os.environ.get("ALLOW_MISSING") or "false").lower() == "true"
         require_marketplace_enabled = (os.environ.get("REQUIRE_MARKETPLACE_ENABLED") or "false").lower() == "true"
         output_path = os.environ["GITHUB_OUTPUT"]

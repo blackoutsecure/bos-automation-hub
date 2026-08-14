@@ -341,7 +341,7 @@ jobs:
           path: hub-config
           fetch-depth: 1
           persist-credentials: false
-          sparse-checkout: .github/workflow-configs/code-scanning-kit-global-config.json
+          sparse-checkout: config/code-scanning-kit-global-config.json
           sparse-checkout-cone-mode: false
       - id: kit
         name: Run BOS Code Scanning Kit
@@ -354,8 +354,8 @@ jobs:
           fail_on: ${{ inputs.fail_on }}
           http_timeout: ${{ inputs.kit_http_timeout }}
           use_global_config: 'true'
-          global_config_path: hub-config/.github/workflow-configs/code-scanning-kit-global-config.json
-          config: bos-universal-config.json
+          global_config_path: hub-config/config/code-scanning-kit-global-config.json
+          config: .github/bos-universal-config.json
 
   codeql:
     name: Analyze (${{ matrix.language }})

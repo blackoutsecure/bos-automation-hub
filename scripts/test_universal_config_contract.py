@@ -59,10 +59,11 @@ def run_universal_config_raw(raw_text: str) -> subprocess.CompletedProcess[str]:
     )[0]
     with tempfile.TemporaryDirectory() as temp_dir:
         temp = Path(temp_dir)
-        config_path = temp / "bos-universal-config.json"
+        config_path = temp / ".github" / "bos-universal-config.json"
+        config_path.parent.mkdir()
         config_path.write_text(raw_text)
         env = os.environ | {
-            "CONFIG_PATH": "bos-universal-config.json",
+            "CONFIG_PATH": ".github/bos-universal-config.json",
             "ALLOW_MISSING": "false",
             "GITHUB_OUTPUT": str(temp / "output"),
             "GITHUB_STEP_SUMMARY": str(temp / "summary"),
@@ -288,8 +289,8 @@ def main() -> None:
         "missing": sorted(declared - forwarded),
         "unknown": sorted(forwarded - declared),
     }
-    assert "config_path: bos-universal-config.json" in kicker
-    assert "config_path: bos-universal-config.json" in action_test_workflow
+    assert "config_path: .github/bos-universal-config.json" in kicker
+    assert "config_path: .github/bos-universal-config.json" in action_test_workflow
 
     assert "managed-files-guard:" not in kicker
     assert "bos-universal-sync.yml@main" not in workflow
@@ -383,8 +384,8 @@ def main() -> None:
     assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" not in marketplace_kicker
     assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" not in marketplace_kicker
     assert "outputs.cfg" in marketplace_kicker
-    assert "`bos-universal-config.json`" in marketplace_kicker
-    assert "config_path: bos-universal-config.json" in marketplace_kicker
+    assert "`.github/bos-universal-config.json`" in marketplace_kicker
+    assert "config_path: .github/bos-universal-config.json" in marketplace_kicker
     assert "pull_request_target:" in marketplace_kicker
     assert "github.event.repository.default_branch" in marketplace_kicker
     assert not re.search(r"source_branch:\s+dev\b", marketplace_kicker)
@@ -393,11 +394,11 @@ def main() -> None:
     ).read_text()
     assert "use_global_config:       'true'" in marketplace_workflow
     assert (
-        "global_config_path:      hub-config/.github/workflow-configs/"
+        "global_config_path:      hub-config/config/"
         "marketplace-kit-global-config.json"
         in marketplace_workflow
     )
-    assert "config_path:             bos-universal-config.json" in marketplace_workflow
+    assert "config_path:             .github/bos-universal-config.json" in marketplace_workflow
     assert "bos-marketplace-kit/.github/actions/check@5fc9b4088c962cd45b52c9928443c5f5496a41d1" in marketplace_workflow
 
     for kicker_path in (
@@ -621,15 +622,17 @@ def main() -> None:
     assert sync_backend.count("runs-on: ubuntu-latest") == 1
     assert "vars.DEFAULT_RUNNER" not in sync_backend
 
-    hub_config_raw = json.loads((ROOT / "bos-universal-config.json").read_text())
+    hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
     assert set(hub_config_raw) == {"launchpad", "organization"}
     hub_org = hub_config_raw["organization"]
     assert hub_org["runners"]["default"] == "ubuntu-latest"
     assert hub_org["reporting"]["fail_on"] == "fail"
-    assert hub_org["workflows"]["security"]["timeout_minutes"] == 20
+    assert hub_org["defaults"]["timeout_minutes"] == 30
+    # Hub config has no workflow overrides; they're just examples for consumers.
+    assert "workflows" not in hub_org
 
     global_code_scan_config = json.loads(
-        (ROOT / ".github/workflow-configs/code-scanning-kit-global-config.json").read_text()
+        (ROOT / "sync-files/config/code-scanning-kit-global-config.json").read_text()
     )
     assert global_code_scan_config["code_scanning"] == {
         "posture": {
@@ -650,7 +653,7 @@ def main() -> None:
     }
 
     global_marketplace_config = json.loads(
-        (ROOT / ".github/workflow-configs/marketplace-kit-global-config.json").read_text()
+        (ROOT / "sync-files/config/marketplace-kit-global-config.json").read_text()
     )
     assert global_marketplace_config["marketplace_kit"] == {
         "profile": "strict",
@@ -660,21 +663,21 @@ def main() -> None:
     }
 
     assert (
-        "global_config_path: hub-config/.github/workflow-configs/code-scanning-kit-global-config.json"
+        "global_config_path: hub-config/config/code-scanning-kit-global-config.json"
         in gate_workflow
     )
     assert "use_global_config: 'true'" in gate_workflow
-    assert "config: bos-universal-config.json" in gate_workflow
+    assert "config: .github/bos-universal-config.json" in gate_workflow
     assert "bos-code-scanning-kit@8f8145afd7d1faf0a28792f6105103d9666c978c" in gate_workflow
     standalone_scan_workflow = (
         ROOT / ".github/workflows/security-scan.yml"
     ).read_text()
-    assert "sparse-checkout: .github/workflow-configs/code-scanning-kit-global-config.json" in standalone_scan_workflow
+    assert "sparse-checkout: config/code-scanning-kit-global-config.json" in standalone_scan_workflow
     assert "use_global_config: 'true'" in standalone_scan_workflow
-    assert "config: bos-universal-config.json" in standalone_scan_workflow
+    assert "config: .github/bos-universal-config.json" in standalone_scan_workflow
     assert "bos-code-scanning-kit@8f8145afd7d1faf0a28792f6105103d9666c978c" in standalone_scan_workflow
     global_sync_config = json.loads(
-        (ROOT / ".github/workflow-configs/managed-file-sync-global-config.json").read_text()
+        (ROOT / "sync-files/config/managed-file-sync-global-config.json").read_text()
     )
     sync_policy = global_sync_config["managed_file_sync"]
     assert "exclude_services" not in sync_policy
@@ -695,7 +698,7 @@ def main() -> None:
     )
     assert "variables" not in sync_policy
     hub_config = cfg_from(
-        run_universal_config_raw((ROOT / "bos-universal-config.json").read_text())
+        run_universal_config_raw((ROOT / ".github/bos-universal-config.json").read_text())
     )
     assert "gate" not in hub_config
     assert hub_config["repo_metadata"] == {
@@ -714,11 +717,11 @@ def main() -> None:
     assert "  workflow_dispatch:" not in sync_backend
     assert "global_config_json" not in sync_backend
     assert (
-        "global_config_path: sync-files/.github/workflow-configs/managed-file-sync-global-config.json"
+        "global_config_path: sync-files/config/managed-file-sync-global-config.json"
         in sync_backend
     )
     assert "ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}" in sync_backend
-    assert "config_path: bos-universal-config.json" not in sync_backend
+    assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
     assert "use_global_config: 'true'" in sync_backend
     assert "bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a" in sync_backend

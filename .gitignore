@@ -62,7 +62,7 @@ build/
 
 
 # >>> managed-file-sync:common >>>
-# Managed by Blackout Secure Managed File Sync — configure services in bos-universal-config.json.
+# Managed by Blackout Secure Managed File Sync — configure services in .github/bos-universal-config.json.
 # OS + editor noise
 .DS_Store
 Thumbs.db

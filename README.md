@@ -39,7 +39,7 @@ The launchpad can compose:
 - security scanning;
 - repository metadata updates.
 
-Consumer behavior is data-driven through `bos-universal-config.json`; managed
+Consumer behavior is data-driven through `.github/bos-universal-config.json`; managed
 workflow files are not edited in consumer repositories.
 
 ## Universal security
@@ -67,7 +67,7 @@ The hub itself runs
 [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)
 directly. Use **Actions → Blackout Secure universal security (reusable) → Run
 workflow** on `dev` for a manual scan; it loads the current `security` section
-from `bos-universal-config.json`, just like the sync backend. The managed
+from `.github/bos-universal-config.json`, just like the sync backend. The managed
 [`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml)
 is retained for consumer repositories, but the hub does not install a local
 kicker for this workflow.
@@ -79,10 +79,10 @@ which owns Marketplace validation, stable-branch guarding, promotion, and
 opt-in post-release repository metadata synchronization.
 
 Code-scan policy layers the same way sync policy does. Org-wide defaults live in
-[.github/workflow-configs/code-scanning-kit-global-config.json](.github/workflow-configs/code-scanning-kit-global-config.json),
+[sync-files/config/code-scanning-kit-global-config.json](sync-files/config/code-scanning-kit-global-config.json),
 a hub-authored file the code-scan job checks out alongside the caller repo and
 passes via `global_config_path`. A repository can layer its own overrides with
-a `code_scanning` block in its own `bos-universal-config.json`, which
+a `code_scanning` block in its own `.github/bos-universal-config.json`, which
 `bos-code-scanning-kit` receives explicitly as its repository-tier config.
 
 ## Managed file sync
@@ -101,7 +101,7 @@ consumer front door resolves the target hub branch and delegates to
 `bos-universal-sync.yml`, the same pattern used by the launchpad, security, and
 Marketplace kickers. The reusable workflow never self-triggers and never
 traverses the release, security, or Marketplace workflows. Sync defaults live in
-[.github/workflow-configs/managed-file-sync-global-config.json](.github/workflow-configs/managed-file-sync-global-config.json),
+[sync-files/config/managed-file-sync-global-config.json](sync-files/config/managed-file-sync-global-config.json),
 a hub-authored file. `bos-universal-sync.yml` checks out this hub alongside
 the consumer repo and passes `global_config_path` at the checked-out copy, so
 the policy stays a real, editable JSON file instead of an inline blob.
@@ -117,7 +117,7 @@ It complements `bos-universal-security.yml`'s single-OS/Python `python-lint`
 job (Ruff + pytest, part of the PR security gate) rather than replacing it:
 use this workflow when a repo needs broader Python/OS matrix coverage and/or
 validation against a live upstream target, driven by an `action_test` block
-in `bos-universal-config.json`:
+in `.github/bos-universal-config.json`:
 
 ```json
 {
@@ -222,7 +222,7 @@ never executes PR-head code; its release job runs only by manual dispatch with
 
 ## Consumer configuration
 
-Create `bos-universal-config.json` in the repository. A minimal
+Create `.github/bos-universal-config.json` in the repository. A minimal
 configuration can enable only the required stages:
 
 ```json
@@ -316,10 +316,21 @@ repeated in every job:
       "title_prefix": "Blackout Secure",
       "fail_on": "fail"
     },
-    "defaults": { "timeout_minutes": 30 },
+    "defaults": {
+      "timeout_minutes": 30
+    }
+  }
+}
+```
+
+Config consumers can override per-workflow timeouts by adding entries under `workflows`; any unspecified workflows inherit the `defaults.timeout_minutes`. For example:
+
+```json
+{
+  "organization": {
     "workflows": {
       "security": { "timeout_minutes": 20 },
-      "sync": { "runs_on": ["self-hosted", "Linux"], "timeout_minutes": 5 }
+      "sync": { "runs_on": ["self-hosted", "Linux"] }
     }
   }
 }
@@ -422,7 +433,7 @@ For example, the sample above can equivalently be written grouped:
 event and commit wrapper around the published
 [`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
 The published action reads the `managed_file_sync` block from
-[`bos-universal-config.json`](bos-universal-config.json), resolves its catalog,
+[`bos-universal-config.json`](.github/bos-universal-config.json), resolves its catalog,
 and reconciles the working tree. Canonical hub templates live under
 [`sync-files/`](sync-files/); this repository no longer contains a local
 sync engine or service registry. The global hub policy enables the
@@ -530,7 +541,7 @@ Use this consumer configuration:
 ```
 
 Marketplace validation loads the hub's strict
-[`marketplace-kit-global-config.json`](.github/workflow-configs/marketplace-kit-global-config.json)
+[`marketplace-kit-global-config.json`](sync-files/config/marketplace-kit-global-config.json)
 policy and then the repository's `marketplace_kit` block. The global policy
 inherits organization community-health files and defers GHAS and Security
 DevOps posture rules to `bos-code-scanning-kit`; set a per-repository
@@ -573,7 +584,7 @@ Consumer repositories normally need only the managed
 [`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml),
 [`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml),
 and [`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml)
-callers. They read `bos-universal-config.json` and invoke independent hub
+callers. They read `.github/bos-universal-config.json` and invoke independent hub
 entry points:
 
 | Entry point | Purpose |
@@ -698,7 +709,7 @@ No consumer wiring is required beyond creating the secret:
   security-scan stage additionally requires
   `launchpad.security_scan.use_advanced_pat: true` (or the flat
   `security_scan.use_advanced_pat` equivalent) in
-  [`bos-universal-config.json`](bos-universal-config.json) — this hub ships
+  [`bos-universal-config.json`](.github/bos-universal-config.json) — this hub ships
   that flag enabled by default. It is a documented no-op when `SCANNING_PAT`
   is absent (the kit transparently falls back to `GITHUB_TOKEN`), so enabling
   it ahead of provisioning the secret is safe.

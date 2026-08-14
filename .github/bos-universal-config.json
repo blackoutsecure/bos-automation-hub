@@ -13,14 +13,6 @@
     },
     "defaults": {
       "timeout_minutes": 30
-    },
-    "workflows": {
-      "security": {
-        "timeout_minutes": 20
-      },
-      "sync": {
-        "timeout_minutes": 5
-      }
     }
   },
   "launchpad": {

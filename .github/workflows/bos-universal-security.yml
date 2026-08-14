@@ -96,10 +96,10 @@
 # ------------------------------
 # The code-scan job forwards an org-wide policy tier to the kit via
 # `global_config_path`, sourced from this hub's own
-# `.github/workflow-configs/code-scanning-kit-global-config.json` (checked
+# `sync-files/config/code-scanning-kit-global-config.json` (checked
 # out alongside the caller repo, mirroring the `bos-universal-sync.yml`
 # pattern). Per-repository overrides remain opt-in through a `code_scanning`
-# block in the caller's own `bos-universal-config.json`, which the
+# block in the caller's own `.github/bos-universal-config.json`, which the
 # kit discovers automatically as its repository-tier config.
 
 name: Blackout Secure universal security (reusable)
@@ -189,7 +189,7 @@ on:
         required: false
         default: '20'
       config_authoritative:
-        description: Use bos-universal-config.json instead of direct gate inputs.
+        description: Use .github/bos-universal-config.json instead of direct gate inputs.
         type: boolean
         required: false
         default: false
@@ -506,7 +506,7 @@ jobs:
           path: hub-config
           fetch-depth: 1
           persist-credentials: false
-          sparse-checkout: .github/workflow-configs/code-scanning-kit-global-config.json
+          sparse-checkout: config/code-scanning-kit-global-config.json
           sparse-checkout-cone-mode: false
       - name: Run bos-code-scanning-kit
         uses: blackoutsecure/bos-code-scanning-kit@8f8145afd7d1faf0a28792f6105103d9666c978c # dev
@@ -518,8 +518,8 @@ jobs:
           enable_scanners: 'true'
           enable_upload: 'true'
           use_global_config: 'true'
-          global_config_path: hub-config/.github/workflow-configs/code-scanning-kit-global-config.json
-          config: bos-universal-config.json
+          global_config_path: hub-config/config/code-scanning-kit-global-config.json
+          config: .github/bos-universal-config.json
 
   # -----------------------------------------------------------------
   # 5. Pinned actions — ensures every third-party `uses:` reference in
@@ -596,7 +596,7 @@ jobs:
           subjectPatternError: |
             PR title subject must be at least 3 characters after the
             `<type>:` prefix. Examples:
-              feat(sync): add target_repo_role to bos-universal-config.json
+              feat(sync): add target_repo_role to .github/bos-universal-config.json
               fix(lint): allow `truthy: on/off` in yamllint default
 
   # -----------------------------------------------------------------
@@ -668,7 +668,7 @@ jobs:
           }
           GATES = [
               ("SG001", "R_CONFIG", "Universal config", "quality",
-               "Fix `bos-universal-config.json` so every downstream gate can resolve its policy."),
+               "Fix `.github/bos-universal-config.json` so every downstream gate can resolve its policy."),
               ("SG010", "R_LINT", "Workflow / Markdown / YAML lint", "quality",
                "Run the kit lint composite locally and correct the reported files."),
               ("SG011", "R_NODE", "Node (ESLint + Prettier)", "quality",
@@ -706,7 +706,7 @@ jobs:
               if severity == "fail":
                   advice = remediation
               elif severity == "skip":
-                  advice = "Enable this gate in `bos-universal-config.json` to obtain a verdict."
+                  advice = "Enable this gate in `.github/bos-universal-config.json` to obtain a verdict."
               else:
                   advice = "—"
               findings.append({
