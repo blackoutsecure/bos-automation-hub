@@ -725,6 +725,11 @@ def main() -> None:
         "global_config_path: sync-files/config/managed-file-sync-global-config.json"
         in sync_backend
     )
+    assert "Ensure managed-file-sync global config is available" in sync_backend
+    assert (
+        'git -C sync-files show "HEAD:config/managed-file-sync-global-config.json"'
+        in sync_backend
+    )
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend

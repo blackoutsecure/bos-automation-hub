@@ -133,6 +133,17 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Ensure managed-file-sync global config is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_path="sync-files/config/managed-file-sync-global-config.json"
+          if [[ ! -f "${config_path}" ]]; then
+            mkdir -p "$(dirname "${config_path}")"
+            git -C sync-files show "HEAD:config/managed-file-sync-global-config.json" > "${config_path}"
+          fi
+          test -s "${config_path}"
+
       - name: Sync configured services
         id: sync
         uses: blackoutsecure/bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a # dev
