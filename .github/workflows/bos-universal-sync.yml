@@ -150,7 +150,7 @@ jobs:
         uses: blackoutsecure/bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a # dev
         with:
           # The action auto-discovers .github/bos-universal-config.json.
-          use_global_config: 'true'
+          use_global_config: 'auto'
           global_config_path: hub-source/sync-files/config/managed-file-sync-global-config.json
           managed_files_path: hub-source/sync-files/workflows
           config_json: >-
@@ -315,17 +315,17 @@ jobs:
                   "enable_annotations="
                   f"{str(reporting.get('enable_annotations', True)).lower()}\n"
               )
-                handle.write(
+              handle.write(
                   "enable_html="
                   f"{str(reporting.get('enable_html', True)).lower()}\n"
-                )
-                handle.write(
+              )
+              handle.write(
                   "enable_pdf="
                   f"{str(reporting.get('enable_pdf', False)).lower()}\n"
-                )
-                handle.write(f"html_path={reporting.get('html_path', 'blackout-secure-report.html')}\n")
-                handle.write(f"pdf_path={reporting.get('pdf_path', 'blackout-secure-report.pdf')}\n")
-                handle.write(f"artifact_name={reporting.get('artifact_name', 'blackout-secure-audit-report')}\n")
+              )
+              handle.write(f"html_path={reporting.get('html_path', 'blackout-secure-report.html')}\n")
+              handle.write(f"pdf_path={reporting.get('pdf_path', 'blackout-secure-report.pdf')}\n")
+              handle.write(f"artifact_name={reporting.get('artifact_name', 'blackout-secure-audit-report')}\n")
               for name, value in (
                   ("findings", json.dumps(findings, separators=(",", ":"))),
                   ("context_rows", json.dumps(context_rows, separators=(",", ":"))),
