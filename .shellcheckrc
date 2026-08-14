@@ -15,7 +15,7 @@ disable=SC2016,SC1091
 external-sources=true
 
 # >>> managed-file-sync:shellcheck >>>
-# Managed by Blackout Secure. Best practices applied via marketplace config, customized in .github/workflow-configs/managed-file-sync-global-config.json and bos-universal-config.json.
+# Managed by Blackout Secure Managed File Sync — configure services in bos-universal-config.json.
 shell=bash
 external-sources=true
 enable=quote-safe-variables
