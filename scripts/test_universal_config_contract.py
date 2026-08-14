@@ -596,7 +596,7 @@ def main() -> None:
         in sync_backend
     )
     assert "ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}" in sync_backend
-    assert "config_path: bos-universal-config.json" in sync_backend
+    assert "config_path: bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
     assert "use_global_config: 'true'" in sync_backend
     assert "bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a" in sync_backend
