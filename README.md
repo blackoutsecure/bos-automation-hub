@@ -349,6 +349,11 @@ Config consumers can override per-workflow timeouts by adding entries under `wor
 | `runners.x64` / `runners.arm64` | `runners.default` | Architecture-specific labels for multi-arch build jobs. |
 | `reporting.enable_job_summary` | `true` | `false` suppresses the `$GITHUB_STEP_SUMMARY` report. |
 | `reporting.enable_annotations` | `true` | `false` suppresses `::error::` / `::warning::` annotations. |
+| `reporting.enable_html` | `true` | Generates the standalone HTML audit artifact. |
+| `reporting.enable_pdf` | `false` | Attempts PDF export when Chromium or Chrome is installed; HTML remains the source report. |
+| `reporting.html_path` | `blackout-secure-report.html` | Workspace path for the HTML report. |
+| `reporting.pdf_path` | `blackout-secure-report.pdf` | Workspace path for an optional PDF export. |
+| `reporting.artifact_name` | `blackout-secure-audit-report` | Authenticated GitHub Actions artifact name. |
 | `reporting.title_prefix` | `Blackout Secure` | Prefix applied to generated report titles. |
 | `reporting.fail_on` | `fail` | `fail`, `warn`, or `never` — the severity tier that makes a report step exit non-zero. |
 | `defaults.timeout_minutes` | `30` | Fallback job timeout. |
@@ -375,7 +380,21 @@ Every workflow reports through one shared surface,
 same audit layout used by `bos-code-scanning-kit` and
 `bos-managed-file-sync-action`: a verdict, a severity-count table, recommended
 actions, a `Configuration used` disclosure, and grouped findings tables — plus
-matching workflow annotations.
+matching workflow annotations. It also generates a standalone, responsive HTML
+audit report with print CSS, provenance metadata, GitHub repository/run/commit
+links, Blackout Secure branding, and a downloadable GitHub Actions artifact.
+The HTML is the canonical rich report and can be printed to PDF from any
+browser. When `reporting.enable_pdf` is enabled, the action additionally uses a
+preinstalled Chromium/Chrome binary when available; a missing PDF engine is a
+notice, not a failed audit.
+
+Artifact access is authenticated by GitHub Actions and follows the permissions
+of the workflow run. The report itself contains no credentials and does not
+create a public URL. The generated report identifies [Blackout
+Secure](https://blackoutsecure.app), the repository, ref, commit, workflow,
+run, generation time, Apache License 2.0 metadata, and an open-source notice:
+automated findings are operational guidance, not a security certification,
+legal opinion, warranty, or substitute for qualified human review.
 
 Findings are pure data, so a workflow only builds a JSON array and the report
 surface stays identical everywhere:

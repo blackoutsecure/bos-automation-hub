@@ -169,6 +169,11 @@ def main() -> None:
     assert org_defaults["reporting"] == {
         "enable_job_summary": True,
         "enable_annotations": True,
+        "enable_html": True,
+        "enable_pdf": False,
+        "html_path": "blackout-secure-report.html",
+        "pdf_path": "blackout-secure-report.pdf",
+        "artifact_name": "blackout-secure-audit-report",
         "title_prefix": "Blackout Secure",
         "fail_on": "fail",
     }
@@ -614,7 +619,9 @@ def main() -> None:
 
     # Runner topology comes from the organization block, never a literal.
     assert "org: ${{ steps.config.outputs.organization }}" in gate_workflow
+    assert "config: ${{ steps.config.outputs.cfg }}" in gate_workflow
     assert "org: ${{ steps.config.outputs.organization }}" in sync_backend
+    assert "config: ${{ steps.config.outputs.cfg }}" in sync_backend
     assert (
         "runs-on: ${{ fromJSON(needs.resolve-config.outputs.org)"
         ".workflows.security.runs_on }}"
@@ -626,6 +633,10 @@ def main() -> None:
     assert gate_workflow.count("runs-on: ubuntu-latest") == 2
     assert sync_backend.count("runs-on: ubuntu-latest") == 1
     assert "vars.DEFAULT_RUNNER" not in sync_backend
+    assert 'elif counts["skip"]' in job_report
+    assert "Coverage incomplete" in job_report
+    assert 'set_value(row.get("value"))' in job_report
+    assert 'for key in LABELS if counts[key]' in job_report
 
     hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
     assert set(hub_config_raw) == {"launchpad", "organization"}
@@ -722,12 +733,12 @@ def main() -> None:
     assert "  workflow_dispatch:" not in sync_backend
     assert "global_config_json" not in sync_backend
     assert (
-        "global_config_path: hub-source/config/managed-file-sync-global-config.json"
+        "global_config_path: hub-source/sync-files/config/managed-file-sync-global-config.json"
         in sync_backend
     )
     assert "Ensure managed-file-sync global config is available" in sync_backend
     assert (
-        'git -C hub-source show "HEAD:config/managed-file-sync-global-config.json"'
+        'git -C hub-source show "HEAD:sync-files/config/managed-file-sync-global-config.json"'
         in sync_backend
     )
     assert "managed_files_path: hub-source/sync-files/workflows" in sync_backend

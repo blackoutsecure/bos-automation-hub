@@ -381,6 +381,11 @@ runs:
         reporting = {
             "enable_job_summary": reporting_raw.get("enable_job_summary") is not False,
             "enable_annotations": reporting_raw.get("enable_annotations") is not False,
+            "enable_html": reporting_raw.get("enable_html") is not False,
+            "enable_pdf": reporting_raw.get("enable_pdf") is True,
+            "html_path": str(reporting_raw.get("html_path") or "blackout-secure-report.html"),
+            "pdf_path": str(reporting_raw.get("pdf_path") or "blackout-secure-report.pdf"),
+            "artifact_name": str(reporting_raw.get("artifact_name") or "blackout-secure-audit-report"),
             "title_prefix": str(reporting_raw.get("title_prefix") or "Blackout Secure"),
             "fail_on": fail_on,
         }

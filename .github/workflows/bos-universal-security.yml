@@ -225,6 +225,7 @@ jobs:
     outputs:
       gate: ${{ steps.resolve.outputs.gate }}
       org: ${{ steps.config.outputs.organization }}
+      config: ${{ steps.config.outputs.cfg }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -661,6 +662,7 @@ jobs:
         env:
           ORG: ${{ needs.resolve-config.outputs.org }}
           GATE: ${{ needs.resolve-config.outputs.gate }}
+          CONFIG: ${{ needs.resolve-config.outputs.config }}
           R_CONFIG: ${{ needs.resolve-config.result }}
           R_LINT: ${{ needs.lint.result }}
           R_NODE: ${{ needs.node-lint.result }}
@@ -712,6 +714,7 @@ jobs:
 
           org = json.loads(os.environ["ORG"] or "{}")
           gate = json.loads(os.environ["GATE"] or "{}")
+          config = json.loads(os.environ.get("CONFIG") or "{}")
           # `resolve-config` may itself have failed, so every org lookup
           # below degrades to the documented default rather than making
           # the required check unrenderable.
@@ -739,16 +742,30 @@ jobs:
                   "group": group,
               })
 
-          context_rows = [
-              {"label": "Runner", "value": runs_on,
-               "meaning": "Resolved from `organization.runners` in the universal config."},
-              {"label": "Job timeout", "value": f"{timeout_minutes} min",
-               "meaning": "Resolved from `organization.workflows.security.timeout_minutes`."},
-              {"label": "Code-scan fail policy", "value": gate.get("code_scan_fail_on", "fail"),
-               "meaning": "Forwarded to bos-code-scanning-kit's `fail_on` input."},
-              {"label": "Report fail policy", "value": org_reporting.get("fail_on", "fail"),
-               "meaning": "Severity tier that makes this required check exit non-zero."},
-          ]
+          organization = config.get("organization") or {}
+          workflow_config = (organization.get("workflows") or {}).get("security") or {}
+          gate_config = config.get("gate") or config.get("security") or {}
+          context_rows = []
+          if (organization.get("runners") or {}).get("default") is not None:
+              context_rows.append({
+                  "label": "Runner", "value": runs_on,
+                  "meaning": "Explicitly configured by `organization.runners.default`.",
+              })
+          if workflow_config.get("timeout_minutes") is not None:
+              context_rows.append({
+                  "label": "Job timeout", "value": f"{timeout_minutes} min",
+                  "meaning": "Explicitly configured by `organization.workflows.security.timeout_minutes`.",
+              })
+          if "code_scan_fail_on" in gate_config:
+              context_rows.append({
+                  "label": "Code-scan fail policy", "value": gate.get("code_scan_fail_on"),
+                  "meaning": "Forwarded to bos-code-scanning-kit's `fail_on` input.",
+              })
+          if "fail_on" in (organization.get("reporting") or {}):
+              context_rows.append({
+                  "label": "Report fail policy", "value": org_reporting.get("fail_on"),
+                  "meaning": "Severity tier that makes this required check exit non-zero.",
+              })
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
               handle.write(f"fail_on={org_reporting.get('fail_on', 'fail')}\n")
@@ -760,6 +777,17 @@ jobs:
                   "enable_annotations="
                   f"{str(org_reporting.get('enable_annotations', True)).lower()}\n"
               )
+                handle.write(
+                  "enable_html="
+                  f"{str(org_reporting.get('enable_html', True)).lower()}\n"
+                )
+                handle.write(
+                  "enable_pdf="
+                  f"{str(org_reporting.get('enable_pdf', False)).lower()}\n"
+                )
+                handle.write(f"html_path={org_reporting.get('html_path', 'blackout-secure-report.html')}\n")
+                handle.write(f"pdf_path={org_reporting.get('pdf_path', 'blackout-secure-report.pdf')}\n")
+                handle.write(f"artifact_name={org_reporting.get('artifact_name', 'blackout-secure-audit-report')}\n")
               for name, value in (
                   ("findings", json.dumps(findings, separators=(",", ":"))),
                   ("context_rows", json.dumps(context_rows, separators=(",", ":"))),
@@ -783,6 +811,20 @@ jobs:
           fail_on: ${{ steps.findings.outputs.fail_on }}
           enable_summary: ${{ steps.findings.outputs.enable_summary }}
           enable_annotations: ${{ steps.findings.outputs.enable_annotations }}
+          enable_html: ${{ steps.findings.outputs.enable_html }}
+          enable_pdf: ${{ steps.findings.outputs.enable_pdf }}
+          html_path: ${{ steps.findings.outputs.html_path }}
+          pdf_path: ${{ steps.findings.outputs.pdf_path }}
           footer: >-
             This report was generated by the Blackout Secure universal security
             workflow (`bos-universal-security.yml`).
+      - name: Upload security audit report
+        if: ${{ always() && steps.findings.outputs.enable_html == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.findings.outputs.artifact_name || 'blackout-secure-audit-report' }}
+          path: |
+            ${{ steps.findings.outputs.html_path || 'blackout-secure-report.html' }}
+            ${{ steps.findings.outputs.pdf_path }}
+          if-no-files-found: warn
+          retention-days: 14
