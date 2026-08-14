@@ -25,6 +25,24 @@
             "content_file": "bos-universal-sync-kicker.yml"
           }
         ]
+      },
+      "bos_universal_action_test_kicker": {
+        "mode": "file",
+        "files": [
+          {
+            "path": ".github/workflows/bos-universal-action-test-kicker.yml",
+            "content_file": "bos-universal-action-test-kicker.yml"
+          }
+        ]
+      },
+      "bos_universal_marketplace_kicker": {
+        "mode": "file",
+        "files": [
+          {
+            "path": ".github/workflows/bos-universal-marketplace-kicker.yml",
+            "content_file": "bos-universal-marketplace-kicker.yml"
+          }
+        ]
       }
     }
   }
