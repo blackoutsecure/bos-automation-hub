@@ -1,0 +1,21 @@
+{
+  "code_scanning": {
+    "posture": {
+      "workflows": {
+        "require_permissions_block": "fail",
+        "forbid_write_all": "fail",
+        "require_pinned_actions": "fail"
+      },
+      "branches": {
+        "main": {
+          "require_conversation_resolution": true,
+          "severity": "fail"
+        },
+        "dev": {}
+      }
+    },
+    "remediation": {
+      "enable_ai_findings_summary": false
+    }
+  }
+}

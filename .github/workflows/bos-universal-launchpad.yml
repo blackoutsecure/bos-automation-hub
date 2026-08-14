@@ -643,7 +643,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         description: >-
           Run the hub's `cf-pages-redirects-generate` composite action
           before deploy to dynamically build a Cloudflare Pages
-          `_redirects` file. See the `.github/bos-universal-config.json`
+          `_redirects` file. See the `.github/workflow-configs/bos-universal-config.json`
           `cloudflare.redirects.*` block for the full input schema.
         required: false
         type: boolean
@@ -671,7 +671,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
           Run the hub's `cf-pages-headers-generate` composite action
           before deploy to dynamically build a Cloudflare Pages
           `_headers` file from composable presets. See the
-          `.github/bos-universal-config.json` `cloudflare.headers.*` block for the
+          `.github/workflow-configs/bos-universal-config.json` `cloudflare.headers.*` block for the
           full input schema.
         required: false
         type: boolean
@@ -768,7 +768,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
       use_launchpad_config:
         description: >-
           When `true`, read Cloudflare Pages settings from the caller
-          repo's `.github/bos-universal-config.json` instead of the `cloudflare_*`
+          repo's `.github/workflow-configs/bos-universal-config.json` instead of the `cloudflare_*`
           workflow-call inputs. Intended for the universal
           `bos-launchpad.yml` kicker; legacy split callers leave this
           `false` and continue forwarding explicit inputs.

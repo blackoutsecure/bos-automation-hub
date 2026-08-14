@@ -1,5 +1,5 @@
 # Blackout Secure universal Marketplace kicker (hub-managed).
-# Customize via `.github/bos-universal-config.json`, not this file.
+# Customize via `.github/workflow-configs/bos-universal-config.json`, not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 name: Blackout Secure Universal Marketplace
 run-name: >-
@@ -28,7 +28,7 @@ run-name: >-
         required: true
         type: choice
         options: [validate, name-check, release, metadata]
-        default: validate
+        default: release
       tag_name:
         description: Optional SemVer release tag; empty auto-bumps the latest stable tag.
         required: false
@@ -73,7 +73,7 @@ jobs:
         id: config
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
         with:
-          config_path: .github/bos-universal-config.json
+          config_path: .github/workflow-configs/bos-universal-config.json
           allow_missing: 'false'
           require_marketplace_enabled: 'true'
       # `uses:` refs cannot be dynamic, so resolve which hub branch this
@@ -107,10 +107,6 @@ jobs:
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-marketplace.yml@dev
     with:
       action_yml_path: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.action_yml_path || 'action.yml' }}
-      fail_on_warning: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.fail_on_warning == true }}
-      require_security: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.require_security || 'warn' }}
-      require_code_of_conduct: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.require_code_of_conduct || 'warn' }}
-      require_contributing: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.require_contributing || 'warn' }}
       run_branding_preview: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.run_branding_preview != false }}
       run_name_check: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'name-check' }}
 
@@ -129,10 +125,6 @@ jobs:
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-marketplace.yml@main
     with:
       action_yml_path: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.action_yml_path || 'action.yml' }}
-      fail_on_warning: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.fail_on_warning == true }}
-      require_security: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.require_security || 'warn' }}
-      require_code_of_conduct: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.require_code_of_conduct || 'warn' }}
-      require_contributing: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.require_contributing || 'warn' }}
       run_branding_preview: ${{ fromJson(needs.parse_config.outputs.cfg).marketplace.run_branding_preview != false }}
       run_name_check: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'name-check' }}
 

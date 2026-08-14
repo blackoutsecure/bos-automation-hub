@@ -1,8 +1,4 @@
 {
-  "security": {},
-  "code_scanning": {
-    "project_name": "bos-automation-hub"
-  },
   "launchpad": {
     "repo_metadata": {
       "enable": true,

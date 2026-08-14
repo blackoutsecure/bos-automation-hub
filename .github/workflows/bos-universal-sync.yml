@@ -38,7 +38,7 @@ name: Blackout Secure managed file sync (reusable)
           Optional PAT with the Workflows: write permission. The default
           GITHUB_TOKEN can never push changes to .github/workflows/**
           (a hard GitHub platform restriction, not a `permissions:`
-          setting). Without this secret, the five managed kicker
+          setting). Without this secret, the two managed kicker
           workflow files are skipped; every other managed file still
           syncs normally with GITHUB_TOKEN.
         required: false
@@ -96,14 +96,15 @@ jobs:
 
       - name: Sync configured services
         id: sync
-        uses: blackoutsecure/bos-managed-file-sync-action@v1.0.11
+        uses: blackoutsecure/bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a # dev
         with:
-          config_path: .github/bos-universal-config.json
-          global_config_path: sync-files/.github/blackout-secure-managed-file-sync-global-config.json
+          config_path: .github/workflow-configs/bos-universal-config.json
+          use_global_config: 'true'
+          global_config_path: sync-files/.github/workflow-configs/managed-file-sync-global-config.json
           config_json: >-
             ${{
               steps.workflow-pat.outputs.has_pat != 'true'
-              && '{"managed_file_sync":{"disabled_services":["bos_universal_action_test_kicker","bos_universal_launchpad_kicker","bos_universal_marketplace_kicker","bos_universal_security_kicker","bos_universal_sync_kicker"]}}'
+              && '{"managed_file_sync":{"disabled_services":["bos_universal_security_kicker","bos_universal_sync_kicker"]}}'
               || ''
             }}
           services: ${{ inputs.services }}

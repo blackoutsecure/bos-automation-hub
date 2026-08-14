@@ -1,11 +1,11 @@
 name: Universal config
-description: Universal config reader for .github/bos-universal-config.json.
+description: Universal config reader for .github/workflow-configs/bos-universal-config.json.
 
 inputs:
   config_path:
     description: Path to the config JSON file.
     required: false
-    default: .github/bos-universal-config.json
+    default: .github/workflow-configs/bos-universal-config.json
   allow_missing:
     description: Emit {} when config file is missing instead of failing.
     required: false
@@ -34,7 +34,7 @@ runs:
         import os
         import sys
 
-        config_path = os.environ.get("CONFIG_PATH") or ".github/bos-universal-config.json"
+        config_path = os.environ.get("CONFIG_PATH") or ".github/workflow-configs/bos-universal-config.json"
         allow_missing = (os.environ.get("ALLOW_MISSING") or "false").lower() == "true"
         require_marketplace_enabled = (os.environ.get("REQUIRE_MARKETPLACE_ENABLED") or "false").lower() == "true"
         output_path = os.environ["GITHUB_OUTPUT"]
@@ -42,11 +42,6 @@ runs:
 
         def error(message):
             print(message, file=sys.stderr)
-
-        if not os.path.isfile(config_path) and config_path == ".github/bos-universal-config.json":
-            legacy_path = "bos-universal-config.json"
-            if os.path.isfile(legacy_path):
-                config_path = legacy_path
 
         if not os.path.isfile(config_path):
             if allow_missing:
@@ -72,7 +67,7 @@ runs:
 
         # Optional service-grouped authoring layout: consumers may nest a
         # service's settings under a named section ("launchpad", "security",
-        # "sync") instead of (or alongside) the historical flat top-level
+        # "sync") instead of (or alongside) the flat top-level
         # keys. Sections are hoisted to the flat keys every downstream
         # normalizer already reads, so both layouts — and any mix of the
         # two — resolve identically. A flat key already present at the top
@@ -81,10 +76,14 @@ runs:
         # "security": { ...same fields as top-level "gate"... }
         # "sync":     { ...same fields as top-level "managed_file_sync"... }
         # "launchpad": { "upstream": {...}, "docker": {...}, ... }
-        # "general":  catch-all for keys owned by neither of the four
-        #             named services (e.g. "action_test"); every key is
+        # "general":  catch-all for keys owned by neither named service
+        #             (e.g. "action_test"); every key is
         #             hoisted as-is, unlike the fixed per-section allowlists
         #             above, since new standalone services land here first.
+        #
+        # `code_scanning` and `marketplace_kit` are intentionally preserved
+        # verbatim. Their published actions own their full schemas and merge
+        # the hub global policy with this repository-level config.
         WHOLE_SECTION_ALIASES = {"security": "gate", "sync": "managed_file_sync"}
         LAUNCHPAD_SUBKEYS = (
             "upstream", "stages", "docker", "scout", "balena",
@@ -131,12 +130,10 @@ runs:
         def marketplace_paths(value, field):
             if value is None:
                 return ""
-            if isinstance(value, str):
-                return value
             if not isinstance(value, list):
                 error(
-                    f"::error file={config_path}::marketplace.{field} must be "
-                    "a string or an array of strings."
+                    f"::error file={config_path}::marketplace.{field} must be an "
+                    "array of strings."
                 )
                 sys.exit(1)
             paths = []

@@ -26,11 +26,6 @@
           }
         ]
       }
-    },
-    "variables": {
-      "org_name": "Blackout Secure",
-      "support_email": "engineering@blackoutsecure.com",
-      "license": "Apache-2.0"
     }
   }
 }

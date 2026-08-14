@@ -81,40 +81,40 @@ name: Blackout Secure universal Marketplace (reusable)
         type: string
         default: ''
       require_security:
-        description: 'Policy for SECURITY.md (SC003). `fail` | `warn` | `skip`. Default `warn`.'
+        description: 'Policy override for SECURITY.md (SC003). `fail` | `warn` | `skip`; empty uses config.'
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_code_of_conduct:
-        description: 'Policy for CODE_OF_CONDUCT.md. `fail` | `warn` | `skip`. Default `warn`.'
+        description: 'Policy override for CODE_OF_CONDUCT.md. `fail` | `warn` | `skip`; empty uses config.'
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_contributing:
-        description: 'Policy for CONTRIBUTING.md. `fail` | `warn` | `skip`. Default `warn`.'
+        description: 'Policy override for CONTRIBUTING.md. `fail` | `warn` | `skip`; empty uses config.'
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_support:
-        description: 'Policy for SUPPORT.md. `fail` | `warn` | `skip`. Default `skip`.'
+        description: 'Policy override for SUPPORT.md. `fail` | `warn` | `skip`; empty uses config.'
         required: false
         type: string
-        default: 'skip'
+        default: ''
       require_issue_templates:
-        description: 'Policy for `.github/ISSUE_TEMPLATE/`. `fail` | `warn` | `skip`. Default `skip`.'
+        description: 'Policy override for `.github/ISSUE_TEMPLATE/`. `fail` | `warn` | `skip`; empty uses config.'
         required: false
         type: string
-        default: 'skip'
+        default: ''
       require_pr_template:
-        description: 'Policy for `.github/PULL_REQUEST_TEMPLATE.md`. `fail` | `warn` | `skip`. Default `skip`.'
+        description: 'Policy override for `.github/PULL_REQUEST_TEMPLATE.md`. `fail` | `warn` | `skip`; empty uses config.'
         required: false
         type: string
-        default: 'skip'
+        default: ''
       require_funding:
-        description: 'Policy for `.github/FUNDING.yml`. `fail` | `warn` | `skip`. Default `skip`.'
+        description: 'Policy override for `.github/FUNDING.yml`. `fail` | `warn` | `skip`; empty uses config.'
         required: false
         type: string
-        default: 'skip'
+        default: ''
 
       # ----- community-health source mode (where each file lives) ---------
       # Lets callers express *where* each community-health file is expected
@@ -173,47 +173,47 @@ name: Blackout Secure universal Marketplace (reusable)
       # Same `fail | warn | skip` semantics as the CH/SC rules above.
       # Defaults follow the kit's own defaults — back-compat additive.
       require_dependabot:
-        description: 'Policy for `.github/dependabot.yml` presence (DP001). Default `warn`.'
+        description: 'Policy override for `.github/dependabot.yml` presence (DP001); empty uses config.'
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_codeql:
-        description: 'Policy for a CodeQL workflow (CQ001). Default `warn`.'
+        description: 'Policy override for a CodeQL workflow (CQ001); empty uses config.'
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_editorconfig:
-        description: 'Policy for `.editorconfig` presence (LT001). Default `warn`.'
+        description: 'Policy override for `.editorconfig` presence (LT001); empty uses config.'
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_gitattributes:
-        description: 'Policy for `.gitattributes` presence (LT002). Default `warn`.'
+        description: 'Policy override for `.gitattributes` presence (LT002); empty uses config.'
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_gitignore:
-        description: 'Policy for `.gitignore` presence (LT003). Default `warn`.'
+        description: 'Policy override for `.gitignore` presence (LT003); empty uses config.'
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_markdownlint:
-        description: 'Policy for markdownlint config presence (LT004). Default `skip`.'
+        description: 'Policy override for markdownlint config presence (LT004); empty uses config.'
         required: false
         type: string
-        default: 'skip'
+        default: ''
       require_yamllint:
-        description: 'Policy for yamllint config presence (LT005). Default `skip`.'
+        description: 'Policy override for yamllint config presence (LT005); empty uses config.'
         required: false
         type: string
-        default: 'skip'
+        default: ''
       require_ghas_code_scanning:
         description: >-
           Policy for code-scanning enabled at repo level (GH001). Requires
           `github_token` with `metadata: read`. Default `warn`.
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_ghas_secret_scanning:
         description: >-
           Policy for secret-scanning enabled at repo level (GH002).
@@ -221,28 +221,28 @@ name: Blackout Secure universal Marketplace (reusable)
           `security_and_analysis`. Default `warn`.
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_dependabot_alerts:
         description: >-
           Policy for Dependabot alerts enabled at repo level (GH003).
           Requires `github_token` with `Administration: read`. Default `warn`.
         required: false
         type: string
-        default: 'warn'
+        default: ''
       require_security_devops:
         description: >-
           Policy for a Microsoft Security DevOps workflow being present
           (MS001). Opt-in. Default `skip`.
         required: false
         type: string
-        default: 'skip'
+        default: ''
       require_scorecard:
         description: >-
           Policy for an OpenSSF Scorecard workflow being present (SR001).
           Opt-in. Default `skip`.
         required: false
         type: string
-        default: 'skip'
+        default: ''
 
       # ----- name-check (opt-in) --------------------------------------------
       run_name_check:
@@ -347,15 +347,29 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout Marketplace Kit global policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ github.event.repository.default_branch == 'dev' && 'dev' || 'main' }}
+          path: hub-config
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/workflow-configs/marketplace-kit-global-config.json
+          sparse-checkout-cone-mode: false
+
       - name: Marketplace pre-publish check
         id: check
         # Kit `check` composite. SHA-pinned per the hub GHA pin
         # policy. Dependabot bumps in lockstep with the guard +
         # promote pins.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@5fc9b4088c962cd45b52c9928443c5f5496a41d1 # v0.1.11
         with:
+          use_global_config:       'true'
+          global_config_path:      hub-config/.github/workflow-configs/marketplace-kit-global-config.json
+          config_path:             .github/workflow-configs/bos-universal-config.json
           action_yml_path:        ${{ inputs.action_yml_path }}
-          fail_on_warning:        ${{ inputs.fail_on_warning }}
+          fail_on_warning:        ${{ inputs.fail_on_warning && 'true' || '' }}
           skip_checks:            ${{ inputs.skip_checks }}
           github_token:           ${{ github.token }}
           check_org_health:       ${{ inputs.check_org_health }}
@@ -441,7 +455,7 @@ jobs:
 
       - name: Marketplace name check
         id: name
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/name-check@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/name-check@5fc9b4088c962cd45b52c9928443c5f5496a41d1 # v0.1.11
         with:
           proposed_name:     ${{ steps.resolve.outputs.name }}
           fail_on_collision: ${{ inputs.name_check_fail_on_collision }}
@@ -465,7 +479,7 @@ jobs:
 
       - name: Render branding preview
         id: render
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/branding-preview@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/branding-preview@5fc9b4088c962cd45b52c9928443c5f5496a41d1 # v0.1.11
         with:
           action_yml_path: ${{ inputs.action_yml_path }}
           feather_ref:     ${{ inputs.branding_preview_feather_ref }}

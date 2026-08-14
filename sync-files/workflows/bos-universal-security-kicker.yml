@@ -1,5 +1,5 @@
 # Blackout Secure universal security and policy kicker (hub-managed).
-# Customize via `.github/bos-universal-config.json`, not this file.
+# Customize via `.github/workflow-configs/bos-universal-config.json`, not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 name: Blackout Secure Universal Security
 run-name: >-
@@ -13,6 +13,8 @@ run-name: >-
 
 "on":
   pull_request:
+    branches: [main, dev]
+  push:
     branches: [main, dev]
   merge_group:
   workflow_dispatch:

@@ -333,9 +333,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Checkout canonical hub code-scanning global config
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ github.event.repository.default_branch == 'dev' && 'dev' || 'main' }}
+          path: hub-config
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/workflow-configs/code-scanning-kit-global-config.json
+          sparse-checkout-cone-mode: false
       - id: kit
         name: Run BOS Code Scanning Kit
-        uses: blackoutsecure/bos-code-scanning-kit@37ee8d5cf143be59b02dd9fcbb3070b174dc22e3 # v1
+        uses: blackoutsecure/bos-code-scanning-kit@8f8145afd7d1faf0a28792f6105103d9666c978c # dev
         with:
           github_token: ${{ (inputs.use_advanced_pat && secrets.SCANNING_PAT != '') && secrets.SCANNING_PAT || github.token }}
           enable_posture: ${{ inputs.enable_posture }}
@@ -343,6 +353,9 @@ jobs:
           enable_upload: ${{ inputs.enable_upload }}
           fail_on: ${{ inputs.fail_on }}
           http_timeout: ${{ inputs.kit_http_timeout }}
+          use_global_config: 'true'
+          global_config_path: hub-config/.github/workflow-configs/code-scanning-kit-global-config.json
+          config: .github/workflow-configs/bos-universal-config.json
 
   codeql:
     name: Analyze (${{ matrix.language }})

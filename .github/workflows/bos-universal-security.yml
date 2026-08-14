@@ -96,10 +96,10 @@
 # ------------------------------
 # The code-scan job forwards an org-wide policy tier to the kit via
 # `global_config_path`, sourced from this hub's own
-# `.github/blackout-secure-code-scanning-kit-global-config.json` (checked
+# `.github/workflow-configs/code-scanning-kit-global-config.json` (checked
 # out alongside the caller repo, mirroring the `bos-universal-sync.yml`
 # pattern). Per-repository overrides remain opt-in through a `code_scanning`
-# block in the caller's own `.github/bos-universal-config.json`, which the
+# block in the caller's own `.github/workflow-configs/bos-universal-config.json`, which the
 # kit discovers automatically as its repository-tier config.
 
 name: Blackout Secure universal security (reusable)
@@ -189,7 +189,7 @@ on:
         required: false
         default: '20'
       config_authoritative:
-        description: Use .github/bos-universal-config.json instead of direct gate inputs.
+        description: Use .github/workflow-configs/bos-universal-config.json instead of direct gate inputs.
         type: boolean
         required: false
         default: false
@@ -327,7 +327,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run kit lint composite
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@5fc9b4088c962cd45b52c9928443c5f5496a41d1 # v0.1.11
         with:
           severity: fail
 
@@ -499,10 +499,10 @@ jobs:
           path: hub-config
           fetch-depth: 1
           persist-credentials: false
-          sparse-checkout: .github/blackout-secure-code-scanning-kit-global-config.json
+          sparse-checkout: .github/workflow-configs/code-scanning-kit-global-config.json
           sparse-checkout-cone-mode: false
       - name: Run bos-code-scanning-kit
-        uses: blackoutsecure/bos-code-scanning-kit@37ee8d5cf143be59b02dd9fcbb3070b174dc22e3 # v1
+        uses: blackoutsecure/bos-code-scanning-kit@8f8145afd7d1faf0a28792f6105103d9666c978c # dev
         with:
           github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}
           fail_on: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_fail_on }}
@@ -510,8 +510,9 @@ jobs:
           enable_posture: 'true'
           enable_scanners: 'true'
           enable_upload: 'true'
-          use_global_config: 'auto'
-          global_config_path: hub-config/.github/blackout-secure-code-scanning-kit-global-config.json
+          use_global_config: 'true'
+          global_config_path: hub-config/.github/workflow-configs/code-scanning-kit-global-config.json
+          config: .github/workflow-configs/bos-universal-config.json
 
   # -----------------------------------------------------------------
   # 5. Pinned actions — ensures every third-party `uses:` reference in
@@ -585,7 +586,7 @@ jobs:
           subjectPatternError: |
             PR title subject must be at least 3 characters after the
             `<type>:` prefix. Examples:
-              feat(sync): add target_repo_role to .github/bos-universal-config.json
+              feat(sync): add target_repo_role to .github/workflow-configs/bos-universal-config.json
               fix(lint): allow `truthy: on/off` in yamllint default
 
   # -----------------------------------------------------------------

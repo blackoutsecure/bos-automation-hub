@@ -38,7 +38,7 @@
 #                                publish the GitHub Release.
 #   5. metadata                — refresh the hub repository About box
 #                                from the released tag when enabled in
-#                                `.github/bos-universal-config.json`.
+#                                `.github/workflow-configs/bos-universal-config.json`.
 #
 # Trigger: `workflow_dispatch` ONLY. This workflow file is itself in
 # the runtime allowlist, so it lives ONLY on the development branch.
