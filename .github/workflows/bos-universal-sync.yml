@@ -288,6 +288,10 @@ jobs:
           organization = config.get("organization") or {}
           workflow_config = (organization.get("workflows") or {}).get("sync") or {}
           context_rows = [
+              {"label": "Sync engine", "value": "Blackout Secure Managed File Sync",
+               "meaning": "Upstream package responsible for reconciliation and its native job summary."},
+              {"label": "Sync engine ref", "value": "c8b42d7258a919aa72b82e8ef63829af9fa3ad6a",
+               "meaning": "Pinned action ref; source: https://github.com/blackoutsecure/bos-managed-file-sync-action."},
               {"label": "Mode", "value": mode,
                "meaning": "`commit` writes and pushes; `check` is a read-only drift gate."},
               {"label": "Changed files", "value": len(changed_files),
@@ -316,6 +320,9 @@ jobs:
                   f"{str(reporting.get('enable_annotations', True)).lower()}\n"
               )
               handle.write(
+                  f"title_prefix={reporting.get('title_prefix', 'Blackout Secure')}\n"
+              )
+              handle.write(
                   "enable_html="
                   f"{str(reporting.get('enable_html', True)).lower()}\n"
               )
@@ -337,7 +344,7 @@ jobs:
         if: ${{ always() }}
         uses: ./hub-source/.github/actions/shared/job-report
         with:
-          title: Blackout Secure Managed File Sync Report
+          title: ${{ steps.findings.outputs.title_prefix }} Managed File Sync Report
           subject: >-
             **Repository:** `${{ github.repository }}`  ·
             **Ref:** `${{ github.ref_name }}`  ·

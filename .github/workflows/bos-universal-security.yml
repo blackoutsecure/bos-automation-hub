@@ -777,17 +777,20 @@ jobs:
                   "enable_annotations="
                   f"{str(org_reporting.get('enable_annotations', True)).lower()}\n"
               )
-                handle.write(
+              handle.write(
+                  f"title_prefix={org_reporting.get('title_prefix', 'Blackout Secure')}\n"
+              )
+              handle.write(
                   "enable_html="
                   f"{str(org_reporting.get('enable_html', True)).lower()}\n"
-                )
-                handle.write(
+              )
+              handle.write(
                   "enable_pdf="
                   f"{str(org_reporting.get('enable_pdf', False)).lower()}\n"
-                )
-                handle.write(f"html_path={org_reporting.get('html_path', 'blackout-secure-report.html')}\n")
-                handle.write(f"pdf_path={org_reporting.get('pdf_path', 'blackout-secure-report.pdf')}\n")
-                handle.write(f"artifact_name={org_reporting.get('artifact_name', 'blackout-secure-audit-report')}\n")
+              )
+              handle.write(f"html_path={org_reporting.get('html_path', 'blackout-secure-report.html')}\n")
+              handle.write(f"pdf_path={org_reporting.get('pdf_path', 'blackout-secure-report.pdf')}\n")
+              handle.write(f"artifact_name={org_reporting.get('artifact_name', 'blackout-secure-audit-report')}\n")
               for name, value in (
                   ("findings", json.dumps(findings, separators=(",", ":"))),
                   ("context_rows", json.dumps(context_rows, separators=(",", ":"))),
@@ -797,7 +800,7 @@ jobs:
       - name: Publish security gate report
         uses: ./hub-runtime/.github/actions/shared/job-report
         with:
-          title: Blackout Secure Security Gate Report
+          title: ${{ steps.findings.outputs.title_prefix }} Security Gate Report
           subject: >-
             **Repository:** `${{ github.repository }}`  ·
             **Ref:** `${{ github.ref_name }}`  ·

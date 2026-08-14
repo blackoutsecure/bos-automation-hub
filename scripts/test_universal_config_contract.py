@@ -620,8 +620,10 @@ def main() -> None:
     # Runner topology comes from the organization block, never a literal.
     assert "org: ${{ steps.config.outputs.organization }}" in gate_workflow
     assert "config: ${{ steps.config.outputs.cfg }}" in gate_workflow
+    assert "title: ${{ steps.findings.outputs.title_prefix }} Security Gate Report" in gate_workflow
     assert "org: ${{ steps.config.outputs.organization }}" in sync_backend
     assert "config: ${{ steps.config.outputs.cfg }}" in sync_backend
+    assert "title: ${{ steps.findings.outputs.title_prefix }} Managed File Sync Report" in sync_backend
     assert (
         "runs-on: ${{ fromJSON(needs.resolve-config.outputs.org)"
         ".workflows.security.runs_on }}"
