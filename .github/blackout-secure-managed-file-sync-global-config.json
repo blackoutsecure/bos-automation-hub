@@ -8,33 +8,6 @@
       "bos_universal_sync_kicker"
     ],
     "service_definitions": {
-      "bos_universal_action_test_kicker": {
-        "mode": "file",
-        "files": [
-          {
-            "path": ".github/workflows/bos-universal-action-test-kicker.yml",
-            "content_file": "bos-universal-action-test-kicker.yml"
-          }
-        ]
-      },
-      "bos_universal_launchpad_kicker": {
-        "mode": "file",
-        "files": [
-          {
-            "path": ".github/workflows/bos-universal-launchpad-kicker.yml",
-            "content_file": "bos-universal-launchpad-kicker.yml"
-          }
-        ]
-      },
-      "bos_universal_marketplace_kicker": {
-        "mode": "file",
-        "files": [
-          {
-            "path": ".github/workflows/bos-universal-marketplace-kicker.yml",
-            "content_file": "bos-universal-marketplace-kicker.yml"
-          }
-        ]
-      },
       "bos_universal_security_kicker": {
         "mode": "file",
         "files": [
