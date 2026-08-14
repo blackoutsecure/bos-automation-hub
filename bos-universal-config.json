@@ -1,4 +1,28 @@
 {
+  "organization": {
+    "runners": {
+      "default": "ubuntu-latest",
+      "x64": "ubuntu-latest",
+      "arm64": "ubuntu-24.04-arm"
+    },
+    "reporting": {
+      "enable_job_summary": true,
+      "enable_annotations": true,
+      "title_prefix": "Blackout Secure",
+      "fail_on": "fail"
+    },
+    "defaults": {
+      "timeout_minutes": 30
+    },
+    "workflows": {
+      "security": {
+        "timeout_minutes": 20
+      },
+      "sync": {
+        "timeout_minutes": 5
+      }
+    }
+  },
   "launchpad": {
     "repo_metadata": {
       "enable": true,

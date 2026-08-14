@@ -283,6 +283,7 @@ section-nested equivalent when both are present.
 
 | Section (optional) | Flat top-level key(s) it groups | Consumed by |
 | --- | --- | --- |
+| `organization` | `organization` (already the flat key name) | every hub workflow, for runner topology and report policy |
 | `security` | `gate` | `bos-universal-security.yml` |
 | `managed_file_sync` | `managed_file_sync` | `bos-universal-sync.yml` and `bos-managed-file-sync-action` |
 | `launchpad` | `upstream`, `stages`, `docker`, `scout`, `balena`, `companion_docker`, `release`, `platforms`, `security_scan`, `repo_metadata`, `cloudflare`, `triggers` | `bos-universal-launchpad.yml` |
@@ -293,6 +294,99 @@ Unlike the other sections, `general` hoists every key it contains rather than
 a fixed allowlist — it's the landing spot for a new standalone service's
 config (like `bos-universal-action-test.yml`'s `action_test` block) before it
 earns its own named section.
+
+### Organization section
+
+`organization` is the one section that is not owned by a single workflow. It
+carries cross-cutting policy — runner topology, per-workflow overrides, and
+report behavior — so runner labels and timeouts are data instead of a literal
+repeated in every job:
+
+```json
+{
+  "organization": {
+    "runners": {
+      "default": "ubuntu-latest",
+      "x64": "ubuntu-latest",
+      "arm64": "ubuntu-24.04-arm"
+    },
+    "reporting": {
+      "enable_job_summary": true,
+      "enable_annotations": true,
+      "title_prefix": "Blackout Secure",
+      "fail_on": "fail"
+    },
+    "defaults": { "timeout_minutes": 30 },
+    "workflows": {
+      "security": { "timeout_minutes": 20 },
+      "sync": { "runs_on": ["self-hosted", "Linux"], "timeout_minutes": 5 }
+    }
+  }
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `runners.default` | `ubuntu-latest` | Runner used by any workflow with no override. |
+| `runners.x64` / `runners.arm64` | `runners.default` | Architecture-specific labels for multi-arch build jobs. |
+| `reporting.enable_job_summary` | `true` | `false` suppresses the `$GITHUB_STEP_SUMMARY` report. |
+| `reporting.enable_annotations` | `true` | `false` suppresses `::error::` / `::warning::` annotations. |
+| `reporting.title_prefix` | `Blackout Secure` | Prefix applied to generated report titles. |
+| `reporting.fail_on` | `fail` | `fail`, `warn`, or `never` — the severity tier that makes a report step exit non-zero. |
+| `defaults.timeout_minutes` | `30` | Fallback job timeout. |
+| `workflows.<name>.runs_on` | `runners.default` | Per-workflow runner override. |
+| `workflows.<name>.timeout_minutes` | `defaults.timeout_minutes` | Per-workflow timeout override. |
+
+Recognized workflow names are `security`, `sync`, `launchpad`, `marketplace`,
+`action_test`, and `release`. Every one is always present in the normalized
+`organization` output, so a workflow can read
+`fromJSON(needs.resolve-config.outputs.org).workflows.<name>.runs_on`
+unconditionally. A runner value may be a bare label or an array of labels;
+both normalize to a value that `runs-on:` accepts directly, with no
+`startsWith` guard in the workflow.
+
+Two jobs deliberately keep a literal runner: each workflow's `resolve-config`
+job (it bootstraps the runner topology) and the security workflow's `summary`
+job (it is the required status check, so it must still publish a report when
+config resolution itself failed).
+
+### Run reporting
+
+Every workflow reports through one shared surface,
+[`job-report`](.github/actions/shared/job-report/action.yml), which renders the
+same audit layout used by `bos-code-scanning-kit` and
+`bos-managed-file-sync-action`: a verdict, a severity-count table, recommended
+actions, a `Configuration used` disclosure, and grouped findings tables — plus
+matching workflow annotations.
+
+Findings are pure data, so a workflow only builds a JSON array and the report
+surface stays identical everywhere:
+
+```json
+[
+  {
+    "id": "SG021",
+    "severity": "fail",
+    "control": "Code scanning + posture audit",
+    "evidence": "job result: failure",
+    "remediation": "Review the SARIF findings on the Security tab.",
+    "group": "security"
+  }
+]
+```
+
+| Severity | Report label | Meaning |
+| --- | --- | --- |
+| `pass` | Pass | Control satisfied. |
+| `warn` | Warning | Advisory drift; review recommended but not blocking. |
+| `fail` | High | Required control failed. |
+| `skip` | Not Assessed | Not evaluated; no verdict can be inferred. |
+
+A skipped gate reports as `Not Assessed` rather than a pass, so a report never
+implies coverage the run did not actually provide. The action's `outcome`
+output (`success`, `warn`, `failure`) reflects severity only and does not
+change with `fail_on`, so a caller can gate on the verdict independently of
+whether the report step itself exited non-zero.
 
 For example, the sample above can equivalently be written grouped:
 

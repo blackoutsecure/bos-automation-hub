@@ -23,15 +23,19 @@ name: Blackout Secure managed file sync (reusable)
         type: string
         default: 'chore: sync managed files'
       runs_on:
-        description: Optional runner override. Defaults to `vars.DEFAULT_RUNNER`.
+        description: >-
+          Optional runner override. Defaults to
+          `organization.workflows.sync.runs_on` from the universal config.
         required: false
         type: string
         default: ''
       timeout_minutes:
-        description: Optional per-job timeout override.
+        description: >-
+          Optional per-job timeout override. `0` (default) defers to
+          `organization.workflows.sync.timeout_minutes`.
         required: false
         type: number
-        default: 5
+        default: 0
     secrets:
       workflow_sync_pat:
         description: >-
@@ -61,10 +65,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  resolve-config:
+    name: Resolve organization config
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      org: ${{ steps.config.outputs.organization }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Load universal config
+        id: config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+        with:
+          allow_missing: 'true'
+
   sync:
+    needs: resolve-config
     name: Sync managed files (${{ inputs.mode || 'commit' }})
-    runs-on: ${{ fromJSON(startsWith(inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', inputs.runs_on || vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
-    timeout-minutes: ${{ inputs.timeout_minutes || 5 }}
+    # Workflow input wins over the organization default so a caller can
+    # still pin one run to a specific runner. Both a bare label and a
+    # JSON-array label list are accepted.
+    runs-on: ${{ inputs.runs_on != '' && fromJSON(startsWith(inputs.runs_on, '[') && inputs.runs_on || format('"{0}"', inputs.runs_on)) || fromJSON(needs.resolve-config.outputs.org).workflows.sync.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes || fromJSON(needs.resolve-config.outputs.org).workflows.sync.timeout_minutes }}
     permissions:
       contents: write
     outputs:
@@ -129,3 +155,158 @@ jobs:
         with:
           files: ${{ steps.sync.outputs.changed_files }}
           message: "${{ inputs.commit_message || 'chore: sync managed files' }}"
+
+      - name: Build sync findings
+        id: findings
+        if: ${{ always() }}
+        env:
+          MODE: ${{ inputs.mode || 'commit' }}
+          SYNC_RESULT: ${{ steps.sync.outcome }}
+          CHANGED: ${{ steps.sync.outputs.changed }}
+          CHANGED_FILES: ${{ steps.sync.outputs.changed_files }}
+          COMMIT_SHA: ${{ steps.commit.outputs.commit_sha }}
+          HAS_PAT: ${{ steps.workflow-pat.outputs.has_pat }}
+          RUNS_ON: ${{ toJSON(fromJSON(needs.resolve-config.outputs.org).workflows.sync.runs_on) }}
+          REPORTING: ${{ toJSON(fromJSON(needs.resolve-config.outputs.org).reporting) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+
+          mode = os.environ.get("MODE") or "commit"
+          sync_result = os.environ.get("SYNC_RESULT") or "skipped"
+          changed = (os.environ.get("CHANGED") or "").lower() == "true"
+          changed_files = [
+              line.strip()
+              for line in (os.environ.get("CHANGED_FILES") or "").splitlines()
+              if line.strip()
+          ]
+          commit_sha = (os.environ.get("COMMIT_SHA") or "").strip()
+          has_pat = (os.environ.get("HAS_PAT") or "false").lower() == "true"
+
+          findings = []
+          if sync_result == "success":
+              findings.append({
+                  "id": "MS001", "severity": "pass", "group": "sync",
+                  "control": "Managed-file reconciliation",
+                  "evidence": f"engine completed in `{mode}` mode",
+              })
+          else:
+              findings.append({
+                  "id": "MS001", "severity": "fail", "group": "sync",
+                  "control": "Managed-file reconciliation",
+                  "evidence": f"engine result: {sync_result}",
+                  "remediation": (
+                      "Read the managed-file-sync error above. Config errors exit 2 and "
+                      "usually mean an unknown service or an unreachable config tier."
+                  ),
+              })
+
+          # In `check` mode drift is the finding; in `commit` mode drift is
+          # expected input and only an uncommitted change is noteworthy.
+          if mode == "check":
+              findings.append({
+                  "id": "MS010",
+                  "severity": "fail" if changed else "pass",
+                  "group": "sync",
+                  "control": "Managed-file drift gate",
+                  "evidence": (
+                      f"{len(changed_files)} file(s) out of sync" if changed
+                      else "working tree matches the managed catalog"
+                  ),
+                  "remediation": (
+                      "Re-run this workflow in `commit` mode, or apply the diff above locally."
+                      if changed else "—"
+                  ),
+              })
+          else:
+              findings.append({
+                  "id": "MS010",
+                  "severity": "pass",
+                  "group": "sync",
+                  "control": "Managed-file drift applied",
+                  "evidence": (
+                      f"{len(changed_files)} file(s) updated in commit `{commit_sha[:7]}`"
+                      if commit_sha else
+                      f"{len(changed_files)} file(s) changed"
+                      if changed else "no drift detected"
+                  ),
+              })
+
+          findings.append({
+              "id": "MS020",
+              "severity": "pass" if has_pat else "skip",
+              "group": "credentials",
+              "control": "Workflow-file sync capability",
+              "evidence": (
+                  "`workflow_sync_pat` present; managed kicker workflows are in scope"
+                  if has_pat else
+                  "`workflow_sync_pat` absent; managed kicker workflows were skipped"
+              ),
+              "remediation": (
+                  "—" if has_pat else
+                  "Add a `WORKFLOW_SYNC_PAT` secret with `Workflows: write`. "
+                  "GITHUB_TOKEN can never write to `.github/workflows/**`."
+              ),
+          })
+
+          for path in changed_files[:50]:
+              findings.append({
+                  "id": "MS030", "severity": "pass", "group": "files",
+                  "control": "Managed file",
+                  "evidence": f"`{path}`",
+                  "remediation": "Pending" if mode == "check" else "Applied",
+              })
+
+          context_rows = [
+              {"label": "Mode", "value": mode,
+               "meaning": "`commit` writes and pushes; `check` is a read-only drift gate."},
+              {"label": "Runner", "value": json.loads(os.environ["RUNS_ON"]),
+               "meaning": "Resolved from `organization.workflows.sync` in the universal config."},
+              {"label": "Changed files", "value": len(changed_files),
+               "meaning": "Managed files the engine created, updated, or removed."},
+              {"label": "Commit", "value": commit_sha or "(none)",
+               "meaning": "Commit created by this run, when drift was applied."},
+          ]
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              reporting = json.loads(os.environ.get("REPORTING") or "{}")
+              handle.write(f"fail_on={reporting.get('fail_on', 'fail')}\n")
+              handle.write(
+                  "enable_summary="
+                  f"{str(reporting.get('enable_job_summary', True)).lower()}\n"
+              )
+              handle.write(
+                  "enable_annotations="
+                  f"{str(reporting.get('enable_annotations', True)).lower()}\n"
+              )
+              for name, value in (
+                  ("findings", json.dumps(findings, separators=(",", ":"))),
+                  ("context_rows", json.dumps(context_rows, separators=(",", ":"))),
+              ):
+                  handle.write(f"{name}<<__BOS_EOF__\n{value}\n__BOS_EOF__\n")
+          PY
+
+      - name: Publish managed file sync report
+        if: ${{ always() }}
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/job-report@main
+        with:
+          title: Blackout Secure Managed File Sync Report
+          subject: >-
+            **Repository:** `${{ github.repository }}`  ·
+            **Ref:** `${{ github.ref_name }}`  ·
+            **Mode:** `${{ inputs.mode || 'commit' }}`
+          findings: ${{ steps.findings.outputs.findings }}
+          context_rows: ${{ steps.findings.outputs.context_rows }}
+          groups: >-
+            {"sync":{"title":"Reconciliation","blurb":"Engine result and drift disposition"},
+             "credentials":{"title":"Credentials","blurb":"Token reach and resulting scope limits"},
+             "files":{"title":"Managed files","blurb":"Per-file outcome for this run"}}
+          fail_on: ${{ steps.findings.outputs.fail_on }}
+          enable_summary: ${{ steps.findings.outputs.enable_summary }}
+          enable_annotations: ${{ steps.findings.outputs.enable_annotations }}
+          footer: >-
+            This report was generated by the Blackout Secure managed file sync
+            workflow (`bos-universal-sync.yml`).

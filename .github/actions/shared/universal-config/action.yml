@@ -15,7 +15,7 @@ inputs:
     required: false
     default: 'false'
 
-outputs: {cfg: {description: 'Compact JSON object for downstream fromJson usage.', value: '${{ steps.config.outputs.cfg }}'}, cloudflare: {description: 'Normalized Cloudflare block derived from the config.', value: '${{ steps.config.outputs.cloudflare }}'}, action_test: {description: 'Normalized action_test block derived from the config.', value: '${{ steps.config.outputs.action_test }}'}}
+outputs: {cfg: {description: 'Compact JSON object for downstream fromJson usage.', value: '${{ steps.config.outputs.cfg }}'}, cloudflare: {description: 'Normalized Cloudflare block derived from the config.', value: '${{ steps.config.outputs.cloudflare }}'}, action_test: {description: 'Normalized action_test block derived from the config.', value: '${{ steps.config.outputs.action_test }}'}, organization: {description: 'Normalized organization block (runners, reporting, per-workflow overrides).', value: '${{ steps.config.outputs.organization }}'}}
 
 runs:
   using: composite
@@ -328,10 +328,86 @@ runs:
             "timeout_smoke": as_int(action_test_raw.get("timeout_smoke"), 5),
         }
 
+        # ── organization section ──────────────────────────────────
+        # Org-wide runner labels, report policy, and per-workflow
+        # overrides. Every hub workflow reads its `runs_on` /
+        # `timeout_minutes` from here so runner topology is data, not a
+        # per-workflow literal. `runs_on` resolves to a JSON string OR a
+        # JSON array of labels, so callers can use the value directly in
+        # `runs-on:` without a `startsWith`/`fromJSON` guard.
+        ORG_WORKFLOWS = (
+            "security", "sync", "launchpad", "marketplace", "action_test", "release"
+        )
+
+        organization_raw = as_dict(cfg.get("organization"))
+        runners_raw = as_dict(organization_raw.get("runners"))
+        reporting_raw = as_dict(organization_raw.get("reporting"))
+        org_defaults_raw = as_dict(organization_raw.get("defaults"))
+        org_workflows_raw = as_dict(organization_raw.get("workflows"))
+
+        def runner_value(value, default):
+            if isinstance(value, list):
+                labels = [str(label).strip() for label in value if str(label).strip()]
+                return labels or default
+            text = str(value or "").strip()
+            if not text:
+                return default
+            if text.startswith("["):
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    error(
+                        f"::error file={config_path}::organization runner label "
+                        f"{text!r} is not valid JSON."
+                    )
+                    sys.exit(1)
+                return runner_value(parsed, default)
+            return text
+
+        default_runner = runner_value(runners_raw.get("default"), "ubuntu-latest")
+        runners = {
+            "default": default_runner,
+            "x64": runner_value(runners_raw.get("x64"), default_runner),
+            "arm64": runner_value(runners_raw.get("arm64"), default_runner),
+        }
+
+        fail_on = str(reporting_raw.get("fail_on") or "fail").strip().lower()
+        if fail_on not in {"fail", "warn", "never"}:
+            error(
+                f"::error file={config_path}::organization.reporting.fail_on must be "
+                "`fail`, `warn`, or `never`."
+            )
+            sys.exit(1)
+        reporting = {
+            "enable_job_summary": reporting_raw.get("enable_job_summary") is not False,
+            "enable_annotations": reporting_raw.get("enable_annotations") is not False,
+            "title_prefix": str(reporting_raw.get("title_prefix") or "Blackout Secure"),
+            "fail_on": fail_on,
+        }
+
+        default_timeout = as_int(org_defaults_raw.get("timeout_minutes"), 30)
+        org_workflows = {}
+        for name in ORG_WORKFLOWS:
+            override = as_dict(org_workflows_raw.get(name))
+            org_workflows[name] = {
+                "runs_on": runner_value(override.get("runs_on"), default_runner),
+                "timeout_minutes": as_int(
+                    override.get("timeout_minutes"), default_timeout
+                ),
+            }
+
+        organization = {
+            "runners": runners,
+            "reporting": reporting,
+            "defaults": {"timeout_minutes": default_timeout},
+            "workflows": org_workflows,
+        }
+
         compact_cfg = json.dumps(cfg, separators=(",", ":"))
         compact_cloudflare = json.dumps(cloudflare, separators=(",", ":"))
         compact_sync = json.dumps(sync, separators=(",", ":"))
         compact_action_test = json.dumps(action_test, separators=(",", ":"))
+        compact_organization = json.dumps(organization, separators=(",", ":"))
 
         cloudflare_enabled = stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name"))
         stage_flags = {
@@ -350,6 +426,9 @@ runs:
         upstream_source = (upstream.get("source") or "").strip() or "(unset)"
         release_template_path = (release.get("template_path") or "").strip() or "(unset)"
 
+        def label_text(value):
+            return ", ".join(value) if isinstance(value, list) else str(value)
+
         summary_lines = [
             "## Universal config snapshot",
             "",
@@ -363,6 +442,12 @@ runs:
             f"| Sync mode | `{sync_mode}` |",
             f"| Sync services | `{sync_services_text}` |",
             f"| Release template path | `{release_template_path}` |",
+            f"| Default runner | `{label_text(runners['default'])}` |",
+            f"| Runner (x64 / arm64) | `{label_text(runners['x64'])}` / `{label_text(runners['arm64'])}` |",
+            f"| Default job timeout | `{default_timeout}` min |",
+            f"| Report policy | `fail_on={reporting['fail_on']}`, "
+            f"summary={str(reporting['enable_job_summary']).lower()}, "
+            f"annotations={str(reporting['enable_annotations']).lower()} |",
         ]
 
         if summary_path:
@@ -377,6 +462,9 @@ runs:
         print(f"  cloudflare_site_url: {cf_site}")
         print(f"  sync_mode: {sync_mode}")
         print(f"  sync_services: {sync_services_text}")
+        print(f"  default_runner: {label_text(runners['default'])}")
+        print(f"  default_timeout_minutes: {default_timeout}")
+        print(f"  reporting_fail_on: {reporting['fail_on']}")
 
         with open(output_path, "a", encoding="utf-8") as handle:
             handle.write("cfg<<__BOS_EOF__\n")
@@ -385,4 +473,5 @@ runs:
             handle.write(f"cloudflare={compact_cloudflare}\n")
             handle.write(f"sync={compact_sync}\n")
             handle.write(f"action_test={compact_action_test}\n")
+            handle.write(f"organization={compact_organization}\n")
         PY

@@ -152,6 +152,76 @@ def main() -> None:
         "timeout_smoke": 5,
     }
 
+    # ── organization section ──────────────────────────────────────
+    # Runner topology and report policy are data, so an empty config
+    # must still yield a complete, directly usable organization block.
+    def org_from(result: subprocess.CompletedProcess[str]) -> dict:
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout.split("organization=", 1)[1].split("\n", 1)[0])
+
+    org_defaults = org_from(run_universal_config({}))
+    assert org_defaults["runners"] == {
+        "default": "ubuntu-latest",
+        "x64": "ubuntu-latest",
+        "arm64": "ubuntu-latest",
+    }
+    assert org_defaults["reporting"] == {
+        "enable_job_summary": True,
+        "enable_annotations": True,
+        "title_prefix": "Blackout Secure",
+        "fail_on": "fail",
+    }
+    assert org_defaults["defaults"] == {"timeout_minutes": 30}
+    assert set(org_defaults["workflows"]) == {
+        "security", "sync", "launchpad", "marketplace", "action_test", "release",
+    }
+    assert all(
+        entry == {"runs_on": "ubuntu-latest", "timeout_minutes": 30}
+        for entry in org_defaults["workflows"].values()
+    )
+
+    # A per-workflow override wins over the org default; unset workflows
+    # keep inheriting it.
+    org_override = org_from(
+        run_universal_config(
+            {
+                "organization": {
+                    "runners": {"default": "ubuntu-24.04", "arm64": "ubuntu-24.04-arm"},
+                    "defaults": {"timeout_minutes": 15},
+                    "reporting": {"fail_on": "never", "enable_annotations": False},
+                    "workflows": {"security": {"runs_on": ["self-hosted", "Linux"], "timeout_minutes": 45}},
+                }
+            }
+        )
+    )
+    assert org_override["runners"]["arm64"] == "ubuntu-24.04-arm"
+    assert org_override["runners"]["x64"] == "ubuntu-24.04"
+    assert org_override["reporting"]["fail_on"] == "never"
+    assert org_override["reporting"]["enable_annotations"] is False
+    assert org_override["workflows"]["security"] == {
+        "runs_on": ["self-hosted", "Linux"],
+        "timeout_minutes": 45,
+    }
+    assert org_override["workflows"]["sync"] == {
+        "runs_on": "ubuntu-24.04",
+        "timeout_minutes": 15,
+    }
+
+    # A JSON-array label string resolves to a real array so callers can
+    # feed the value straight into `runs-on:` without a startsWith guard.
+    org_json_labels = org_from(
+        run_universal_config(
+            {"organization": {"runners": {"default": '["self-hosted","X64"]'}}}
+        )
+    )
+    assert org_json_labels["runners"]["default"] == ["self-hosted", "X64"]
+
+    bad_fail_on = run_universal_config(
+        {"organization": {"reporting": {"fail_on": "sometimes"}}}
+    )
+    assert bad_fail_on.returncode == 1
+    assert "organization.reporting.fail_on must be" in bad_fail_on.stderr
+
     # Grouped-section authoring layout hoists to the flat keys every
     # downstream kicker/normalizer reads — both layouts must resolve
     # identically, and a flat key always wins over its section alias.
@@ -503,8 +573,60 @@ def main() -> None:
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
     assert "name: Blackout Secure managed file sync (reusable)" in sync_backend
+
+    # ── standardized reporting ────────────────────────────────────
+    # One shared audit-report surface, driven by findings data, so every
+    # workflow reports status the same way instead of hand-rolling a
+    # summary block per job.
+    job_report = (ROOT / ".github/actions/shared/job-report/action.yml").read_text()
+    assert "name: Job report" in job_report
+    for token in ("outcome", "verdict", "passes", "warns", "fails", "skips", "total"):
+        assert f"{token}:" in job_report
+    assert "Provided by [Blackout Secure](https://blackoutsecure.app)" in job_report
+    assert "## Recommended Actions" in job_report
+    assert "## Detailed Findings" in job_report
+    assert '"Not Assessed"' in job_report
+
+    report_ref = (
+        "uses: blackoutsecure/bos-automation-hub/"
+        ".github/actions/shared/job-report@main"
+    )
+    for reporting_workflow in (gate_workflow, sync_backend):
+        assert report_ref in reporting_workflow
+        # Report policy is read through step outputs, never a bare
+        # `fromJSON` of a possibly-empty needs output, so the report
+        # still renders when config resolution failed.
+        assert "fail_on: ${{ steps.findings.outputs.fail_on }}" in reporting_workflow
+        assert (
+            "enable_summary: ${{ steps.findings.outputs.enable_summary }}"
+            in reporting_workflow
+        )
+        assert (
+            "enable_annotations: ${{ steps.findings.outputs.enable_annotations }}"
+            in reporting_workflow
+        )
+
+    # Runner topology comes from the organization block, never a literal.
+    assert "org: ${{ steps.config.outputs.organization }}" in gate_workflow
+    assert "org: ${{ steps.config.outputs.organization }}" in sync_backend
+    assert (
+        "runs-on: ${{ fromJSON(needs.resolve-config.outputs.org)"
+        ".workflows.security.runs_on }}"
+    ) in gate_workflow
+    assert "workflows.sync.runs_on }}" in sync_backend
+    # Two literal runners survive by design: `resolve-config` bootstraps
+    # the runner topology, and the aggregated summary must still run when
+    # that bootstrap failed.
+    assert gate_workflow.count("runs-on: ubuntu-latest") == 2
+    assert sync_backend.count("runs-on: ubuntu-latest") == 1
+    assert "vars.DEFAULT_RUNNER" not in sync_backend
+
     hub_config_raw = json.loads((ROOT / "bos-universal-config.json").read_text())
-    assert set(hub_config_raw) == {"launchpad"}
+    assert set(hub_config_raw) == {"launchpad", "organization"}
+    hub_org = hub_config_raw["organization"]
+    assert hub_org["runners"]["default"] == "ubuntu-latest"
+    assert hub_org["reporting"]["fail_on"] == "fail"
+    assert hub_org["workflows"]["security"]["timeout_minutes"] == 20
 
     global_code_scan_config = json.loads(
         (ROOT / ".github/workflow-configs/code-scanning-kit-global-config.json").read_text()
