@@ -61,7 +61,6 @@ jobs:
       contents: write
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-sync.yml@dev
     with:
-      hub_ref: dev
       mode: ${{ inputs.mode || '' }}
     secrets: inherit
 
@@ -79,6 +78,5 @@ jobs:
       contents: write
     uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-sync.yml@main
     with:
-      hub_ref: main
       mode: ${{ inputs.mode || '' }}
     secrets: inherit
