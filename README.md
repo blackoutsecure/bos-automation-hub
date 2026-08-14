@@ -19,6 +19,13 @@ selection is therefore handled by ownership rather than generated ref strings:
 - runtime branch decisions use `github.event.repository.default_branch` where
   the caller repository's branch is intended.
 
+The reusable security and managed-file-sync workflows expose `hub_ref`, which
+defaults to `auto`. Auto follows a pull request or merge-group base branch,
+then the current `dev` ref, and otherwise selects `main`. The managed dev/main
+callers pass an explicit `hub_ref` override so each static `uses:` job consumes
+the matching hub branch; other callers can pass `hub_ref: dev` or
+`hub_ref: main` when they need a deliberate override.
+
 [`release-hub.yml`](.github/workflows/release-hub.yml) promotes shared actions,
 managed templates, `LICENSE`, this README, and every workflow declaring
 `workflow_call`. Event-only maintenance workflows stay on `dev` automatically.

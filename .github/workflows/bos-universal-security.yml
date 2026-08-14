@@ -193,6 +193,11 @@ on:
         type: boolean
         required: false
         default: false
+      hub_ref:
+        description: Hub runtime ref. Use auto to follow the event target branch.
+        type: string
+        required: false
+        default: auto
     secrets:
       scanning_pat:
         description: >-
@@ -224,9 +229,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Checkout selected hub runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
+          path: hub-runtime
+          sparse-checkout: .github/actions/shared/universal-config
+          sparse-checkout-cone-mode: false
       - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+        uses: ./hub-runtime/.github/actions/shared/universal-config
         with:
           allow_missing: 'false'
       - name: Resolve security settings
@@ -502,7 +515,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: blackoutsecure/bos-automation-hub
-          ref: ${{ github.event.repository.default_branch == 'dev' && 'dev' || 'main' }}
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
           path: hub-config
           fetch-depth: 1
           persist-credentials: false
@@ -635,6 +648,14 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
+      - name: Checkout selected hub reporting action
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
+          path: hub-runtime
+          sparse-checkout: .github/actions/shared/job-report
+          sparse-checkout-cone-mode: false
       - name: Build gate findings
         id: findings
         env:
@@ -746,7 +767,7 @@ jobs:
                   handle.write(f"{name}<<__BOS_EOF__\n{value}\n__BOS_EOF__\n")
           PY
       - name: Publish security gate report
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/job-report@main
+        uses: ./hub-runtime/.github/actions/shared/job-report
         with:
           title: Blackout Secure Security Gate Report
           subject: >-

@@ -329,7 +329,9 @@ def main() -> None:
     assert "  push:\n    branches: [main, dev]" in security_kicker
     assert "enable_baseline:" not in gate_workflow
     assert "needs.resolve-config.outputs.gate" in gate_workflow
-    assert "actions/shared/universal-config@main" in gate_workflow
+    assert "uses: ./hub-runtime/.github/actions/shared/universal-config" in gate_workflow
+    assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in gate_workflow
+    assert "github.event_name == 'pull_request' && github.base_ref" in gate_workflow
     assert "code_scan_fail_on:" in gate_workflow
     assert "code_scan_http_timeout:" in gate_workflow
     assert (
@@ -574,6 +576,9 @@ def main() -> None:
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
     assert "name: Blackout Secure managed file sync (reusable)" in sync_backend
+    assert "uses: ./hub-runtime/.github/actions/shared/universal-config" in sync_backend
+    assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
+    assert "github.event_name == 'merge_group'" in sync_backend
 
     # ── standardized reporting ────────────────────────────────────
     # One shared audit-report surface, driven by findings data, so every
@@ -588,12 +593,12 @@ def main() -> None:
     assert "## Detailed Findings" in job_report
     assert '"Not Assessed"' in job_report
 
-    report_ref = (
-        "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/shared/job-report@main"
-    )
+    report_refs = {
+        "uses: ./hub-runtime/.github/actions/shared/job-report",
+        "uses: ./sync-files/.github/actions/shared/job-report",
+    }
     for reporting_workflow in (gate_workflow, sync_backend):
-        assert report_ref in reporting_workflow
+        assert any(ref in reporting_workflow for ref in report_refs)
         # Report policy is read through step outputs, never a bare
         # `fromJSON` of a possibly-empty needs output, so the report
         # still renders when config resolution failed.
@@ -720,12 +725,12 @@ def main() -> None:
         "global_config_path: sync-files/config/managed-file-sync-global-config.json"
         in sync_backend
     )
-    assert "ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}" in sync_backend
+    assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
     assert "use_global_config: 'true'" in sync_backend
     assert "bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a" in sync_backend
-    assert "actions/shared/commit-and-push@main" in sync_backend
+    assert "uses: ./sync-files/.github/actions/shared/commit-and-push" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend
     assert "token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}" in sync_backend

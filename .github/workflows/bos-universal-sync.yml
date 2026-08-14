@@ -36,6 +36,11 @@ name: Blackout Secure managed file sync (reusable)
         required: false
         type: number
         default: 0
+      hub_ref:
+        description: Hub runtime ref. Use auto to follow the event target branch.
+        required: false
+        type: string
+        default: auto
     secrets:
       workflow_sync_pat:
         description: >-
@@ -77,9 +82,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Checkout selected hub runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
+          path: hub-runtime
+          sparse-checkout: .github/actions/shared/universal-config
+          sparse-checkout-cone-mode: false
       - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+        uses: ./hub-runtime/.github/actions/shared/universal-config
         with:
           allow_missing: 'true'
 
@@ -115,7 +128,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: blackoutsecure/bos-automation-hub
-          ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
           path: sync-files
           fetch-depth: 1
           persist-credentials: false
@@ -124,7 +137,6 @@ jobs:
         id: sync
         uses: blackoutsecure/bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a # dev
         with:
-          # Let the action auto-discover the repo config (it already prefers
           # The action auto-discovers .github/bos-universal-config.json.
           use_global_config: 'true'
           global_config_path: sync-files/config/managed-file-sync-global-config.json
@@ -149,7 +161,7 @@ jobs:
         if: >-
           (inputs.mode || 'commit') == 'commit'
           && steps.sync.outputs.changed == 'true'
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/commit-and-push@main
+        uses: ./sync-files/.github/actions/shared/commit-and-push
         with:
           files: ${{ steps.sync.outputs.changed_files }}
           message: "${{ inputs.commit_message || 'chore: sync managed files' }}"
@@ -289,7 +301,7 @@ jobs:
 
       - name: Publish managed file sync report
         if: ${{ always() }}
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/job-report@main
+        uses: ./sync-files/.github/actions/shared/job-report
         with:
           title: Blackout Secure Managed File Sync Report
           subject: >-
