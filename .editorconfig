@@ -20,7 +20,7 @@ trim_trailing_whitespace = false
 indent_style = tab
 
 # >>> managed-file-sync:editorconfig >>>
-# Managed by Blackout Secure. Best practices applied via marketplace config, customized in .github/workflow-configs/managed-file-sync-global-config.json and .github/workflow-configs/bos-universal-config.json.
+# Managed by Blackout Secure Managed File Sync — configure services in .github/workflow-configs/bos-universal-config.json.
 [*]
 charset = utf-8
 end_of_line = lf
