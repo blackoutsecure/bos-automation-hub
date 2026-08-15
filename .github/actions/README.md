@@ -14,13 +14,14 @@ configuration and execution belong in the reusable backend workflow.
 
 ## Published orchestration actions
 
-[`repo-metadata`](repo-metadata/action.yml) is the shared composite that
-resolves and writes repository descriptions, homepages, topics, and best-effort
-sidebar widget preferences. Prefer the reusable
+Repository About-box sync (description, homepage, topics, and best-effort
+sidebar widget preferences) is no longer a hub-local composite — it now
+consumes the published
+[`blackoutsecure/bos-repo-about-sync-action`](https://github.com/blackoutsecure/bos-repo-about-sync-action)
+Marketplace action directly. Prefer the reusable
 [`repo-metadata-sync.yml`](../workflows/repo-metadata-sync.yml) workflow for
 normal consumers; it adds released-ref checkout, token fallback, concurrency,
-soft skip behavior, and reusable outputs around the composite. Direct action
-calls remain supported for custom orchestration.
+soft skip behavior, and reusable outputs around the action.
 
 The reusable workflow keeps credentials purpose-specific: the selected
 Administration PAT is used only for repository PATCH/PUT calls, while the

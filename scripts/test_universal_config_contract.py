@@ -30,7 +30,14 @@ def caller_input_names(body: str, workflow_name: str) -> set[str]:
     match = call_pattern.search(body)
     assert match is not None, workflow_name
     call = body[match.end() :]
-    inputs = call.split("    with:\n", 1)[1].split("    secrets:\n", 1)[0]
+    # Stop at the job-level `secrets:` key, whether it's an inline value
+    # (`secrets: inherit`, the common case) or a nested mapping — both start
+    # a line with exactly 4 spaces of indent then `secrets:`. Without this,
+    # a caller with more than one job invoking the same reusable workflow
+    # (e.g. a dev/main split) would bleed into the next job's `permissions:`
+    # block, since a plain `"    secrets:\n"` literal never matches
+    # `secrets: inherit`.
+    inputs = re.split(r"\n    secrets:", call.split("    with:\n", 1)[1], maxsplit=1)[0]
     return set(re.findall(r"^      ([a-z][a-z0-9_]+):", inputs, re.MULTILINE))
 
 
@@ -338,6 +345,7 @@ def main() -> None:
     assert "marketplace-action-ci.yml@main" not in gate_workflow
     assert "bos-universal-marketplace.yml@main" not in gate_workflow
     assert "enable_marketplace_ci:" not in gate_workflow
+    assert "  schedule:\n    - cron: '43 14 * * *'" in security_kicker
     assert "  push:\n    branches: [main, dev]" in security_kicker
     assert "enable_baseline:" not in gate_workflow
     assert "needs.resolve-config.outputs.gate" in gate_workflow
@@ -452,14 +460,11 @@ def main() -> None:
     assert "  workflow_call:" in repo_metadata_workflow
     assert "\n  release:\n" not in repo_metadata_workflow
     assert repo_metadata_workflow.count(
-        "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/repo-metadata@main"
+        "uses: blackoutsecure/bos-repo-about-sync-action@"
     ) == 1
+    assert ".github/actions/repo-metadata@main" not in repo_metadata_workflow
+    assert not (ROOT / ".github/actions/repo-metadata").exists()
     assert "secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token" in repo_metadata_workflow
-    repo_metadata_action = (
-        ROOT / ".github/actions/repo-metadata/action.yml"
-    ).read_text()
-    assert "MODELS_TOKEN:        ${{ github.token || inputs.github_token }}" in repo_metadata_action
     assert "group: repo-metadata-${{ github.repository }}" in repo_metadata_workflow
     assert "inputs.checkout_ref || github.sha" in repo_metadata_workflow
     assert workflow.count("uses: ./.github/workflows/repo-metadata-sync.yml") == 1
@@ -518,6 +523,8 @@ def main() -> None:
         "lint.yml",
         "openwrt-readsb-wiedehopf-bump.yml",
         "release-hub.yml",
+        "bos-org-kicker-fanout.yml",
+        "bos-hub-managed-sync-propagate.yml",
         "bos-universal-security-kicker.yml",
         "bos-universal-sync-kicker.yml",
     }
@@ -582,10 +589,11 @@ def main() -> None:
     assert docker_workflow.count(compose_build_args) == 2
     assert "echo \"build_args<<__EOF__\"" not in docker_workflow
 
-    # `kicker` (launchpad) only ever fires on `main` pushes; the other
-    # dual-branch kickers resolve a static @dev or @main ref per run.
+    # Every dual-branch kicker (including `launchpad`, since its `sync-check`
+    # pre-flight and `release` stage now resolve `target_ref` like the rest)
+    # resolves a static @dev or @main ref per run.
     for managed_caller, expected_refs in (
-        (kicker, {"main"}),
+        (kicker, {"main", "dev"}),
         (security_kicker, {"main", "dev"}),
         (marketplace_kicker, {"main", "dev"}),
         (sync_kicker, {"main", "dev"}),
@@ -719,10 +727,14 @@ def main() -> None:
     assert "exclude_sevices" not in sync_policy
     assert sync_policy["take_over_managed_files"] is True
     # The hub is checked out into `sync-files/`, and its canonical template
-    # directory is itself `sync-files/workflows/`.
-    assert sync_policy["managed_files_path"] == "sync-files/sync-files/workflows"
+    # root is `sync-files/` itself (not just `sync-files/workflows/`) so
+    # `content_file` entries can also reach `sync-files/community-health/`,
+    # `sync-files/github-meta/`, and `sync-files/org-profile/` (see
+    # `org_defaults` below) alongside the `workflows/` subdirectory.
+    assert sync_policy["managed_files_path"] == "sync-files"
     assert sync_policy["services"] == [
         "shellcheck",
+        "coverage_artifacts",
         "bos_universal_security_kicker",
         "bos_universal_sync_kicker",
     ]
@@ -770,7 +782,7 @@ def main() -> None:
         'git -C hub-source show "HEAD:sync-files/config/managed-file-sync-global-config.json"'
         in sync_backend
     )
-    assert "managed_files_path: hub-source/sync-files/workflows" in sync_backend
+    assert "managed_files_path: hub-source/sync-files" in sync_backend
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend

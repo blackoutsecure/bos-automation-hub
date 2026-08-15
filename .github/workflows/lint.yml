@@ -27,8 +27,6 @@ on:
       - '**/*.yaml'
       - '**/*.sh'
       - '.shellcheckrc'
-      - '.github/actions/repo-metadata/helper.py'
-      - 'scripts/test_repo_metadata_helper.py'
       - 'scripts/test_universal_config_contract.py'
   pull_request:
     paths:
@@ -37,8 +35,6 @@ on:
       - '**/*.yaml'
       - '**/*.sh'
       - '.shellcheckrc'
-      - '.github/actions/repo-metadata/helper.py'
-      - 'scripts/test_repo_metadata_helper.py'
       - 'scripts/test_universal_config_contract.py'
   workflow_dispatch:
 
@@ -61,9 +57,6 @@ jobs:
 
       - name: Validate managed universal config contract
         run: python3 scripts/test_universal_config_contract.py
-
-      - name: Test repository metadata helper and composite
-        run: python3 scripts/test_repo_metadata_helper.py
 
   actionlint:
     name: actionlint
