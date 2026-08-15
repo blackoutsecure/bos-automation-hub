@@ -14,8 +14,19 @@ inputs:
     description: Fail unless `marketplace.enabled` is `true` in the parsed config.
     required: false
     default: 'false'
+  global_config_path:
+    description: >-
+      Path to an optional org-wide global config JSON file (e.g. checked
+      out from bos-automation-hub's sync-files/config/). Currently only
+      merges the `action_test` section; repo config always wins over it.
+    required: false
+    default: ''
+  use_global_config:
+    description: "'auto' loads global_config_path when the file exists, 'true' requires it, 'false' ignores it."
+    required: false
+    default: 'auto'
 
-outputs: {cfg: {description: 'Compact JSON object for downstream fromJson usage.', value: '${{ steps.config.outputs.cfg }}'}, cloudflare: {description: 'Normalized Cloudflare block derived from the config.', value: '${{ steps.config.outputs.cloudflare }}'}, action_test: {description: 'Normalized action_test block derived from the config.', value: '${{ steps.config.outputs.action_test }}'}, organization: {description: 'Normalized organization block (runners, reporting, per-workflow overrides).', value: '${{ steps.config.outputs.organization }}'}}
+outputs: {cfg: {description: 'Compact JSON object for downstream fromJson usage.', value: '${{ steps.config.outputs.cfg }}'}, cloudflare: {description: 'Normalized Cloudflare block derived from the config.', value: '${{ steps.config.outputs.cloudflare }}'}, action_test: {description: 'Normalized action_test block derived from the config.', value: '${{ steps.config.outputs.action_test }}'}, organization: {description: 'Normalized organization block (runners, reporting, per-workflow overrides).', value: '${{ steps.config.outputs.organization }}'}, sync: {description: 'Normalized managed_file_sync block.', value: '${{ steps.config.outputs.sync }}'}}
 
 runs:
   using: composite
@@ -27,6 +38,8 @@ runs:
         CONFIG_PATH: ${{ inputs.config_path }}
         ALLOW_MISSING: ${{ inputs.allow_missing }}
         REQUIRE_MARKETPLACE_ENABLED: ${{ inputs.require_marketplace_enabled }}
+        GLOBAL_CONFIG_PATH: ${{ inputs.global_config_path }}
+        USE_GLOBAL_CONFIG: ${{ inputs.use_global_config }}
       run: |
         set -euo pipefail
         python3 - <<'PY'
@@ -37,6 +50,8 @@ runs:
         config_path = os.environ.get("CONFIG_PATH") or ".github/bos-universal-config.json"
         allow_missing = (os.environ.get("ALLOW_MISSING") or "false").lower() == "true"
         require_marketplace_enabled = (os.environ.get("REQUIRE_MARKETPLACE_ENABLED") or "false").lower() == "true"
+        global_config_path = (os.environ.get("GLOBAL_CONFIG_PATH") or "").strip()
+        use_global_config = (os.environ.get("USE_GLOBAL_CONFIG") or "auto").strip().lower()
         output_path = os.environ["GITHUB_OUTPUT"]
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
 
@@ -64,6 +79,27 @@ runs:
         if not isinstance(cfg, dict):
             error(f"::error file={config_path}::Top-level config must be a JSON object.")
             sys.exit(1)
+
+        global_cfg = {}
+        if use_global_config != "false" and global_config_path:
+            if os.path.isfile(global_config_path):
+                with open(global_config_path, encoding="utf-8") as handle:
+                    try:
+                        parsed = json.loads(handle.read())
+                    except json.JSONDecodeError as exc:
+                        error(
+                            f"::error file={global_config_path}::Invalid JSON "
+                            f"({exc.msg}) at line {exc.lineno}, column {exc.colno}."
+                        )
+                        sys.exit(1)
+                if isinstance(parsed, dict):
+                    global_cfg = parsed
+                else:
+                    error(f"::error file={global_config_path}::Top-level global config must be a JSON object.")
+                    sys.exit(1)
+            elif use_global_config == "true":
+                error(f"::error file={global_config_path}::Required global config file not found.")
+                sys.exit(1)
 
         # Optional service-grouped authoring layout: consumers may nest a
         # service's settings under a named section ("launchpad", "security",
@@ -287,23 +323,68 @@ runs:
             "timeout_minutes": as_int(sync_raw.get("timeout_minutes"), 5),
         }
 
-        action_test_raw = as_dict(cfg.get("action_test"))
-        action_test_python_versions = [
-            str(version).strip()
-            for version in as_list(action_test_raw.get("python_versions"))
-            if str(version).strip()
-        ]
-        action_test_os_matrix = [
-            str(runner).strip()
-            for runner in as_list(action_test_raw.get("os_matrix"))
-            if str(runner).strip()
-        ]
-        action_test_python_packages = [
-            str(package).strip()
-            for package in as_list(action_test_raw.get("python_packages"))
-            if str(package).strip()
-        ]
-        smoke_test_config = action_test_raw.get("smoke_test_config")
+        # action_test merges three tiers, first non-empty wins per field:
+        # repo config > org-wide global config (global_config_path) > a
+        # pyproject.toml-derived auto-detection > hardcoded fallback.
+        global_action_test_raw = as_dict(global_cfg.get("action_test"))
+        repo_action_test_raw = as_dict(cfg.get("action_test"))
+
+        def merged_list(field):
+            for source in (repo_action_test_raw, global_action_test_raw):
+                values = [
+                    str(item).strip()
+                    for item in as_list(source.get(field))
+                    if str(item).strip()
+                ]
+                if values:
+                    return values
+            return []
+
+        def merged_scalar(field, default=None):
+            for source in (repo_action_test_raw, global_action_test_raw):
+                if field in source and source.get(field) not in (None, ""):
+                    return source.get(field)
+            return default
+
+        action_test_python_versions = merged_list("python_versions")
+        action_test_os_matrix = merged_list("os_matrix")
+        action_test_python_packages = merged_list("python_packages")
+
+        # Auto-detection: only consulted when neither tier configured the
+        # field, so an explicit `[]` is never silently overridden.
+        pyproject = {}
+        pyproject_path = "pyproject.toml"
+        if os.path.isfile(pyproject_path):
+            with open(pyproject_path, encoding="utf-8") as handle:
+                pyproject_text = handle.read()
+            match = __import__("re").search(
+                r'requires-python\s*=\s*"[>=~!<]*\s*(\d+)\.(\d+)', pyproject_text
+            )
+            if match:
+                pyproject["floor"] = (int(match.group(1)), int(match.group(2)))
+            pyproject["has_dev_extra"] = bool(
+                __import__("re").search(r"\[project\.optional-dependencies\][^\[]*\bdev\s*=", pyproject_text, __import__("re").DOTALL)
+            )
+
+        if not action_test_python_versions:
+            if pyproject.get("floor"):
+                floor_major, floor_minor = pyproject["floor"]
+                candidates = [(3, minor) for minor in range(9, 14)]
+                action_test_python_versions = [
+                    f"{major}.{minor}" for major, minor in candidates
+                    if (major, minor) >= (floor_major, floor_minor)
+                ]
+            action_test_python_versions = action_test_python_versions or ["3.11"]
+
+        if not action_test_python_packages:
+            if os.path.isfile(pyproject_path):
+                action_test_python_packages = (
+                    ["-e", ".[dev]"] if pyproject.get("has_dev_extra") else ["-e", "."]
+                )
+            else:
+                action_test_python_packages = ["pytest>=8.0", "ruff>=0.6", "PyYAML>=6.0"]
+
+        smoke_test_config = merged_scalar("smoke_test_config")
         if smoke_test_config is None:
             smoke_test_config = {}
         if not isinstance(smoke_test_config, dict):
@@ -313,19 +394,19 @@ runs:
             sys.exit(1)
 
         action_test = {
-            "python_versions": action_test_python_versions or ["3.11"],
+            "python_versions": action_test_python_versions,
             "os_matrix": action_test_os_matrix or ["ubuntu-latest"],
-            "python_packages": action_test_python_packages or [
-                "pytest>=8.0",
-                "ruff>=0.6",
-                "PyYAML>=6.0",
-            ],
-            "pytest_args": str(action_test_raw.get("pytest_args") or "-q"),
-            "enable_smoke_test": action_test_raw.get("enable_smoke_test") is True,
-            "smoke_trigger": str(action_test_raw.get("smoke_trigger") or "push-dev"),
+            "python_packages": action_test_python_packages,
+            "pytest_args": str(merged_scalar("pytest_args") or "-q"),
+            "enable_smoke_test": merged_scalar("enable_smoke_test") is True,
+            "smoke_trigger": str(merged_scalar("smoke_trigger") or "push-dev"),
             "smoke_test_config": smoke_test_config,
-            "timeout_pytest": as_int(action_test_raw.get("timeout_pytest"), 10),
-            "timeout_smoke": as_int(action_test_raw.get("timeout_smoke"), 5),
+            "smoke_test_output_name": str(merged_scalar("smoke_test_output_name") or "version"),
+            "timeout_pytest": as_int(merged_scalar("timeout_pytest"), 10),
+            "timeout_smoke": as_int(merged_scalar("timeout_smoke"), 5),
+            "enable_ai_failure_summary": merged_scalar("enable_ai_failure_summary") is not False,
+            "ai_provider": str(merged_scalar("ai_provider") or "auto"),
+            "ai_model": str(merged_scalar("ai_model") or "openai/gpt-4o-mini"),
         }
 
         # ── organization section ──────────────────────────────────

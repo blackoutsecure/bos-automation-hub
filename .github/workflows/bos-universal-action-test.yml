@@ -28,71 +28,40 @@
 #   jobs:
 #     action-test:
 #       uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-action-test.yml@main
-#       with:
-#         python_versions: '["3.10", "3.11", "3.12"]'
-#         enable_smoke_test: true
-#         smoke_test_config: '{"source": "npm", "package_name": "@actions/core"}'
+#
+#   Then set `action_test` in the caller's own
+#   `.github/bos-universal-config.json`, e.g.:
+#     { "action_test": {
+#         "enable_smoke_test": true,
+#         "smoke_test_config": {"source": "npm", "package_name": "@actions/core"}
+#     } }
+#   Every field not set there falls back to this hub's org-wide
+#   defaults, then to pyproject.toml-based auto-detection, then to a
+#   hardcoded default — see "Configuration" below.
 #
 # Pin discipline
 # --------------
 # Third-party action references are pinned to a 40-char SHA per hub
 # policy (gate #5 in `bos-universal-security.yml`); Dependabot keeps
 # them current.
+#
+# Configuration
+# -------------
+# Every job reads `action_test` from the caller's own
+# `.github/bos-universal-config.json` via the shared `universal-config`
+# composite, layered over this hub's org-wide
+# `sync-files/config/action-test-global-config.json` (repo config always
+# wins). Any field left unset in both tiers is auto-detected from the
+# caller's `pyproject.toml` (`requires-python` floor → a Python version
+# matrix; a `dev` extra → `pip install -e .[dev]`) before falling back to
+# a hardcoded default. There are no `workflow_call` inputs — configure
+# this workflow the same way as every other hub-managed kicker, through
+# `action_test` in `.github/bos-universal-config.json`, not `with:`.
 
 name: Blackout Secure universal action test (reusable)
 
 on:
   workflow_call:
-    inputs:
-      python_versions:
-        description: 'JSON array of Python versions, e.g. ["3.10", "3.11", "3.12"].'
-        type: string
-        required: false
-        default: '["3.11"]'
-      os_matrix:
-        description: 'JSON array of runner labels, e.g. ["ubuntu-latest", "macos-latest", "windows-latest"].'
-        type: string
-        required: false
-        default: '["ubuntu-latest"]'
-      pytest_args:
-        description: Additional arguments appended to the `pytest` invocation.
-        type: string
-        required: false
-        default: '-q'
-      enable_smoke_test:
-        description: >-
-          `true` to run the smoke-test job, which checks out the calling
-          repo, invokes it as an action (`uses: ./`), and asserts its
-          declared outputs are non-empty. Requires an `action.yml` at
-          the repo root.
-        type: boolean
-        required: false
-        default: false
-      smoke_trigger:
-        description: >-
-          When the smoke-test job is allowed to run: `always`,
-          `push-dev` (only on a push to the caller's `dev` branch), or
-          `never`.
-        type: string
-        required: false
-        default: push-dev
-      smoke_test_config:
-        description: >-
-          JSON object of `with:` inputs passed to the action under
-          test, e.g. '{"source": "npm", "package_name": "@actions/core"}'.
-        type: string
-        required: false
-        default: '{}'
-      timeout_pytest:
-        description: pytest job timeout, in minutes.
-        type: number
-        required: false
-        default: 10
-      timeout_smoke:
-        description: smoke-test job timeout, in minutes.
-        type: number
-        required: false
-        default: 5
 
 permissions: {}
 
@@ -113,12 +82,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Checkout hub org-wide action_test defaults
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: main
+          path: hub-config
+          sparse-checkout: sync-files/config/action-test-global-config.json
+          sparse-checkout-cone-mode: false
       - name: Load universal config
         id: config
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
         with:
           config_path: .github/bos-universal-config.json
           allow_missing: 'false'
+          global_config_path: hub-config/sync-files/config/action-test-global-config.json
+          use_global_config: auto
 
   pytest:
     name: pytest (py${{ matrix.python-version }} / ${{ matrix.os }})
@@ -167,14 +146,32 @@ jobs:
           PY
 
       - name: Run pytest
+        id: pytest
         shell: bash
-        run: pytest ${{ fromJSON(needs.resolve-config.outputs.test).pytest_args }}
+        run: pytest ${{ fromJSON(needs.resolve-config.outputs.test).pytest_args }} 2>&1 | tee "${RUNNER_TEMP}/pytest-output.txt"
+
+      - name: Upload failure log
+        if: failure() && steps.pytest.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pytest-failure-py${{ matrix.python-version }}-${{ matrix.os }}
+          path: ${{ runner.temp }}/pytest-output.txt
+          retention-days: 5
 
   # -----------------------------------------------------------------
   # Smoke test — validates the action against a live upstream target.
   # Runs only when explicitly enabled, and only on the trigger the
   # caller opted into, since it can reach out to third-party services
   # and should not run unattended on untrusted PR heads.
+  #
+  # Not fully generic: GitHub Actions can't dynamically build a `with:`
+  # block from arbitrary JSON, so the inputs passed to the action under
+  # test are a fixed set (`source` / `package_name`) matching
+  # `bos-upstream-watcher`'s shape today. A repo whose action takes a
+  # different shape of inputs should leave `enable_smoke_test` off and
+  # rely on its own repo-specific test suite via `pytest` above instead
+  # — `smoke_test_output_name` only lets the *output* being asserted on
+  # vary, not the inputs supplied.
   # -----------------------------------------------------------------
   smoke-test:
     name: smoke test (live upstream)
@@ -203,11 +200,119 @@ jobs:
       - name: Verify action outputs
         shell: bash
         env:
-          ACTION_VERSION_OUTPUT: ${{ steps.action-under-test.outputs.version }}
+          SMOKE_OUTPUT_NAME: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_output_name }}
+          SMOKE_OUTPUT_VALUE: ${{ steps.action-under-test.outputs[fromJSON(needs.resolve-config.outputs.test).smoke_test_output_name] }}
         run: |
           set -euo pipefail
-          if [[ -z "${ACTION_VERSION_OUTPUT}" ]]; then
-            echo "::error::action under test did not produce a 'version' output"
+          if [[ -z "${SMOKE_OUTPUT_VALUE}" ]]; then
+            echo "::error::action under test did not produce a non-empty '${SMOKE_OUTPUT_NAME}' output"
             exit 1
           fi
-          echo "action version output: ${ACTION_VERSION_OUTPUT}"
+          echo "action ${SMOKE_OUTPUT_NAME} output: ${SMOKE_OUTPUT_VALUE}"
+
+  # -----------------------------------------------------------------
+  # Failure summary — opt-in (`enable_ai_failure_summary`, on by
+  # default). Runs only when the pytest matrix actually failed;
+  # downloads each failed cell's captured output and asks GitHub
+  # Models for a one-paragraph root-cause hypothesis. Same
+  # opportunistic-fallback contract as every other AI feature in this
+  # org: a missing `models: read` grant, disabled provider, or failed
+  # request silently falls back to a deterministic listing of which
+  # matrix cells failed, never blocks the workflow.
+  # -----------------------------------------------------------------
+  failure-summary:
+    name: Failure summary
+    needs: [resolve-config, pytest]
+    if: failure() && fromJSON(needs.resolve-config.outputs.test).enable_ai_failure_summary == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      models: read
+    steps:
+      - name: Download failed pytest logs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          pattern: pytest-failure-*
+          path: failures
+          merge-multiple: false
+
+      - name: Summarize matrix failures
+        shell: bash
+        env:
+          AI_ENABLED: ${{ fromJSON(needs.resolve-config.outputs.test).enable_ai_failure_summary }}
+          AI_MODEL: ${{ fromJSON(needs.resolve-config.outputs.test).ai_model }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          FAILED_CELLS=$(find failures -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sed 's#failures/pytest-failure-##' | sort || true)
+          {
+            echo "## Action test failure summary"
+            echo
+            if [[ -z "${FAILED_CELLS}" ]]; then
+              echo "pytest matrix failed, but no per-cell failure log was captured."
+            else
+              echo "Failed matrix cells:"
+              echo
+              while IFS= read -r cell; do
+                [[ -n "${cell}" ]] && echo "- \`${cell}\`"
+              done <<< "${FAILED_CELLS}"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          [[ -z "${FAILED_CELLS}" ]] && exit 0
+
+          PROMPT_FILE="${RUNNER_TEMP}/failure-summary.prompt.txt"
+          {
+            echo "The following GitHub Actions pytest matrix cells failed. For each,"
+            echo "the tail of its captured output follows. In 2-3 sentences, give a"
+            echo "root-cause hypothesis a maintainer can start triaging from. Output"
+            echo "plain text only, no markdown headers."
+            echo
+            while IFS= read -r cell; do
+              [[ -z "${cell}" ]] && continue
+              echo "### ${cell}"
+              tail -c 2000 "failures/pytest-failure-${cell}/pytest-output.txt" 2>/dev/null || echo "(no log captured)"
+              echo
+            done <<< "${FAILED_CELLS}"
+          } > "${PROMPT_FILE}"
+
+          if [[ "${AI_ENABLED}" != "true" ]]; then
+            exit 0
+          fi
+
+          AI_OUT="${RUNNER_TEMP}/failure-summary.ai.txt"
+          PAYLOAD=$(jq -Rs --arg model "${AI_MODEL}" '{
+            model: $model,
+            temperature: 0.1,
+            messages: [
+              {"role": "system", "content": "You are a precise CI triage assistant. Output plain text only."},
+              {"role": "user",   "content": . }
+            ]
+          }' < "${PROMPT_FILE}")
+
+          HTTP_CODE=$(curl -sS \
+            -o "${AI_OUT}" -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "${PAYLOAD}" \
+            'https://models.github.ai/inference/chat/completions' \
+            2>/dev/null || true)
+
+          if [[ "${HTTP_CODE}" == "200" ]]; then
+            AI_CONTENT=$(jq -r '.choices[0].message.content // empty' "${AI_OUT}" 2>/dev/null || true)
+            if [[ -n "${AI_CONTENT}" ]]; then
+              {
+                echo
+                echo "**AI hypothesis** (${AI_MODEL}):"
+                echo
+                echo "${AI_CONTENT}"
+              } >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+          fi
+          echo "::notice::failure-summary: AI request unavailable (HTTP ${HTTP_CODE:-none}); deterministic listing above stands alone."
+

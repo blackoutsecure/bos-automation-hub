@@ -155,8 +155,12 @@ def main() -> None:
         "enable_smoke_test": False,
         "smoke_trigger": "push-dev",
         "smoke_test_config": {},
+        "smoke_test_output_name": "version",
         "timeout_pytest": 10,
         "timeout_smoke": 5,
+        "enable_ai_failure_summary": True,
+        "ai_provider": "auto",
+        "ai_model": "openai/gpt-4o-mini",
     }
 
     # ── organization section ──────────────────────────────────────
