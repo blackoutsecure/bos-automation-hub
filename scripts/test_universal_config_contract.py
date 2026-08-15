@@ -469,6 +469,7 @@ def main() -> None:
     assert repo_metadata_workflow.count(
         "uses: blackoutsecure/bos-repo-about-sync-action@"
     ) == 1
+    assert "uses: blackoutsecure/bos-repo-about-sync-action@f1b08228a6ddcef32a23a09a2fde804eb8fc693f" in repo_metadata_workflow
     assert ".github/actions/repo-metadata@main" not in repo_metadata_workflow
     assert not (ROOT / ".github/actions/repo-metadata").exists()
     assert "secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token" in repo_metadata_workflow
