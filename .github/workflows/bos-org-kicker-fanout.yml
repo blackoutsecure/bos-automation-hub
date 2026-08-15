@@ -1,0 +1,175 @@
+# Organization-wide kicker fan-out (hub-only; never synced to member repos).
+#
+# Dispatches one of the universal kickers across every repository in the
+# organization that already has that kicker installed. Requires an
+# Actions: write / Metadata: read credential covering the org, because the
+# job-scoped GITHUB_TOKEN cannot dispatch workflows in other repositories.
+name: Blackout Secure org kicker fan-out
+
+run-name: >-
+  Org fan-out / ${{ inputs.kicker }}${{ inputs.dry_run && ' (dry run)' || '' }}
+
+"on":
+  workflow_dispatch:
+    inputs:
+      kicker:
+        description: 'Which universal kicker to run in every repository.'
+        required: true
+        type: choice
+        options:
+          - sync
+          - security
+          - marketplace
+          - upstream
+          - launchpad
+          - action-test
+        default: sync
+      repos:
+        description: >-
+          Optional comma- or space-separated repository filter. Accepts bare
+          names or `owner/name`, and `*` globs. Empty targets the whole org.
+        required: false
+        type: string
+        default: ''
+      dispatch_inputs:
+        description: >-
+          Optional JSON object of inputs forwarded to the kicker, e.g.
+          {"mode":"check"}. Empty uses each kicker's own defaults.
+        required: false
+        type: string
+        default: ''
+      include_forks:
+        description: 'Include forked repositories.'
+        required: false
+        type: boolean
+        default: false
+      include_archived:
+        description: 'Include archived repositories.'
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: 'Resolve and report targets without dispatching.'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: org-kicker-fanout-${{ inputs.kicker }}
+  cancel-in-progress: false
+
+jobs:
+  fanout:
+    name: Fan out ${{ inputs.kicker }} kicker
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    timeout-minutes: 30
+    steps:
+      - name: Validate credential
+        env:
+          HAS_TOKEN: ${{ (secrets.ORG_KICK_PAT || secrets.DISPATCH_TOKEN) != '' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [ "${HAS_TOKEN}" != "true" ]; then
+            echo "::error::Cross-repository dispatch needs an org-scoped credential." \
+                 "Add an \`ORG_KICK_PAT\` (or \`DISPATCH_TOKEN\`) secret with" \
+                 "Actions: write and Metadata: read on the target repositories."
+            exit 1
+          fi
+
+      - name: Resolve targets and dispatch
+        env:
+          GH_TOKEN: ${{ secrets.ORG_KICK_PAT || secrets.DISPATCH_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+          KICKER: ${{ inputs.kicker }}
+          REPO_FILTER: ${{ inputs.repos }}
+          DISPATCH_INPUTS: ${{ inputs.dispatch_inputs }}
+          INCLUDE_FORKS: ${{ inputs.include_forks }}
+          INCLUDE_ARCHIVED: ${{ inputs.include_archived }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          WORKFLOW_FILE="bos-universal-${KICKER}-kicker.yml"
+
+          # Build `-f key=value` flags from the optional JSON input object.
+          FLAGS=()
+          if [ -n "${DISPATCH_INPUTS//[[:space:]]/}" ]; then
+            while IFS= read -r pair; do
+              FLAGS+=(-f "${pair}")
+            done < <(printf '%s' "${DISPATCH_INPUTS}" \
+              | jq -r 'to_entries[] | "\(.key)=\(.value)"')
+          fi
+
+          mapfile -t CANDIDATES < <(
+            gh api --paginate "orgs/${ORG}/repos?per_page=100" \
+              --jq '.[] | select(.disabled | not)
+                        | [.full_name, (.fork|tostring), (.archived|tostring)]
+                        | @tsv'
+          )
+
+          matches_filter() {
+            local name="$1" short="${1#*/}" token
+            [ -z "${REPO_FILTER//[[:space:]]/}" ] && return 0
+            for token in ${REPO_FILTER//,/ }; do
+              # shellcheck disable=SC2254
+              case "${name}" in ${token}) return 0 ;; esac
+              # shellcheck disable=SC2254
+              case "${short}" in ${token}) return 0 ;; esac
+            done
+            return 1
+          }
+
+          {
+            echo "### Org kicker fan-out: \`${WORKFLOW_FILE}\`"
+            echo
+            echo "| Repository | Result |"
+            echo "| --- | --- |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          dispatched=0
+          skipped=0
+          failed=0
+
+          for row in "${CANDIDATES[@]}"; do
+            IFS=$'\t' read -r full_name is_fork is_archived <<< "${row}"
+            matches_filter "${full_name}" || continue
+            if [ "${is_fork}" = "true" ] && [ "${INCLUDE_FORKS}" != "true" ]; then
+              continue
+            fi
+            if [ "${is_archived}" = "true" ] && [ "${INCLUDE_ARCHIVED}" != "true" ]; then
+              continue
+            fi
+
+            if ! gh api "repos/${full_name}/actions/workflows/${WORKFLOW_FILE}" \
+                 --silent >/dev/null 2>&1; then
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            if [ "${DRY_RUN}" = "true" ]; then
+              echo "| ${full_name} | would dispatch |" >> "${GITHUB_STEP_SUMMARY}"
+              dispatched=$((dispatched + 1))
+              continue
+            fi
+
+            if gh workflow run "${WORKFLOW_FILE}" \
+                 --repo "${full_name}" "${FLAGS[@]+"${FLAGS[@]}"}"; then
+              echo "| ${full_name} | dispatched |" >> "${GITHUB_STEP_SUMMARY}"
+              dispatched=$((dispatched + 1))
+            else
+              echo "| ${full_name} | :x: dispatch failed |" >> "${GITHUB_STEP_SUMMARY}"
+              failed=$((failed + 1))
+            fi
+          done
+
+          {
+            echo
+            echo "Targets: ${dispatched} | without kicker: ${skipped} | failed: ${failed}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${failed}" -gt 0 ]; then
+            echo "::error::${failed} repository dispatch(es) failed."
+            exit 1
+          fi
