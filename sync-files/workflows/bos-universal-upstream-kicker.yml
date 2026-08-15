@@ -80,7 +80,7 @@ jobs:
       version_regex: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.version_regex || '' }}
       tag_pattern: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.tag_pattern || '' }}
       include_prereleases: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.include_prereleases || 'false' }}
-      track_file: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.tracker_path || '.github/upstream/tracked-release.json' }}
+      track_file: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.tracker_path || '.github/tracked-release.json' }}
       target_workflows: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.target_workflows || '' }}
       force_dispatch: ${{ inputs.force_run && 'true' || 'false' }}
     secrets: inherit
@@ -104,7 +104,7 @@ jobs:
       version_regex: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.version_regex || '' }}
       tag_pattern: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.tag_pattern || '' }}
       include_prereleases: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.include_prereleases || 'false' }}
-      track_file: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.tracker_path || '.github/upstream/tracked-release.json' }}
+      track_file: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.tracker_path || '.github/tracked-release.json' }}
       target_workflows: ${{ fromJson(needs.parse_config.outputs.cfg).upstream_watcher.target_workflows || '' }}
       force_dispatch: ${{ inputs.force_run && 'true' || 'false' }}
     secrets: inherit
