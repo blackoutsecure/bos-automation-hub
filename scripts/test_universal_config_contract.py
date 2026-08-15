@@ -422,7 +422,7 @@ def main() -> None:
     ).read_text()
     assert "use_global_config:       'true'" in marketplace_workflow
     assert (
-        "global_config_path:      hub-config/config/"
+        "global_config_path:      hub-config/sync-files/config/"
         "marketplace-kit-global-config.json"
         in marketplace_workflow
     )
