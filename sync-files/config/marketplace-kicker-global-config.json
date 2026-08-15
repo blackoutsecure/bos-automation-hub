@@ -1,5 +1,12 @@
 {
   "marketplace": {
-    "release_label": "auto"
+    "release_label": "auto",
+    "repo_metadata": {
+      "ai_model": "auto",
+      "description_mode": "auto",
+      "description_fallback": "",
+      "use_existing_readme": true,
+      "generate_readme": false
+    }
   }
 }

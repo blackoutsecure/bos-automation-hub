@@ -984,6 +984,16 @@ name: Blackout Secure Launchpad
         required: false
         type: string
         default: ''
+      repo_metadata_description_mode:
+        description: '`auto` uses AI then README; `fallback` skips AI; `existing` leaves the description unchanged.'
+        required: false
+        type: string
+        default: auto
+      repo_metadata_description_fallback:
+        description: 'Deterministic description used by fallback mode.'
+        required: false
+        type: string
+        default: ''
       repo_metadata_homepage:
         description: >-
           Explicit Website URL for the About box. Empty (default) leaves
@@ -1025,7 +1035,7 @@ name: Blackout Secure Launchpad
         description: 'GitHub Models model id. Only used when `repo_metadata_ai_enabled: true`.'
         required: false
         type: string
-        default: 'openai/gpt-4o-mini'
+        default: auto
       repo_metadata_show_releases:
         description: 'Include the Releases sidebar widget on the repo home page. Default `true`.'
         required: false

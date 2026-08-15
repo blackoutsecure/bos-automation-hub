@@ -766,6 +766,11 @@ def main() -> None:
     assert hub_config["repo_metadata"] == {
         "enable": True,
         "homepage": "https://github.com/blackoutsecure/bos-automation-hub",
+        "ai_model": "auto",
+        "description_mode": "auto",
+        "description_fallback": "",
+        "use_existing_readme": True,
+        "generate_readme": False,
         "generate_topics": True,
         "topics_fallback": (
             "github-actions automation reusable-workflows composite-actions "

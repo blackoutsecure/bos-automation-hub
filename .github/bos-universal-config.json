@@ -19,6 +19,11 @@
     "repo_metadata": {
       "enable": true,
       "homepage": "https://github.com/blackoutsecure/bos-automation-hub",
+      "ai_model": "auto",
+      "description_mode": "auto",
+      "description_fallback": "",
+      "use_existing_readme": true,
+      "generate_readme": false,
       "generate_topics": true,
       "topics_fallback": "github-actions automation reusable-workflows composite-actions devops ci-cd workflow-automation"
     }
