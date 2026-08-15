@@ -406,7 +406,7 @@ def main() -> None:
         in marketplace_workflow
     )
     assert "config_path:             .github/bos-universal-config.json" in marketplace_workflow
-    assert "bos-marketplace-kit/.github/actions/check@5fc9b4088c962cd45b52c9928443c5f5496a41d1" in marketplace_workflow
+    assert "bos-marketplace-kit/.github/actions/check@93affaddfa4f5b6e6c162112d334baa989a31d34" in marketplace_workflow
 
     for kicker_path in (
         ROOT / "sync-files/workflows/bos-universal-action-test-kicker.yml",
@@ -681,6 +681,9 @@ def main() -> None:
     assert global_marketplace_config["marketplace_kit"] == {
         "profile": "strict",
         "org_health_repo": "blackoutsecure/.github",
+        "check_org_health": True,
+        "community_health_source": "inherit",
+        "enable_security_scan": True,
         "defer_to_code_scanning_kit": True,
         "enable_ai_findings_summary": False,
     }

@@ -343,7 +343,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run kit lint composite
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@5fc9b4088c962cd45b52c9928443c5f5496a41d1 # v0.1.11
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@93affaddfa4f5b6e6c162112d334baa989a31d34 # v0.1.12
         with:
           severity: fail
 
