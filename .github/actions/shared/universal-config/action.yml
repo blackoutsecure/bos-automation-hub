@@ -433,7 +433,7 @@ runs:
             "timeout_smoke": as_int(merged_scalar("timeout_smoke"), 5),
             "enable_ai_failure_summary": merged_scalar("enable_ai_failure_summary") is not False,
             "ai_provider": str(merged_scalar("ai_provider") or "auto"),
-            "ai_model": str(merged_scalar("ai_model") or "openai/gpt-4o-mini"),
+            "ai_model": str(merged_scalar("ai_model") or "auto"),
         }
 
         # ── organization section ──────────────────────────────────

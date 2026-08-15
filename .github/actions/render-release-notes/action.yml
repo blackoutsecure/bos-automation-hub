@@ -68,7 +68,7 @@ inputs:
   ai_changelog:
     description: >-
       When `'true'`, attempt to summarize the commit list via GitHub
-      Models inference (`openai/gpt-4o-mini` by default). Requires the
+          Models inference (auto-selected by default). Requires the
       calling workflow to grant `models: read`. On any AI failure
       (permission, rate limit, network, malformed response) the action
       silently falls back to a deterministic bash grouping by
@@ -82,7 +82,7 @@ inputs:
       `meta/llama-3.1-8b-instruct`). Only consulted when
       `ai_changelog == 'true'`.
     required: false
-    default: 'openai/gpt-4o-mini'
+    default: 'auto'
 
 outputs:
   body_path:
@@ -150,6 +150,10 @@ runs:
           true|false) ;;
           *) echo "::error::ai_changelog must be 'true' or 'false', got '${AI_CHANGELOG}'"; exit 1 ;;
         esac
+
+        if [[ -z "${AI_MODEL}" || "${AI_MODEL}" == "auto" ]]; then
+          AI_MODEL="${GITHUB_MODELS_MODEL_RELEASE_NOTES:-${GITHUB_MODELS_MODEL:-openai/gpt-4o-mini}}"
+        fi
 
         # GH Compare API: returns commits reachable from source_branch but
         # not from previous_tag. `per_page=250` is the API max; we cap our

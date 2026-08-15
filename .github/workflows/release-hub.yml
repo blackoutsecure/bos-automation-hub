@@ -436,10 +436,12 @@ jobs:
       description: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.description || '' }}
       homepage: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.homepage || '' }}
       topics: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.topics || '' }}
+      description_mode: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.description_mode || 'auto' }}
+      description_fallback: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.description_fallback || '' }}
       generate_topics: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.generate_topics == true }}
       topics_fallback: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.topics_fallback || '' }}
       ai_enabled: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.ai_enabled != false }}
-      ai_model: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.ai_model || 'openai/gpt-4o-mini' }}
+      ai_model: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.ai_model || 'auto' }}
       show_releases: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.show_releases != false }}
       show_deployments: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.show_deployments == true }}
       show_packages: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.show_packages == true }}

@@ -263,6 +263,10 @@ jobs:
 
           [[ -z "${FAILED_CELLS}" ]] && exit 0
 
+          if [[ -z "${AI_MODEL}" || "${AI_MODEL}" == "auto" ]]; then
+            AI_MODEL="${GITHUB_MODELS_MODEL_ACTION_TEST:-${GITHUB_MODELS_MODEL:-openai/gpt-4o-mini}}"
+          fi
+
           PROMPT_FILE="${RUNNER_TEMP}/failure-summary.prompt.txt"
           {
             echo "The following GitHub Actions pytest matrix cells failed. For each,"

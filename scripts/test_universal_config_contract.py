@@ -160,7 +160,7 @@ def main() -> None:
         "timeout_smoke": 5,
         "enable_ai_failure_summary": True,
         "ai_provider": "auto",
-        "ai_model": "openai/gpt-4o-mini",
+        "ai_model": "auto",
     }
 
     # ── organization section ──────────────────────────────────────
@@ -427,7 +427,7 @@ def main() -> None:
         in marketplace_workflow
     )
     assert "config_path:             .github/bos-universal-config.json" in marketplace_workflow
-    assert "bos-marketplace-kit/.github/actions/check@93affaddfa4f5b6e6c162112d334baa989a31d34" in marketplace_workflow
+    assert "bos-marketplace-kit/.github/actions/check@3a760ecf7e2734687c17aeffbff5bc2ecbcf9010" in marketplace_workflow
 
     for kicker_path in (
         ROOT / "sync-files/workflows/bos-universal-action-test-kicker.yml",

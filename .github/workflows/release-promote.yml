@@ -6,7 +6,7 @@
 # https://docs.github.com/en/actions/how-tos/create-and-publish-actions/publish-in-github-marketplace).
 #
 # Pipeline (two stages):
-#   1. promote   — `bos-marketplace-kit/.github/actions/promote@v0.1.4`
+#   1. promote   — `bos-marketplace-kit/.github/actions/promote@v0.1.14`
 #                  copies an allowlisted set of paths from
 #                  `source_branch` to `target_branch`, tags
 #                  `target_branch`. v0.1.3+ also tags the existing
@@ -224,7 +224,7 @@ name: Marketplace Promotion Release
           Only consulted when `release_ai_changelog == 'true'`.
         required: false
         type: string
-        default: 'openai/gpt-4o-mini'
+        default: auto
 
     outputs:
       target_sha:
@@ -414,7 +414,7 @@ jobs:
         # step above (operator-supplied verbatim OR auto-bumped
         # next-patch) — never `inputs.tag_name` directly, because
         # that can be empty.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@93affaddfa4f5b6e6c162112d334baa989a31d34 # v0.1.12
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@3a760ecf7e2734687c17aeffbff5bc2ecbcf9010 # v0.1.14
         with:
           source_branch:         ${{ inputs.source_branch }}
           target_branch:         ${{ inputs.target_branch }}
