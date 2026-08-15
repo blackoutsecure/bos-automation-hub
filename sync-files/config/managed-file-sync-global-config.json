@@ -1,9 +1,12 @@
 {
   "managed_file_sync": {
     "take_over_managed_files": true,
-    "managed_files_path": "sync-files/sync-files/workflows",
+    "cleanup_duplicate_lines": true,
+    "managed_files_path": "sync-files",
     "services": [
       "shellcheck",
+      "yamllint",
+      "coverage_artifacts",
       "bos_universal_security_kicker",
       "bos_universal_sync_kicker"
     ],
@@ -50,6 +53,61 @@
           {
             "path": ".github/workflows/bos-universal-upstream-kicker.yml",
             "content_file": "bos-universal-upstream-kicker.yml"
+          }
+        ]
+      },
+      "bos_universal_launchpad_kicker": {
+        "mode": "file",
+        "files": [
+          {
+            "path": ".github/workflows/bos-universal-launchpad-kicker.yml",
+            "content_file": "bos-universal-launchpad-kicker.yml"
+          }
+        ]
+      },
+      "org_defaults": {
+        "mode": "file",
+        "description": "Organization-wide community health, pull request, issue, funding, and profile defaults for blackoutsecure/.github.",
+        "files": [
+          {
+            "path": "CODE_OF_CONDUCT.md",
+            "content_file": "community-health/CODE_OF_CONDUCT.md"
+          },
+          {
+            "path": "CONTRIBUTING.md",
+            "content_file": "community-health/CONTRIBUTING.md"
+          },
+          {
+            "path": "SECURITY.md",
+            "content_file": "community-health/SECURITY.md"
+          },
+          {
+            "path": "SUPPORT.md",
+            "content_file": "community-health/SUPPORT.md"
+          },
+          {
+            "path": "FUNDING.yml",
+            "content_file": "community-health/FUNDING.yml"
+          },
+          {
+            "path": ".github/PULL_REQUEST_TEMPLATE.md",
+            "content_file": "github-meta/PULL_REQUEST_TEMPLATE.md"
+          },
+          {
+            "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+            "content_file": "github-meta/ISSUE_TEMPLATE/bug_report.md"
+          },
+          {
+            "path": ".github/ISSUE_TEMPLATE/config.yml",
+            "content_file": "github-meta/ISSUE_TEMPLATE/config.yml"
+          },
+          {
+            "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+            "content_file": "github-meta/ISSUE_TEMPLATE/feature_request.md"
+          },
+          {
+            "path": "profile/README.md",
+            "content_file": "org-profile/README.md"
           }
         ]
       }

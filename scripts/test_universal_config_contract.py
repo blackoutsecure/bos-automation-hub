@@ -734,6 +734,7 @@ def main() -> None:
     assert sync_policy["managed_files_path"] == "sync-files"
     assert sync_policy["services"] == [
         "shellcheck",
+        "yamllint",
         "coverage_artifacts",
         "bos_universal_security_kicker",
         "bos_universal_sync_kicker",
