@@ -173,6 +173,7 @@ different trust and permission boundaries:
 | `bos-universal-marketplace-kicker.yml` | Marketplace PR, trusted-target PR, or manual release/metadata operation | Validate Actions, guard the workflow-free stable branch, promote releases, and refresh the repository About box. |
 | `bos-universal-launchpad.yml` | Push, schedule, or manual caller; publish permissions | Monitor upstreams, run the release-blocking security scan, and coordinate delivery. |
 | `bos-universal-sync-kicker.yml` | Config push, schedule, or manual dispatch; repository contents write | Resolve the target hub branch and invoke the reusable sync workflow. |
+| `bos-universal-upstream-kicker.yml` | Schedule, watcher-config push, or manual dispatch; repository contents/actions write | Resolve the target hub branch and invoke the config-driven upstream monitor. |
 | `release.yml` (artifact release) | Called by Universal or another trusted workflow | Publish Docker, Balena, and GitHub Release artifacts for an already-approved version. |
 | `release-promote.yml` (Marketplace promotion) | Operator-driven Marketplace caller | Promote an allowlisted source tree to the workflow-free stable branch and release it. |
 | `release-hub.yml` (hub runtime release) | Hub-only manual workflow | Promote this hub's reusable runtime from the default branch to `main` and tag it. |
@@ -644,7 +645,7 @@ would not reduce Actions jobs or runner usage.
 
 | Workflow | Purpose |
 | --- | --- |
-| [`monitor-upstream-release.yml`](.github/workflows/monitor-upstream-release.yml) | Universal stage for upstream version discovery and tracking-state updates. |
+| [`monitor-upstream-release.yml`](.github/workflows/monitor-upstream-release.yml) | Universal stage for upstream version discovery and tracking-state updates using the config-aware `bos-upstream-watcher` composite. |
 | [`release.yml`](.github/workflows/release.yml) | Artifact-release composition stage; also supports direct tag-driven releases without upstream monitoring. |
 | [`docker-build-push.yml`](.github/workflows/docker-build-push.yml) | Release leaf for multi-architecture Docker publication. |
 | [`balena-block-publish.yml`](.github/workflows/balena-block-publish.yml) | Release leaf for Balena block publication. |
@@ -653,6 +654,21 @@ would not reduce Actions jobs or runner usage.
 | [`security-scan.yml`](.github/workflows/security-scan.yml) | Shared scanning stage used by trusted delivery and pre-merge validation. |
 | [`repo-metadata-sync.yml`](.github/workflows/repo-metadata-sync.yml) | Shared About-box synchronization stage used by hub, Launchpad, and Marketplace publication. |
 | [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) | Thin event and commit wrapper around the published managed-file sync action. |
+
+The upstream monitor loads organization-wide watcher defaults from
+[`sync-files/config/upstream-watcher-global-config.json`](sync-files/config/upstream-watcher-global-config.json)
+and merges repository-specific `upstream_watcher` settings from
+`.github/bos-universal-config.json` above it. Keep upstream identifiers and
+tracker paths in the repository config; keep shared behavior and AI/report
+defaults in the global file.
+
+The upstream monitor pins the current watcher runtime and passes the caller's
+`.github/bos-universal-config.json` through its config cascade. Add an
+`upstream_watcher` section there to configure provider-specific discovery,
+tracker behavior, and advisory AI settings without expanding another workflow
+input map. The monitor preserves the watcher's canonical label, update type,
+AI impact/status, and package metadata outputs for downstream reporting while
+keeping tracker commits and downstream dispatch in the hub wrapper.
 
 Specialized reusable entry points remain separate when their event or mutation
 contract does not belong in Universal:

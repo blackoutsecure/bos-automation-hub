@@ -43,6 +43,15 @@
             "content_file": "bos-universal-marketplace-kicker.yml"
           }
         ]
+      },
+      "bos_universal_upstream_kicker": {
+        "mode": "file",
+        "files": [
+          {
+            "path": ".github/workflows/bos-universal-upstream-kicker.yml",
+            "content_file": "bos-universal-upstream-kicker.yml"
+          }
+        ]
       }
     }
   }

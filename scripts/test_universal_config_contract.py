@@ -297,6 +297,14 @@ def main() -> None:
     assert "config_path: .github/bos-universal-config.json" in kicker
     assert "config_path: .github/bos-universal-config.json" in action_test_workflow
 
+    monitor_workflow = (ROOT / ".github/workflows/monitor-upstream-release.yml").read_text()
+    assert "bos-upstream-watcher@c91a6fd7d42161f1b37ab6da12ca6a6bbaabe739" in monitor_workflow
+    assert "config_path: .github/bos-universal-config.json" in monitor_workflow
+    assert "global_config_path: hub-config/sync-files/config/upstream-watcher-global-config.json" in monitor_workflow
+    assert "use_global_config: 'auto'" in monitor_workflow
+    assert "upstream_update_type:" in monitor_workflow
+    assert "upstream_ai_status:" in monitor_workflow
+
     assert "managed-files-guard:" not in kicker
     assert "bos-universal-sync.yml@main" not in workflow
     assert (
@@ -719,6 +727,16 @@ def main() -> None:
         "bos_universal_security_kicker",
         "bos_universal_sync_kicker",
     ]
+    assert "bos_universal_upstream_kicker" in sync_policy["service_definitions"]
+    assert sync_policy["service_definitions"]["bos_universal_upstream_kicker"] == {
+        "mode": "file",
+        "files": [
+            {
+                "path": ".github/workflows/bos-universal-upstream-kicker.yml",
+                "content_file": "bos-universal-upstream-kicker.yml",
+            }
+        ],
+    }
     assert all(
         definition["mode"] == "file"
         for name, definition in sync_policy["service_definitions"].items()

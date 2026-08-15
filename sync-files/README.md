@@ -13,6 +13,9 @@ competing managed blocks.
 This repository's own sync wrappers use `.github/bos-universal-config.json` as
 the repo layer and check out the shared global policy at
 `sync-files/config/managed-file-sync-global-config.json`.
+The upstream monitor also loads
+`sync-files/config/upstream-watcher-global-config.json` and merges any
+repository-specific `upstream_watcher` section from the universal config.
 Settings may be authored as flat top-level keys or grouped under a named
 section per service (`launchpad`, `marketplace`, `security`, plus a
 `general` catch-all for anything else) — see the ["Config sections"](../README.md#config-sections)
@@ -44,6 +47,10 @@ review surface for hub-specific release content.
   event routing and ref resolution, then delegates to the promoted hub
   `bos-universal-sync.yml@dev`/`@main`. Repository maintenance never starts
   the delivery workflow.
+- [`bos-universal-upstream-kicker.yml`](workflows/bos-universal-upstream-kicker.yml)
+  is the opt-in scheduled/manual upstream watcher caller. It reads the
+  repository's `upstream_watcher` section and delegates tracking, reporting,
+  commits, and downstream dispatch to `monitor-upstream-release.yml`.
 
 These workflows are file-owned managed. Consumer repositories must not edit
 them directly. A repository opts into the callers it needs, for example:
