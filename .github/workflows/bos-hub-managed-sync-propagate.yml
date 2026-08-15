@@ -1,0 +1,64 @@
+# Auto-propagate managed-file changes (hub-only; never synced to member repos).
+#
+# When a commit lands on `sync-files/**` (the managed-file templates that
+# every onboarded repo's sync kicker pulls from), most repos otherwise only
+# pick up the change on the standalone sync kicker's weekly cron, or when
+# an operator remembers to run `bos-org-kicker-fanout.yml` by hand. This
+# workflow closes that gap: it dispatches that exact same fan-out workflow
+# (same-repo `workflow_dispatch`, not a duplicated copy of its logic) right
+# after the change that would otherwise wait up to a week to reach them.
+#
+# Deliberately NOT a `workflow_call` of `bos-org-kicker-fanout.yml`: adding
+# `workflow_call:` to that file would make `release-hub.yml`'s auto-detected
+# runtime allowlist (`grep -lE '^  workflow_call:' .github/workflows/*.yml`)
+# promote hub-only maintainer tooling to the public `main` runtime surface,
+# which it's explicitly meant to stay off of. A plain `gh workflow run`
+# dispatch avoids that reclassification entirely.
+#
+# Safety notes:
+#   * The fanout run this dispatches fails closed exactly as it would if
+#     triggered manually: without an `ORG_KICK_PAT` (or `DISPATCH_TOKEN`)
+#     secret configured on this repo, its credential-validation step errors
+#     out before dispatching anything to member repos.
+#   * Any repository can opt out by setting its own `AUTO_HUB_SYNC` Actions
+#     variable to `false` — see the opt-out check in
+#     `bos-org-kicker-fanout.yml`. Opt-out, not opt-in: repos participate
+#     by default once onboarded (kicker file present).
+#   * Dispatches with `dry_run=false` \u2014 this trigger only exists to actually
+#     propagate. Use the manual `bos-org-kicker-fanout.yml` dispatch with
+#     `dry_run: true` to preview targets without this push trigger.
+name: Blackout Secure Hub Managed-File Sync Propagation
+
+run-name: Hub sync propagation / ${{ github.ref_name }}
+
+"on":
+  push:
+    branches: [main, dev]
+    paths:
+      - 'sync-files/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hub-sync-propagate-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  propagate:
+    name: Dispatch sync fan-out
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('\"{0}\"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    timeout-minutes: 2
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch bos-org-kicker-fanout.yml
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run bos-org-kicker-fanout.yml \
+            --repo "${{ github.repository }}" \
+            --ref "${{ github.ref_name }}" \
+            -f kicker=sync \
+            -f dry_run=false
