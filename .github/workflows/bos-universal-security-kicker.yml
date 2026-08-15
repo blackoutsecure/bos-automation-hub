@@ -10,10 +10,14 @@ run-name: >-
       && format('PR #{0}', github.event.pull_request.number)
       || github.event_name == 'merge_group'
       && 'merge queue'
+      || github.event_name == 'schedule'
+      && 'scheduled'
       || 'manual'
   }}
 
 "on":
+  schedule:
+    - cron: '43 14 * * *'
   pull_request:
     branches: [main, dev]
   push:
