@@ -154,6 +154,20 @@ name: Marketplace Promotion Release
         required: false
         type: boolean
         default: true
+      require_source_release:
+        description: >-
+          Require a recent published GitHub Release whose tag is reachable
+          from `source_branch` before promotion. Intended for promote-only
+          operations; default false preserves direct reusable-workflow
+          compatibility.
+        required: false
+        type: boolean
+        default: false
+      source_release_max_age_hours:
+        description: 'Maximum age of the required source-branch release. Default 168 hours (7 days).'
+        required: false
+        type: number
+        default: 168
       update_major_tag:
         description: >-
           When `true` (default), force-push the floating major tag
@@ -300,12 +314,64 @@ jobs:
           runner_x64: ${{ vars.RUNNER_X64 }}
           runner_arm64: ${{ vars.RUNNER_ARM64 }}
 
+  source-release-gate:
+    name: Verify recent source-branch release
+    needs: preflight-runner-config
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - name: Check release history
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_BRANCH: ${{ inputs.source_branch }}
+          REQUIRE_SOURCE_RELEASE: ${{ inputs.require_source_release }}
+          MAX_AGE_HOURS: ${{ inputs.source_release_max_age_hours }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${REQUIRE_SOURCE_RELEASE}" != "true" ]]; then
+            echo "::notice::source-release-gate disabled for this operation"
+            exit 0
+          fi
+
+          case "${MAX_AGE_HOURS}" in
+            ''|*[!0-9]*) echo "::error::source_release_max_age_hours must be a positive integer" >&2; exit 1 ;;
+          esac
+          (( MAX_AGE_HOURS > 0 && MAX_AGE_HOURS <= 8760 )) || {
+            echo "::error::source_release_max_age_hours must be between 1 and 8760" >&2
+            exit 1
+          }
+
+          cutoff=$(date -u -d "-${MAX_AGE_HOURS} hours" +%s)
+          releases="${RUNNER_TEMP}/source-releases.json"
+          gh api "repos/${REPOSITORY}/releases?per_page=30" > "${releases}"
+            candidate=$(python3 -c 'import json,sys; from datetime import datetime; cutoff=int(sys.argv[2]); print(next((r.get("tag_name", "") for r in json.load(open(sys.argv[1], encoding="utf-8")) if not r.get("draft") and not r.get("prerelease") and r.get("published_at") and int(datetime.fromisoformat(r["published_at"].replace("Z", "+00:00")).timestamp()) >= cutoff), ""))' "${releases}" "${cutoff}")
+
+          if [[ -z "${candidate}" ]]; then
+            echo "::error::No recent published stable GitHub Release found within ${MAX_AGE_HOURS} hours"
+            exit 1
+          fi
+
+          compare=$(gh api "repos/${REPOSITORY}/compare/${candidate}...${SOURCE_BRANCH}" --jq '.status')
+          case "${compare}" in
+            ahead|identical)
+              echo "::notice::source-release-gate passed: ${candidate} is reachable from ${SOURCE_BRANCH}"
+              ;;
+            *)
+              echo "::error::source release ${candidate} is not reachable from ${SOURCE_BRANCH} (compare status: ${compare})"
+              exit 1
+              ;;
+          esac
+
   # ---------------------------------------------------------------------------
   # Stage 1 — promote source_branch -> target_branch (allowlist) + tag.
   # ---------------------------------------------------------------------------
   promote:
     name: Promote and tag
-    needs: preflight-runner-config
+    needs: [preflight-runner-config, source-release-gate]
     # Resolves `vars.DEFAULT_RUNNER` (bare label or JSON-array string).
     # Shape is enforced by `preflight-runner-config`, so no fallback —
     # see README ("Runner resolution") for the full rationale.
