@@ -33,7 +33,7 @@
 #   * Existing tags cannot be overwritten.
 #   * `source_branch` and `target_branch` must differ.
 #   * Tag must match SemVer (`vX.Y.Z[-suffix]`).
-name: Marketplace promotion release (reusable)
+name: Marketplace Promotion Release
 
 "on":
   workflow_call:
@@ -414,7 +414,7 @@ jobs:
         # step above (operator-supplied verbatim OR auto-bumped
         # next-patch) — never `inputs.tag_name` directly, because
         # that can be empty.
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/promote@93affaddfa4f5b6e6c162112d334baa989a31d34 # v0.1.12
         with:
           source_branch:         ${{ inputs.source_branch }}
           target_branch:         ${{ inputs.target_branch }}

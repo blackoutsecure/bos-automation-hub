@@ -1,4 +1,4 @@
-# Tag-driven release **pipeline** (reusable meta-workflow).
+# Tag-driven release **pipeline**.
 #
 # Acts as the orchestrator / "guider" for a release: composes the three
 # single-purpose reusable workflows in this repo into one end-to-end pipeline.
@@ -16,7 +16,7 @@
 # It is intended to be called from a thin caller workflow in a product repo
 # (see the "Quick start" section of this repo's README) and is **not**
 # intended to be triggered directly on this repo.
-name: Artifact release (reusable)
+name: Artifact Release
 
 "on":
   workflow_call:

@@ -1,4 +1,4 @@
-name: GitHub Release publisher (reusable)
+name: GitHub Release Publisher
 
 "on":
   workflow_call:

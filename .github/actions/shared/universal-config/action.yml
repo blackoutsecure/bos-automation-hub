@@ -1,23 +1,11 @@
 name: Universal config
-description: >-
-  Read, validate, normalize, and summarize bos-universal-config.json
-    as the single shared entry point every managed kicker (launchpad,
-    marketplace, security, sync) uses to load
-  config — no workflow parses the JSON file itself. Accepts settings
-  either as flat top-level keys (`gate`, `sync_files`, `marketplace`,
-  `upstream`, `docker`, ...) or grouped under named sections
-  (`security`, `sync`, `launchpad`, `marketplace`, `general`); both
-  layouts, and any mix of the two, normalize identically. `general` is
-  a catch-all for keys owned by neither of the four named services
-  (e.g. a new standalone service's block). See the "Config sections"
-  table in the hub README.
+description: Universal config reader for .github/bos-universal-config.json.
 
 inputs:
   config_path:
-    description: >-
-            Path to the config JSON file.
+    description: Path to the config JSON file.
     required: false
-    default: bos-universal-config.json
+    default: .github/bos-universal-config.json
   allow_missing:
     description: Emit {} when config file is missing instead of failing.
     required: false
@@ -26,17 +14,19 @@ inputs:
     description: Fail unless `marketplace.enabled` is `true` in the parsed config.
     required: false
     default: 'false'
+  global_config_path:
+    description: >-
+      Path to an optional org-wide global config JSON file (e.g. checked
+      out from bos-automation-hub's sync-files/config/). Currently only
+      merges the `action_test` section; repo config always wins over it.
+    required: false
+    default: ''
+  use_global_config:
+    description: "'auto' loads global_config_path when the file exists, 'true' requires it, 'false' ignores it."
+    required: false
+    default: 'auto'
 
-outputs:
-  cfg:
-    description: Compact JSON object for downstream fromJson usage.
-    value: ${{ steps.config.outputs.cfg }}
-  cloudflare:
-    description: Normalized Cloudflare block derived from the config.
-    value: ${{ steps.config.outputs.cloudflare }}
-  sync:
-    description: Normalized sync_files block derived from the config.
-    value: ${{ steps.config.outputs.sync }}
+outputs: {cfg: {description: 'Compact JSON object for downstream fromJson usage.', value: '${{ steps.config.outputs.cfg }}'}, cloudflare: {description: 'Normalized Cloudflare block derived from the config.', value: '${{ steps.config.outputs.cloudflare }}'}, action_test: {description: 'Normalized action_test block derived from the config.', value: '${{ steps.config.outputs.action_test }}'}, organization: {description: 'Normalized organization block (runners, reporting, per-workflow overrides).', value: '${{ steps.config.outputs.organization }}'}, sync: {description: 'Normalized managed_file_sync block.', value: '${{ steps.config.outputs.sync }}'}}
 
 runs:
   using: composite
@@ -48,6 +38,8 @@ runs:
         CONFIG_PATH: ${{ inputs.config_path }}
         ALLOW_MISSING: ${{ inputs.allow_missing }}
         REQUIRE_MARKETPLACE_ENABLED: ${{ inputs.require_marketplace_enabled }}
+        GLOBAL_CONFIG_PATH: ${{ inputs.global_config_path }}
+        USE_GLOBAL_CONFIG: ${{ inputs.use_global_config }}
       run: |
         set -euo pipefail
         python3 - <<'PY'
@@ -55,9 +47,11 @@ runs:
         import os
         import sys
 
-        config_path = os.environ.get("CONFIG_PATH") or "bos-universal-config.json"
+        config_path = os.environ.get("CONFIG_PATH") or ".github/bos-universal-config.json"
         allow_missing = (os.environ.get("ALLOW_MISSING") or "false").lower() == "true"
         require_marketplace_enabled = (os.environ.get("REQUIRE_MARKETPLACE_ENABLED") or "false").lower() == "true"
+        global_config_path = (os.environ.get("GLOBAL_CONFIG_PATH") or "").strip()
+        use_global_config = (os.environ.get("USE_GLOBAL_CONFIG") or "auto").strip().lower()
         output_path = os.environ["GITHUB_OUTPUT"]
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
 
@@ -86,22 +80,47 @@ runs:
             error(f"::error file={config_path}::Top-level config must be a JSON object.")
             sys.exit(1)
 
+        global_cfg = {}
+        if use_global_config != "false" and global_config_path:
+            if os.path.isfile(global_config_path):
+                with open(global_config_path, encoding="utf-8") as handle:
+                    try:
+                        parsed = json.loads(handle.read())
+                    except json.JSONDecodeError as exc:
+                        error(
+                            f"::error file={global_config_path}::Invalid JSON "
+                            f"({exc.msg}) at line {exc.lineno}, column {exc.colno}."
+                        )
+                        sys.exit(1)
+                if isinstance(parsed, dict):
+                    global_cfg = parsed
+                else:
+                    error(f"::error file={global_config_path}::Top-level global config must be a JSON object.")
+                    sys.exit(1)
+            elif use_global_config == "true":
+                error(f"::error file={global_config_path}::Required global config file not found.")
+                sys.exit(1)
+
         # Optional service-grouped authoring layout: consumers may nest a
         # service's settings under a named section ("launchpad", "security",
-        # "sync") instead of (or alongside) the historical flat top-level
+        # "sync") instead of (or alongside) the flat top-level
         # keys. Sections are hoisted to the flat keys every downstream
         # normalizer already reads, so both layouts — and any mix of the
         # two — resolve identically. A flat key already present at the top
         # level always wins over its section-nested equivalent.
         #
         # "security": { ...same fields as top-level "gate"... }
-        # "sync":     { ...same fields as top-level "sync_files"... }
+        # "sync":     { ...same fields as top-level "managed_file_sync"... }
         # "launchpad": { "upstream": {...}, "docker": {...}, ... }
-        # "general":  catch-all for keys owned by neither of the four
-        #             named services (e.g. "action_test"); every key is
+        # "general":  catch-all for keys owned by neither named service
+        #             (e.g. "action_test"); every key is
         #             hoisted as-is, unlike the fixed per-section allowlists
         #             above, since new standalone services land here first.
-        WHOLE_SECTION_ALIASES = {"security": "gate", "sync": "sync_files"}
+        #
+        # `code_scanning` and `marketplace_kit` are intentionally preserved
+        # verbatim. Their published actions own their full schemas and merge
+        # the hub global policy with this repository-level config.
+        WHOLE_SECTION_ALIASES = {"security": "gate", "sync": "managed_file_sync"}
         LAUNCHPAD_SUBKEYS = (
             "upstream", "stages", "docker", "scout", "balena",
             "companion_docker", "release", "platforms", "security_scan",
@@ -147,12 +166,10 @@ runs:
         def marketplace_paths(value, field):
             if value is None:
                 return ""
-            if isinstance(value, str):
-                return value
             if not isinstance(value, list):
                 error(
-                    f"::error file={config_path}::marketplace.{field} must be "
-                    "a string or an array of strings."
+                    f"::error file={config_path}::marketplace.{field} must be an "
+                    "array of strings."
                 )
                 sys.exit(1)
             paths = []
@@ -172,7 +189,7 @@ runs:
         cloudflare_raw = as_dict(cfg.get("cloudflare"))
         redirects = as_dict(cloudflare_raw.get("redirects"))
         headers = as_dict(cloudflare_raw.get("headers"))
-        sync_raw = as_dict(cfg.get("sync_files"))
+        sync_raw = as_dict(cfg.get("managed_file_sync"))
         marketplace_raw = as_dict(cfg.get("marketplace"))
 
         marketplace = dict(marketplace_raw)
@@ -185,6 +202,28 @@ runs:
             marketplace[path_field] = marketplace_paths(
                 marketplace_raw.get(path_field), path_field
             )
+
+        # release_label: repo config > org-wide global config > "auto".
+        # "auto" is resolved by the caller (it needs github.event.repository
+        # .default_branch, which this composite doesn't have access to) —
+        # dev source branch -> prerelease, main -> latest, anything else ->
+        # none. Explicit none/prerelease/latest always wins over branch.
+        global_marketplace_raw = as_dict(global_cfg.get("marketplace"))
+        release_label = str(
+            marketplace_raw.get("release_label")
+            or global_marketplace_raw.get("release_label")
+            or "auto"
+        ).strip().lower()
+        if release_label not in ("auto", "none", "prerelease", "latest"):
+            error(
+                f"::error file={config_path}::marketplace.release_label must be "
+                f"one of auto, none, prerelease, latest (got '{release_label}')."
+            )
+            sys.exit(1)
+        marketplace["release_label"] = release_label
+        if "source_branch" not in marketplace and global_marketplace_raw.get("source_branch"):
+            marketplace["source_branch"] = str(global_marketplace_raw["source_branch"])
+
         cfg["marketplace"] = marketplace
 
         if require_marketplace_enabled and marketplace.get("enabled") is not True:
@@ -293,7 +332,12 @@ runs:
             "enabled": bool(sync_services),
             "services": sync_services,
             "mode": str(sync_raw.get("mode") or "commit"),
-            "commit_message": str(sync_raw.get("commit_message") or "chore: sync managed files from bos-automation-hub"),
+            "generate_commit_message": sync_raw.get("generate_commit_message") is not False,
+            "commit_message": str(sync_raw.get("commit_message") or ""),
+            "fallback_commit_message": str(
+                sync_raw.get("fallback_commit_message")
+                or "chore: sync managed files from bos-automation-hub"
+            ),
             "git_user_name": str(sync_raw.get("git_user_name") or "github-actions[bot]"),
             "git_user_email": str(sync_raw.get("git_user_email") or "41898282+github-actions[bot]@users.noreply.github.com"),
             "push_retries": as_int(sync_raw.get("push_retries"), 3),
@@ -301,9 +345,177 @@ runs:
             "timeout_minutes": as_int(sync_raw.get("timeout_minutes"), 5),
         }
 
+        # action_test merges three tiers, first non-empty wins per field:
+        # repo config > org-wide global config (global_config_path) > a
+        # pyproject.toml-derived auto-detection > hardcoded fallback.
+        global_action_test_raw = as_dict(global_cfg.get("action_test"))
+        repo_action_test_raw = as_dict(cfg.get("action_test"))
+
+        def merged_list(field):
+            for source in (repo_action_test_raw, global_action_test_raw):
+                values = [
+                    str(item).strip()
+                    for item in as_list(source.get(field))
+                    if str(item).strip()
+                ]
+                if values:
+                    return values
+            return []
+
+        def merged_scalar(field, default=None):
+            for source in (repo_action_test_raw, global_action_test_raw):
+                if field in source and source.get(field) not in (None, ""):
+                    return source.get(field)
+            return default
+
+        action_test_python_versions = merged_list("python_versions")
+        action_test_os_matrix = merged_list("os_matrix")
+        action_test_python_packages = merged_list("python_packages")
+
+        # Auto-detection: only consulted when neither tier configured the
+        # field, so an explicit `[]` is never silently overridden.
+        pyproject = {}
+        pyproject_path = "pyproject.toml"
+        if os.path.isfile(pyproject_path):
+            with open(pyproject_path, encoding="utf-8") as handle:
+                pyproject_text = handle.read()
+            match = __import__("re").search(
+                r'requires-python\s*=\s*"[>=~!<]*\s*(\d+)\.(\d+)', pyproject_text
+            )
+            if match:
+                pyproject["floor"] = (int(match.group(1)), int(match.group(2)))
+            pyproject["has_dev_extra"] = bool(
+                __import__("re").search(r"\[project\.optional-dependencies\][^\[]*\bdev\s*=", pyproject_text, __import__("re").DOTALL)
+            )
+
+        if not action_test_python_versions:
+            if pyproject.get("floor"):
+                floor_major, floor_minor = pyproject["floor"]
+                candidates = [(3, minor) for minor in range(9, 14)]
+                action_test_python_versions = [
+                    f"{major}.{minor}" for major, minor in candidates
+                    if (major, minor) >= (floor_major, floor_minor)
+                ]
+            action_test_python_versions = action_test_python_versions or ["3.11"]
+
+        if not action_test_python_packages:
+            if os.path.isfile(pyproject_path):
+                action_test_python_packages = (
+                    ["-e", ".[dev]"] if pyproject.get("has_dev_extra") else ["-e", "."]
+                )
+            else:
+                action_test_python_packages = ["pytest>=8.0", "ruff>=0.6", "PyYAML>=6.0"]
+
+        smoke_test_config = merged_scalar("smoke_test_config")
+        if smoke_test_config is None:
+            smoke_test_config = {}
+        if not isinstance(smoke_test_config, dict):
+            error(
+                f"::error file={config_path}::action_test.smoke_test_config must be an object."
+            )
+            sys.exit(1)
+
+        action_test = {
+            "python_versions": action_test_python_versions,
+            "os_matrix": action_test_os_matrix or ["ubuntu-latest"],
+            "python_packages": action_test_python_packages,
+            "pytest_args": str(merged_scalar("pytest_args") or "-q"),
+            "enable_smoke_test": merged_scalar("enable_smoke_test") is True,
+            "smoke_trigger": str(merged_scalar("smoke_trigger") or "push-dev"),
+            "smoke_test_config": smoke_test_config,
+            "smoke_test_output_name": str(merged_scalar("smoke_test_output_name") or "version"),
+            "timeout_pytest": as_int(merged_scalar("timeout_pytest"), 10),
+            "timeout_smoke": as_int(merged_scalar("timeout_smoke"), 5),
+            "enable_ai_failure_summary": merged_scalar("enable_ai_failure_summary") is not False,
+            "ai_provider": str(merged_scalar("ai_provider") or "auto"),
+            "ai_model": str(merged_scalar("ai_model") or "openai/gpt-4o-mini"),
+        }
+
+        # ── organization section ──────────────────────────────────
+        # Org-wide runner labels, report policy, and per-workflow
+        # overrides. Every hub workflow reads its `runs_on` /
+        # `timeout_minutes` from here so runner topology is data, not a
+        # per-workflow literal. `runs_on` resolves to a JSON string OR a
+        # JSON array of labels, so callers can use the value directly in
+        # `runs-on:` without a `startsWith`/`fromJSON` guard.
+        ORG_WORKFLOWS = (
+            "security", "sync", "launchpad", "marketplace", "action_test", "release"
+        )
+
+        organization_raw = as_dict(cfg.get("organization"))
+        runners_raw = as_dict(organization_raw.get("runners"))
+        reporting_raw = as_dict(organization_raw.get("reporting"))
+        org_defaults_raw = as_dict(organization_raw.get("defaults"))
+        org_workflows_raw = as_dict(organization_raw.get("workflows"))
+
+        def runner_value(value, default):
+            if isinstance(value, list):
+                labels = [str(label).strip() for label in value if str(label).strip()]
+                return labels or default
+            text = str(value or "").strip()
+            if not text:
+                return default
+            if text.startswith("["):
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    error(
+                        f"::error file={config_path}::organization runner label "
+                        f"{text!r} is not valid JSON."
+                    )
+                    sys.exit(1)
+                return runner_value(parsed, default)
+            return text
+
+        default_runner = runner_value(runners_raw.get("default"), "ubuntu-latest")
+        runners = {
+            "default": default_runner,
+            "x64": runner_value(runners_raw.get("x64"), default_runner),
+            "arm64": runner_value(runners_raw.get("arm64"), default_runner),
+        }
+
+        fail_on = str(reporting_raw.get("fail_on") or "fail").strip().lower()
+        if fail_on not in {"fail", "warn", "never"}:
+            error(
+                f"::error file={config_path}::organization.reporting.fail_on must be "
+                "`fail`, `warn`, or `never`."
+            )
+            sys.exit(1)
+        reporting = {
+            "enable_job_summary": reporting_raw.get("enable_job_summary") is not False,
+            "enable_annotations": reporting_raw.get("enable_annotations") is not False,
+            "enable_html": reporting_raw.get("enable_html") is not False,
+            "enable_pdf": reporting_raw.get("enable_pdf") is True,
+            "html_path": str(reporting_raw.get("html_path") or "blackout-secure-report.html"),
+            "pdf_path": str(reporting_raw.get("pdf_path") or "blackout-secure-report.pdf"),
+            "artifact_name": str(reporting_raw.get("artifact_name") or "blackout-secure-audit-report"),
+            "title_prefix": str(reporting_raw.get("title_prefix") or "Blackout Secure"),
+            "fail_on": fail_on,
+        }
+
+        default_timeout = as_int(org_defaults_raw.get("timeout_minutes"), 30)
+        org_workflows = {}
+        for name in ORG_WORKFLOWS:
+            override = as_dict(org_workflows_raw.get(name))
+            org_workflows[name] = {
+                "runs_on": runner_value(override.get("runs_on"), default_runner),
+                "timeout_minutes": as_int(
+                    override.get("timeout_minutes"), default_timeout
+                ),
+            }
+
+        organization = {
+            "runners": runners,
+            "reporting": reporting,
+            "defaults": {"timeout_minutes": default_timeout},
+            "workflows": org_workflows,
+        }
+
         compact_cfg = json.dumps(cfg, separators=(",", ":"))
         compact_cloudflare = json.dumps(cloudflare, separators=(",", ":"))
         compact_sync = json.dumps(sync, separators=(",", ":"))
+        compact_action_test = json.dumps(action_test, separators=(",", ":"))
+        compact_organization = json.dumps(organization, separators=(",", ":"))
 
         cloudflare_enabled = stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name"))
         stage_flags = {
@@ -322,6 +534,9 @@ runs:
         upstream_source = (upstream.get("source") or "").strip() or "(unset)"
         release_template_path = (release.get("template_path") or "").strip() or "(unset)"
 
+        def label_text(value):
+            return ", ".join(value) if isinstance(value, list) else str(value)
+
         summary_lines = [
             "## Universal config snapshot",
             "",
@@ -335,6 +550,12 @@ runs:
             f"| Sync mode | `{sync_mode}` |",
             f"| Sync services | `{sync_services_text}` |",
             f"| Release template path | `{release_template_path}` |",
+            f"| Default runner | `{label_text(runners['default'])}` |",
+            f"| Runner (x64 / arm64) | `{label_text(runners['x64'])}` / `{label_text(runners['arm64'])}` |",
+            f"| Default job timeout | `{default_timeout}` min |",
+            f"| Report policy | `fail_on={reporting['fail_on']}`, "
+            f"summary={str(reporting['enable_job_summary']).lower()}, "
+            f"annotations={str(reporting['enable_annotations']).lower()} |",
         ]
 
         if summary_path:
@@ -349,6 +570,9 @@ runs:
         print(f"  cloudflare_site_url: {cf_site}")
         print(f"  sync_mode: {sync_mode}")
         print(f"  sync_services: {sync_services_text}")
+        print(f"  default_runner: {label_text(runners['default'])}")
+        print(f"  default_timeout_minutes: {default_timeout}")
+        print(f"  reporting_fail_on: {reporting['fail_on']}")
 
         with open(output_path, "a", encoding="utf-8") as handle:
             handle.write("cfg<<__BOS_EOF__\n")
@@ -356,4 +580,6 @@ runs:
             handle.write("__BOS_EOF__\n")
             handle.write(f"cloudflare={compact_cloudflare}\n")
             handle.write(f"sync={compact_sync}\n")
+            handle.write(f"action_test={compact_action_test}\n")
+            handle.write(f"organization={compact_organization}\n")
         PY

@@ -1,4 +1,4 @@
-name: Monitor Upstream Release (reusable)
+name: Blackout Secure Upstream Watcher
 
 "on":
   workflow_call:
@@ -14,7 +14,7 @@ name: Monitor Upstream Release (reusable)
           run; rewritten each time the upstream version changes.
         required: false
         type: string
-        default: .github/upstream/tracked-release.json
+        default: .github/tracked-release.json
       target_workflows:
         description: >-
           Newline-separated list of workflow file names (e.g. `release.yml`)
@@ -209,6 +209,24 @@ name: Monitor Upstream Release (reusable)
       upstream_published_at:
         description: '`source: github_release` only. ISO 8601 publication timestamp.'
         value: ${{ jobs.monitor.outputs.upstream_published_at }}
+      upstream_previous_version:
+        description: Version recorded in the tracker before this run.
+        value: ${{ jobs.monitor.outputs.upstream_previous_version }}
+      upstream_update_type:
+        description: major, minor, patch, prerelease, none, or unknown.
+        value: ${{ jobs.monitor.outputs.upstream_update_type }}
+      upstream_ai_summary:
+        description: Advisory release summary from the watcher.
+        value: ${{ jobs.monitor.outputs.upstream_ai_summary }}
+      upstream_ai_impact:
+        description: Advisory upgrade impact from the watcher.
+        value: ${{ jobs.monitor.outputs.upstream_ai_impact }}
+      upstream_ai_status:
+        description: Watcher AI status.
+        value: ${{ jobs.monitor.outputs.upstream_ai_status }}
+      upstream_metadata:
+        description: Compact watcher package metadata JSON.
+        value: ${{ jobs.monitor.outputs.upstream_metadata }}
       dispatched:
         description: 'Newline-separated list of workflows actually dispatched.'
         value: ${{ jobs.monitor.outputs.dispatched }}
@@ -265,6 +283,12 @@ jobs:
       upstream_release_name: ${{ steps.discover.outputs.release_name }}
       upstream_release_body: ${{ steps.discover.outputs.release_body }}
       upstream_published_at: ${{ steps.discover.outputs.published_at }}
+      upstream_previous_version: ${{ steps.discover.outputs.previous_version }}
+      upstream_update_type: ${{ steps.discover.outputs.update_type }}
+      upstream_ai_summary: ${{ steps.discover.outputs.ai_summary }}
+      upstream_ai_impact: ${{ steps.discover.outputs.ai_impact }}
+      upstream_ai_status: ${{ steps.discover.outputs.ai_status }}
+      upstream_metadata: ${{ steps.discover.outputs.metadata }}
       dispatched: ${{ steps.dispatch.outputs.dispatched }}
     steps:
       - name: Preflight validation
@@ -315,10 +339,24 @@ jobs:
           # Need credentials to push the marker-file commit back.
           persist-credentials: true
 
+      - name: Checkout upstream watcher global policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ github.event.repository.default_branch == 'dev' && 'dev' || 'main' }}
+          path: hub-config
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: sync-files/config/upstream-watcher-global-config.json
+          sparse-checkout-cone-mode: false
+
       - name: Discover upstream version
         id: discover
-        uses: blackoutsecure/bos-upstream-watcher@2c7955ed75d4bc2ee78af9ecec31c2a698f37f9d # v1.1.0
+        uses: blackoutsecure/bos-upstream-watcher@c91a6fd7d42161f1b37ab6da12ca6a6bbaabe739 # dev
         with:
+          config_path: .github/bos-universal-config.json
+          global_config_path: hub-config/sync-files/config/upstream-watcher-global-config.json
+          use_global_config: 'auto'
           source:              ${{ inputs.source }}
           upstream_repo:       ${{ inputs.upstream_repo }}
           upstream_branch:     ${{ inputs.upstream_branch }}
@@ -414,6 +452,10 @@ jobs:
           # list of downstream workflows it actually triggered.
           CHANGED: ${{ steps.discover.outputs.changed }}
           DISPATCHED: ${{ steps.dispatch.outputs.dispatched }}
+          LABEL: ${{ steps.discover.outputs.label }}
+          UPDATE_TYPE: ${{ steps.discover.outputs.update_type }}
+          AI_IMPACT: ${{ steps.discover.outputs.ai_impact }}
+          AI_STATUS: ${{ steps.discover.outputs.ai_status }}
         run: |
           {
             echo "## Upstream Release Monitor — wrapper"
@@ -421,6 +463,15 @@ jobs:
             echo "| Field | Value |"
             echo "|-------|-------|"
             echo "| Changed       | \`${CHANGED:-false}\` |"
+            if [ -n "${LABEL:-}" ]; then
+              echo "| Upstream      | \`${LABEL}\` |"
+            fi
+            if [ -n "${UPDATE_TYPE:-}" ] && [ "${UPDATE_TYPE}" != "none" ]; then
+              echo "| Update type   | \`${UPDATE_TYPE}\` |"
+            fi
+            if [ -n "${AI_IMPACT:-}" ] && [ "${AI_IMPACT}" != "unknown" ]; then
+              echo "| AI impact     | \`${AI_IMPACT}\` (${AI_STATUS:-unavailable}) |"
+            fi
             if [ -n "${DISPATCHED:-}" ]; then
               echo "| Dispatched    | \`$(printf '%s' "${DISPATCHED}" | tr '\n' ' ')\` |"
             else

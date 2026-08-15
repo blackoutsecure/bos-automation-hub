@@ -1,4 +1,4 @@
-name: Balena Block Publish (reusable)
+name: Balena Block Publish
 
 "on":
   workflow_call:

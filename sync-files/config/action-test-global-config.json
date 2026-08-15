@@ -1,0 +1,11 @@
+{
+  "action_test": {
+    "os_matrix": ["ubuntu-latest"],
+    "pytest_args": "-q",
+    "timeout_pytest": 10,
+    "timeout_smoke": 5,
+    "enable_ai_failure_summary": true,
+    "ai_provider": "auto",
+    "ai_model": "openai/gpt-4o-mini"
+  }
+}

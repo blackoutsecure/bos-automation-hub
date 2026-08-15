@@ -19,6 +19,13 @@ selection is therefore handled by ownership rather than generated ref strings:
 - runtime branch decisions use `github.event.repository.default_branch` where
   the caller repository's branch is intended.
 
+The reusable security and managed-file-sync workflows expose `hub_ref`, which
+defaults to `auto`. Auto follows a pull request or merge-group base branch,
+then the current `dev` ref, and otherwise selects `main`. The managed dev/main
+callers select the matching runtime through their static `uses:` refs; other
+callers can pass `hub_ref: dev` or `hub_ref: main` when they need a deliberate
+override.
+
 [`release-hub.yml`](.github/workflows/release-hub.yml) promotes shared actions,
 managed templates, `LICENSE`, this README, and every workflow declaring
 `workflow_call`. Event-only maintenance workflows stay on `dev` automatically.
@@ -27,7 +34,7 @@ managed templates, `LICENSE`, this README, and every workflow declaring
 
 [`bos-universal-launchpad.yml`](.github/workflows/bos-universal-launchpad.yml)
 is the release and deployment orchestrator. Its managed consumer caller is
-[`bos-universal-launchpad-kicker.yml`](managed-files/workflows/bos-universal-launchpad-kicker.yml).
+[`bos-universal-launchpad-kicker.yml`](sync-files/workflows/bos-universal-launchpad-kicker.yml).
 
 The launchpad can compose:
 
@@ -39,15 +46,31 @@ The launchpad can compose:
 - security scanning;
 - repository metadata updates.
 
-Consumer behavior is data-driven through `bos-universal-config.json`; managed
+Launchpad intentionally has one managed event kicker rather than separate
+release, deployment, and metadata kickers. The reusable
+[`bos-universal-launchpad.yml`](.github/workflows/bos-universal-launchpad.yml)
+already splits those concerns into independent backend jobs with their own
+`needs`, permissions, outputs, and skip gates. Keeping one event front door
+means the repository config is parsed once, `force_run` has one meaning, and
+secrets are routed through one trusted boundary. The managed kicker therefore
+contains only event routing, config-to-workflow input forwarding, and the
+static backend call; stage implementation belongs in the hub backend.
+
+Do not add a second Launchpad kicker for a single stage unless that stage needs
+a different trigger or permission boundary. Security, managed-file sync,
+action-test, and Marketplace remain separate kickers because their triggers
+and trust models are materially different from Launchpad's release/deploy
+orchestration.
+
+Consumer behavior is data-driven through `.github/bos-universal-config.json`; managed
 workflow files are not edited in consumer repositories.
 
 ## Universal security
 
 [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml) is
-the reusable universal PR and merge-queue security/policy workflow. Its
+the reusable universal PR, protected-branch push, and merge-queue security/policy workflow. Its
 managed caller is
-[`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml).
+[`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml).
 
 The required check is `security (dev) / Security summary` or
 `security (main) / Security summary`, depending on which branch a run
@@ -65,47 +88,66 @@ re-pin branch protection whenever a gate moved between groups:
 
 The hub itself runs
 [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)
-directly. Use **Actions → Blackout Secure universal security (reusable) → Run
+directly. Use **Actions → Blackout Secure Universal Security → Run
 workflow** on `dev` for a manual scan; it loads the current `security` section
-from `bos-universal-config.json`, just like the sync backend. The managed
-[`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml)
+from `.github/bos-universal-config.json`, just like the sync backend. The managed
+[`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml)
 is retained for consumer repositories, but the hub does not install a local
 kicker for this workflow.
 
 Marketplace-specific validation is intentionally excluded. Marketplace Action
 repositories add the managed
-[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml),
+[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml),
 which owns Marketplace validation, stable-branch guarding, promotion, and
 opt-in post-release repository metadata synchronization.
 
-## Universal sync
+Code-scan policy layers the same way sync policy does. Org-wide defaults live in
+[sync-files/config/code-scanning-kit-global-config.json](sync-files/config/code-scanning-kit-global-config.json),
+a hub-authored file the code-scan job checks out alongside the caller repo and
+passes via `global_config_path`. A repository can layer its own overrides with
+a `code_scanning` block in its own `.github/bos-universal-config.json`, which
+`bos-code-scanning-kit` receives explicitly as its repository-tier config.
 
-[`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) is the
-single config-aware managed-file backend. It also handles this hub's local
-schedule, config-change, and manual events. Its consumer front door is
-[`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml).
-It runs independently on config changes, schedule, or manual dispatch and
-never traverses the release, security, or Marketplace workflows.
+## Managed file sync
+
+[`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) is a thin
+wrapper around the published
+[`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
+Unlike the other reusable entry points, this workflow only ever does one
+thing (managed-file sync), so its display name and run name read "Blackout
+Secure managed file sync" rather than "universal" — the `bos-universal-sync*`
+filenames are unchanged to keep existing `uses:` references stable. It is
+callable only through the managed
+[`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml).
+That kicker owns the schedule, config-change, and manual events. Its
+consumer front door resolves the target hub branch and delegates to
+`bos-universal-sync.yml`, the same pattern used by the launchpad, security, and
+Marketplace kickers. The reusable workflow never self-triggers and never
+traverses the release, security, or Marketplace workflows. Sync defaults live in
+[sync-files/config/managed-file-sync-global-config.json](sync-files/config/managed-file-sync-global-config.json),
+a hub-authored file. `bos-universal-sync.yml` checks out this hub alongside
+the consumer repo and passes `global_config_path` at the checked-out copy, so
+the policy stays a real, editable JSON file instead of an inline blob.
 
 ## Universal action test
 
 [`bos-universal-action-test.yml`](.github/workflows/bos-universal-action-test.yml)
 is a reusable pytest matrix plus an optional live-upstream smoke test for
 Actions repositories with a Python implementation. Its managed caller is
-[`bos-universal-action-test-kicker.yml`](managed-files/workflows/bos-universal-action-test-kicker.yml).
+[`bos-universal-action-test-kicker.yml`](sync-files/workflows/bos-universal-action-test-kicker.yml).
 
 It complements `bos-universal-security.yml`'s single-OS/Python `python-lint`
 job (Ruff + pytest, part of the PR security gate) rather than replacing it:
 use this workflow when a repo needs broader Python/OS matrix coverage and/or
 validation against a live upstream target, driven by an `action_test` block
-in `bos-universal-config.json`:
+in `.github/bos-universal-config.json`:
 
 ```json
 {
   "action_test": {
     "python_versions": ["3.10", "3.11", "3.12"],
     "os_matrix": ["ubuntu-latest", "macos-latest", "windows-latest"],
-    "requirements_file": "requirements-dev.txt",
+    "python_packages": ["pytest>=8.0", "ruff>=0.6", "PyYAML>=6.0"],
     "pytest_args": "-q",
     "enable_smoke_test": true,
     "smoke_trigger": "push-dev",
@@ -115,8 +157,9 @@ in `bos-universal-config.json`:
 ```
 
 The smoke-test job checks out the calling repo, invokes it as an action
-(`uses: ./`), and asserts its declared `version` output is non-empty; it
-requires an `action.yml` at the repo root. `smoke_trigger` defaults to
+(`uses: ./`) with the configured `source` and `package_name` inputs, and
+asserts its declared `version` output is non-empty; it requires an
+`action.yml` at the repo root. `smoke_trigger` defaults to
 `push-dev` so live-upstream calls don't run on untrusted PR heads.
 
 ## Workflow boundaries
@@ -128,8 +171,9 @@ different trust and permission boundaries:
 | --- | --- | --- |
 | `bos-universal-security.yml` (universal security) | Pull request / merge queue; read-mostly | Lint, tests, dependency review, code scanning, and policy checks before merge. |
 | `bos-universal-marketplace-kicker.yml` | Marketplace PR, trusted-target PR, or manual release/metadata operation | Validate Actions, guard the workflow-free stable branch, promote releases, and refresh the repository About box. |
-| `bos-universal-launchpad.yml` | Push, schedule, or manual caller; publish permissions | Monitor upstreams, run the release-blocking security scan, and coordinate delivery. |
-| `bos-universal-sync-kicker.yml` | Config push, schedule, or manual dispatch; repository contents write | Reconcile only the managed files selected by `sync_files.services`. |
+| `bos-universal-launchpad.yml` | Push, schedule, or manual caller; publish permissions | Sync managed files ahead of the run, monitor upstreams, run the release-blocking security scan (or, via `operation: security_only`, just that scan), and coordinate delivery. |
+| `bos-universal-sync-kicker.yml` | Config push, schedule, or manual dispatch; repository contents write | Resolve the target hub branch and invoke the reusable sync workflow. |
+| `bos-universal-upstream-kicker.yml` | Schedule, watcher-config push, or manual dispatch; repository contents/actions write | Resolve the target hub branch and invoke the config-driven upstream monitor. |
 | `release.yml` (artifact release) | Called by Universal or another trusted workflow | Publish Docker, Balena, and GitHub Release artifacts for an already-approved version. |
 | `release-promote.yml` (Marketplace promotion) | Operator-driven Marketplace caller | Promote an allowlisted source tree to the workflow-free stable branch and release it. |
 | `release-hub.yml` (hub runtime release) | Hub-only manual workflow | Promote this hub's reusable runtime from the default branch to `main` and tag it. |
@@ -150,7 +194,7 @@ Release entry points are already owned by the workflow that has enough context
 and authority to start them: Universal Launchpad calls
 [`release.yml`](.github/workflows/release.yml) for artifact publication,
 Marketplace repos use
-[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml)
+[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml)
 for operator-driven promotion, and this hub uses
 [`release-hub.yml`](.github/workflows/release-hub.yml) for its own runtime
 promotion. A generic release kicker would either duplicate those front doors
@@ -168,7 +212,7 @@ version tag).
 
 For a Marketplace Action consumer, the production path is a manual
 `operation: release` dispatch of the managed
-[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml)
+[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml)
 from the source branch. It validates trusted configuration, calls
 [`release-promote.yml`](.github/workflows/release-promote.yml) to promote the
 allowlist to the stable branch, publishes the GitHub Release, and optionally
@@ -193,7 +237,27 @@ checks when an additional human approval gate is needed.
 The Universal Launchpad retains a release-blocking scan. Scheduled and manual
 releases need a fresh assessment even when no PR triggered the universal
 security kicker. This is defense in depth at a different trust boundary, not a
-second consumer security workflow.
+second consumer security workflow. The kicker's `operation: security_only`
+dispatch input runs just that scan (every publish/deploy stage forced off)
+without removing or duplicating the PR-time security kicker — the two run at
+different trust boundaries (pre-merge, read-mostly vs. release-time, publish
+permissions) and neither can substitute for the other. Repositories that
+enable both the security kicker's own `schedule` trigger and Launchpad's
+default-on `security_scan.enable` should expect the same scan to run on both
+cadences; disable one of the two schedules in `.github/bos-universal-config.json`
+if that duplication isn't wanted.
+
+The Launchpad kicker's leading `sync-check` job (managed-file sync in `commit`
+mode) does not replace the standalone `bos-universal-sync-kicker.yml`: the
+sync kicker is the only sync trigger for repositories without Launchpad, and
+its push trigger has no branch restriction, while Launchpad's push trigger is
+`main`-only. `sync-check` is skipped on `schedule` runs for this reason — the
+sync kicker's own weekly cron and config-push trigger already own periodic
+reconciliation, so Launchpad's 6h cron doesn't need to repeat it. On `push`/
+`workflow_dispatch`, `sync-check` still runs, and only guarantees a given
+Launchpad run isn't executed against a stale kicker file or config — if it
+commits a change to either, this run defers to the fresh one the commit's
+push retriggers.
 
 The Marketplace kicker combines three event-scoped jobs in one managed file.
 Its `pull_request_target` guard reads trusted default-branch configuration and
@@ -202,7 +266,7 @@ never executes PR-head code; its release job runs only by manual dispatch with
 
 ## Consumer configuration
 
-Create `bos-universal-config.json` at the consumer repository root. A minimal
+Create `.github/bos-universal-config.json` in the repository. A minimal
 configuration can enable only the required stages:
 
 ```json
@@ -235,16 +299,8 @@ configuration can enable only the required stages:
       "generate_topics": false
     }
   },
-  "sync_files": {
-    "services": [
-      "common",
-      "lf_line_endings",
-      "dependabot_actions",
-      "bos_launchpad",
-      "bos_universal_security",
-      "bos_universal_marketplace"
-    ],
-    "mode": "commit"
+  "managed_file_sync": {
+    "services": ["editorconfig"]
   }
 }
 ```
@@ -254,16 +310,16 @@ The shared
 validates and normalizes this file. Missing optional objects fall back to the
 reusable workflow defaults. Marketplace `allowlist_paths`, `blocked_paths`,
 `required_paths`, and `extra_sync_paths` accept JSON arrays of non-empty
-strings. Legacy newline-delimited strings remain supported; the normalizer
-converts arrays to the newline-delimited workflow API used by the Marketplace
-guard and promotion workflows.
+strings. The normalizer converts arrays to the newline-delimited workflow API
+used by the Marketplace guard and promotion workflows.
 
 ### Config sections
 
-Every managed kicker (launchpad, marketplace, security, sync) reads this file
-through the same shared
+Launchpad, Marketplace, security, and action-test workflows read this file
+through the shared
 [`universal-config`](.github/actions/shared/universal-config/action.yml)
-action — no workflow parses the JSON itself. Settings can be authored as
+action. Managed-file synchronization is the exception: the published
+`bos-managed-file-sync-action` reads `managed_file_sync` directly. Settings can be authored as
 flat top-level keys (as shown above, and required for anyone who already has
 a config) or grouped under a named section per service; both layouts, and
 any mix of the two, normalize identically. A flat key always wins over its
@@ -271,16 +327,140 @@ section-nested equivalent when both are present.
 
 | Section (optional) | Flat top-level key(s) it groups | Consumed by |
 | --- | --- | --- |
+| `organization` | `organization` (already the flat key name) | every hub workflow, for runner topology and report policy |
 | `security` | `gate` | `bos-universal-security.yml` |
-| `sync` | `sync_files` | `bos-universal-sync.yml` |
+| `managed_file_sync` | `managed_file_sync` | `bos-universal-sync.yml` and `bos-managed-file-sync-action` |
 | `launchpad` | `upstream`, `stages`, `docker`, `scout`, `balena`, `companion_docker`, `release`, `platforms`, `security_scan`, `repo_metadata`, `cloudflare`, `triggers` | `bos-universal-launchpad.yml` |
 | `marketplace` | `marketplace` (already the flat key name) | `bos-universal-marketplace.yml` |
-| `general` | any key not owned by the four services above (e.g. `action_test`) | whichever workflow reads that key |
+| `general` | any key not owned by the shared workflow sections above (e.g. `action_test`) | whichever workflow reads that key |
 
 Unlike the other sections, `general` hoists every key it contains rather than
 a fixed allowlist — it's the landing spot for a new standalone service's
 config (like `bos-universal-action-test.yml`'s `action_test` block) before it
 earns its own named section.
+
+### Organization section
+
+`organization` is the one section that is not owned by a single workflow. It
+carries cross-cutting policy — runner topology, per-workflow overrides, and
+report behavior — so runner labels and timeouts are data instead of a literal
+repeated in every job:
+
+```json
+{
+  "organization": {
+    "runners": {
+      "default": "ubuntu-latest",
+      "x64": "ubuntu-latest",
+      "arm64": "ubuntu-24.04-arm"
+    },
+    "reporting": {
+      "enable_job_summary": true,
+      "enable_annotations": true,
+      "title_prefix": "Blackout Secure",
+      "fail_on": "fail"
+    },
+    "defaults": {
+      "timeout_minutes": 30
+    }
+  }
+}
+```
+
+Config consumers can override per-workflow timeouts by adding entries under `workflows`; any unspecified workflows inherit the `defaults.timeout_minutes`. For example:
+
+```json
+{
+  "organization": {
+    "workflows": {
+      "security": { "timeout_minutes": 20 },
+      "sync": { "runs_on": ["self-hosted", "Linux"] }
+    }
+  }
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `runners.default` | `ubuntu-latest` | Runner used by any workflow with no override. |
+| `runners.x64` / `runners.arm64` | `runners.default` | Architecture-specific labels for multi-arch build jobs. |
+| `reporting.enable_job_summary` | `true` | `false` suppresses the `$GITHUB_STEP_SUMMARY` report. |
+| `reporting.enable_annotations` | `true` | `false` suppresses `::error::` / `::warning::` annotations. |
+| `reporting.enable_html` | `true` | Generates the standalone HTML audit artifact. |
+| `reporting.enable_pdf` | `false` | Attempts PDF export when Chromium or Chrome is installed; HTML remains the source report. |
+| `reporting.html_path` | `blackout-secure-report.html` | Workspace path for the HTML report. |
+| `reporting.pdf_path` | `blackout-secure-report.pdf` | Workspace path for an optional PDF export. |
+| `reporting.artifact_name` | `blackout-secure-audit-report` | Authenticated GitHub Actions artifact name. |
+| `reporting.title_prefix` | `Blackout Secure` | Prefix applied to generated report titles. |
+| `reporting.fail_on` | `fail` | `fail`, `warn`, or `never` — the severity tier that makes a report step exit non-zero. |
+| `defaults.timeout_minutes` | `30` | Fallback job timeout. |
+| `workflows.<name>.runs_on` | `runners.default` | Per-workflow runner override. |
+| `workflows.<name>.timeout_minutes` | `defaults.timeout_minutes` | Per-workflow timeout override. |
+
+Recognized workflow names are `security`, `sync`, `launchpad`, `marketplace`,
+`action_test`, and `release`. Every one is always present in the normalized
+`organization` output, so a workflow can read
+`fromJSON(needs.resolve-config.outputs.org).workflows.<name>.runs_on`
+unconditionally. A runner value may be a bare label or an array of labels;
+both normalize to a value that `runs-on:` accepts directly, with no
+`startsWith` guard in the workflow.
+
+Two jobs deliberately keep a literal runner: each workflow's `resolve-config`
+job (it bootstraps the runner topology) and the security workflow's `summary`
+job (it is the required status check, so it must still publish a report when
+config resolution itself failed).
+
+### Run reporting
+
+Every workflow reports through one shared surface,
+[`job-report`](.github/actions/shared/job-report/action.yml), which renders the
+same audit layout used by `bos-code-scanning-kit` and
+`bos-managed-file-sync-action`: a verdict, a severity-count table, recommended
+actions, a `Configuration used` disclosure, and grouped findings tables — plus
+matching workflow annotations. It also generates a standalone, responsive HTML
+audit report with print CSS, provenance metadata, GitHub repository/run/commit
+links, Blackout Secure branding, and a downloadable GitHub Actions artifact.
+The HTML is the canonical rich report and can be printed to PDF from any
+browser. When `reporting.enable_pdf` is enabled, the action additionally uses a
+preinstalled Chromium/Chrome binary when available; a missing PDF engine is a
+notice, not a failed audit.
+
+Artifact access is authenticated by GitHub Actions and follows the permissions
+of the workflow run. The report itself contains no credentials and does not
+create a public URL. The generated report identifies [Blackout
+Secure](https://blackoutsecure.app), the repository, ref, commit, workflow,
+run, generation time, Apache License 2.0 metadata, and an open-source notice:
+automated findings are operational guidance, not a security certification,
+legal opinion, warranty, or substitute for qualified human review.
+
+Findings are pure data, so a workflow only builds a JSON array and the report
+surface stays identical everywhere:
+
+```json
+[
+  {
+    "id": "SG021",
+    "severity": "fail",
+    "control": "Code scanning + posture audit",
+    "evidence": "job result: failure",
+    "remediation": "Review the SARIF findings on the Security tab.",
+    "group": "security"
+  }
+]
+```
+
+| Severity | Report label | Meaning |
+| --- | --- | --- |
+| `pass` | Pass | Control satisfied. |
+| `warn` | Warning | Advisory drift; review recommended but not blocking. |
+| `fail` | High | Required control failed. |
+| `skip` | Not Assessed | Not evaluated; no verdict can be inferred. |
+
+A skipped gate reports as `Not Assessed` rather than a pass, so a report never
+implies coverage the run did not actually provide. The action's `outcome`
+output (`success`, `warn`, `failure`) reflects severity only and does not
+change with `fail_on`, so a caller can gate on the verdict independently of
+whether the report step itself exited non-zero.
 
 For example, the sample above can equivalently be written grouped:
 
@@ -301,9 +481,8 @@ For example, the sample above can equivalently be written grouped:
     "target_branch": "main",
     "allowlist_paths": ["action.yml", "README.md", "LICENSE"]
   },
-  "sync": {
-    "services": ["common", "lf_line_endings", "dependabot_actions"],
-    "mode": "commit"
+  "managed_file_sync": {
+    "services": ["prettier"]
   },
   "general": {
     "action_test": { "python_versions": ["3.11", "3.12"] }
@@ -313,56 +492,52 @@ For example, the sample above can equivalently be written grouped:
 
 ## Managed files
 
-[`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) exposes
-one reusable orchestration backend. It resolves explicit caller inputs when
-provided and otherwise reads the `sync_files` block from
-[`bos-universal-config.json`](bos-universal-config.json). The
-[`sync-managed-files`](.github/actions/sync-managed-files/action.yml) composite
-action remains the file-mutation engine. Canonical on-disk templates live
-under [`managed-files/`](managed-files/); the service registry in
-[`sync.py`](.github/actions/sync-managed-files/sync.py) is authoritative.
+[`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) is a thin
+event and commit wrapper around the published
+[`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
+The published action reads the `managed_file_sync` block from
+[`bos-universal-config.json`](.github/bos-universal-config.json), resolves its catalog,
+and reconciles the working tree. Canonical hub templates live under
+[`sync-files/`](sync-files/); this repository no longer contains a local
+sync engine or service registry. The global hub policy enables the
+organization-wide `shellcheck`, Security kicker, and Sync kicker defaults;
+repository-specific kicker definitions are available globally but must be
+selected by each repository that needs them. It also sets
+`take_over_managed_files: true`, allowing organization-owned managed blocks to
+replace competing managed blocks from another namespace.
 
 Service ownership modes:
 
 - **Section:** preserves user content outside managed markers.
-- **Whole-file:** continuously enforces a canonical file.
+- **File:** continuously replaces a file with its canonical template.
 - **Init-if-missing:** creates a starter once and leaves later edits alone.
 
-Primary services include:
+### Supported sync services
 
-- repository policy: `common`, `docker`, `balena`, `node`, `python`,
-  `lf_line_endings`;
-- dependency automation: `dependabot_actions`, `dependabot_npm`,
-  `dependabot_pip`;
-- canonical files: `logger`, `shellcheckrc`, `markdownlint`, `prettier`,
-  `wranglerignore`, `humans`;
-- universal callers: `bos_launchpad`, `bos_universal_security`,
-  `bos_universal_marketplace`, `bos_universal_sync`,
-  `bos_universal_action_test`;
-- initialization: `bos_universal_config`, `gha_sync_drift_check`, `license`,
-  `notice_apache2`, `codeowners`;
-- organization repository only: `org_defaults`, gated by
-  `target_repo_role: "org-default-repo"` in the repo-root
-  `bos-universal-config.json`.
+The published action's default catalog currently includes `baseline`,
+`codeowners`, `common`, `dependabot_actions`, `editorconfig`, `lf_line_endings`,
+`license`, `markdownlint`, `notice_apache2`, `prettier`, and `shellcheck`.
+Repos can extend or override the catalog with `service_definitions` or a
+separate catalog file; the published action validates service conflicts before
+writing anything.
 
-See [`managed-files/README.md`](managed-files/README.md) for template ownership
+See [`sync-files/README.md`](sync-files/README.md) for template ownership
 and branch policy.
 
 ### Minimum sync workflow policy
 
 GitHub requires an event-trigger workflow in each repository; a configuration
 file cannot schedule a cross-repository reusable workflow by itself. Enable
-`bos_universal_sync` wherever managed files should be maintained. It calls the
-lightweight sync reusable directly and runs independently from release,
-security, and Marketplace workflows.
+the published managed-file sync action wherever managed files should be
+maintained. It runs independently from release, security, and Marketplace
+workflows.
 
-- delivery repositories can enable both `bos_launchpad` and
-  `bos_universal_sync` without duplicate sync execution;
-- repositories without delivery still use the same `bos_universal_sync`
-  caller;
-- this hub runs the same
-  [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) backend
-  directly from its own events, so there is no second orchestration workflow.
+- delivery repositories can use the published action independently of
+  `bos_launchpad`;
+- repositories without delivery use the same managed-file sync wrapper;
+- this hub uses the managed Sync kicker as the event front door, which calls
+  the reusable [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml)
+  workflow.
 
 Removing every consumer workflow would require a separate organization-wide
 GitHub App or PAT-backed controller with write access to all repositories. That
@@ -372,9 +547,11 @@ larger trust boundary is intentionally not part of managed-file sync.
 
 All repositories should enable `bos_universal_security`. Marketplace Action
 repositories additionally enable `bos_universal_marketplace`. Keep
-product-specific test workflows local; remove generic
-lint, Marketplace CI, guard, and release wrappers once sync creates the managed
-kickers.
+product-specific test workflows local. Remove generic lint, Marketplace CI,
+guard, and release wrappers only after the required managed kickers have been
+installed from the hub's canonical templates or from an organization catalog;
+the public sync action's default catalog does not include these hub-specific
+workflow files.
 
 For `blackoutsecure/bos-upstream-watcher`, retain `.github/workflows/test.yml`
 because it owns the 3-OS by 3-Python matrix and live npm smoke test. Remove
@@ -401,7 +578,6 @@ Use this consumer configuration:
       ".gitignore",
       ".markdownlint.yaml",
       "pyproject.toml",
-      "requirements-dev.txt",
       "test/"
     ],
     "required_paths": [
@@ -415,22 +591,24 @@ Use this consumer configuration:
     "include_dependabot_config": true,
     "include_github_metadata": false
   },
-  "sync_files": {
+  "managed_file_sync": {
     "services": [
       "common",
       "lf_line_endings",
-      "python",
       "dependabot_actions",
-      "dependabot_pip",
-      "bos_universal_config",
-      "bos_universal_security",
-      "bos_universal_marketplace",
-      "bos_universal_sync"
-    ],
-    "mode": "commit"
+      "editorconfig",
+      "shellcheck"
+    ]
   }
 }
 ```
+
+Marketplace validation loads the hub's strict
+[`marketplace-kit-global-config.json`](sync-files/config/marketplace-kit-global-config.json)
+policy and then the repository's `marketplace_kit` block. The global policy
+inherits organization community-health files and defers GHAS and Security
+DevOps posture rules to `bos-code-scanning-kit`; set a per-repository
+`marketplace_kit` field only to override a specific policy.
 
 For `blackoutsecure/bos-code-scanning-kit`, merge this policy into its existing
 `marketplace` object to replace the repository-local post-release workflow:
@@ -465,11 +643,11 @@ granting repository-administration authority.
 ## Workflow API
 
 Consumer repositories normally need only the managed
-[`bos-universal-launchpad-kicker.yml`](managed-files/workflows/bos-universal-launchpad-kicker.yml),
-[`bos-universal-security-kicker.yml`](managed-files/workflows/bos-universal-security-kicker.yml),
-[`bos-universal-marketplace-kicker.yml`](managed-files/workflows/bos-universal-marketplace-kicker.yml),
-and [`bos-universal-sync-kicker.yml`](managed-files/workflows/bos-universal-sync-kicker.yml)
-callers. They read `bos-universal-config.json` and invoke independent hub
+[`bos-universal-launchpad-kicker.yml`](sync-files/workflows/bos-universal-launchpad-kicker.yml),
+[`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml),
+[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml),
+and [`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml)
+callers. They read `.github/bos-universal-config.json` and invoke independent hub
 entry points:
 
 | Entry point | Purpose |
@@ -487,7 +665,7 @@ would not reduce Actions jobs or runner usage.
 
 | Workflow | Purpose |
 | --- | --- |
-| [`monitor-upstream-release.yml`](.github/workflows/monitor-upstream-release.yml) | Universal stage for upstream version discovery and tracking-state updates. |
+| [`monitor-upstream-release.yml`](.github/workflows/monitor-upstream-release.yml) | Universal stage for upstream version discovery and tracking-state updates using the config-aware `bos-upstream-watcher` composite. |
 | [`release.yml`](.github/workflows/release.yml) | Artifact-release composition stage; also supports direct tag-driven releases without upstream monitoring. |
 | [`docker-build-push.yml`](.github/workflows/docker-build-push.yml) | Release leaf for multi-architecture Docker publication. |
 | [`balena-block-publish.yml`](.github/workflows/balena-block-publish.yml) | Release leaf for Balena block publication. |
@@ -495,7 +673,22 @@ would not reduce Actions jobs or runner usage.
 | [`deploy-cloudflare-pages.yml`](.github/workflows/deploy-cloudflare-pages.yml) | Universal stage for Cloudflare Pages build and deployment. |
 | [`security-scan.yml`](.github/workflows/security-scan.yml) | Shared scanning stage used by trusted delivery and pre-merge validation. |
 | [`repo-metadata-sync.yml`](.github/workflows/repo-metadata-sync.yml) | Shared About-box synchronization stage used by hub, Launchpad, and Marketplace publication. |
-| [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) | Shared managed-file engine called directly by the dedicated universal sync kicker. |
+| [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) | Thin event and commit wrapper around the published managed-file sync action. |
+
+The upstream monitor loads organization-wide watcher defaults from
+[`sync-files/config/upstream-watcher-global-config.json`](sync-files/config/upstream-watcher-global-config.json)
+and merges repository-specific `upstream_watcher` settings from
+`.github/bos-universal-config.json` above it. Keep upstream identifiers and
+tracker paths in the repository config; keep shared behavior and AI/report
+defaults in the global file.
+
+The upstream monitor pins the current watcher runtime and passes the caller's
+`.github/bos-universal-config.json` through its config cascade. Add an
+`upstream_watcher` section there to configure provider-specific discovery,
+tracker behavior, and advisory AI settings without expanding another workflow
+input map. The monitor preserves the watcher's canonical label, update type,
+AI impact/status, and package metadata outputs for downstream reporting while
+keeping tracker commits and downstream dispatch in the hub wrapper.
 
 Specialized reusable entry points remain separate when their event or mutation
 contract does not belong in Universal:
@@ -560,7 +753,63 @@ Common secrets are stage-dependent:
 - Cloudflare: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, optionally
   `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_PAGES_ADMIN_TOKEN`;
 - administration/scanning: `REPO_ADMIN_PAT`, `SCANNING_PAT`;
+- workflow-file propagation: `WORKFLOW_SYNC_PAT`;
 - hub promotion: `RELEASE_PAT` when protected-branch bypass is required.
+
+### Elevated posture scanning (`SCANNING_PAT`)
+
+The code-scanning kit's posture probes (secret-scanning enablement, Dependabot
+alerts enablement, push-protection visibility, branch-protection drift) need
+Administration/security read access that the default `GITHUB_TOKEN` does not
+have; without it those probes report indeterminate rather than `pass`/`warn`/
+`fail`.
+
+1. Create a PAT for the repositories to audit.
+2. Preferred: a fine-grained PAT scoped only to the selected repositories.
+3. Grant read access for repository metadata plus the security and
+   administration surfaces the posture checks need (secret scanning alerts,
+   Dependabot alerts, administration).
+4. Fallback: a classic PAT with the `repo` scope.
+5. Store the token as an Actions secret named `SCANNING_PAT` at the
+   organization or repository level.
+6. Re-run the workflow and confirm the previously indeterminate rows now show
+   `pass`, `warn`, or `fail`.
+
+No consumer wiring is required beyond creating the secret:
+
+- [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)'s
+  `code-scan` job always passes
+  `github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}`, and both
+  managed kickers already forward `secrets.SCANNING_PAT` unconditionally — the
+  PAT is used automatically the moment the secret exists, with no config
+  change needed.
+- [`bos-universal-launchpad.yml`](.github/workflows/bos-universal-launchpad.yml)'s
+  security-scan stage additionally requires
+  `launchpad.security_scan.use_advanced_pat: true` (or the flat
+  `security_scan.use_advanced_pat` equivalent) in
+  [`bos-universal-config.json`](.github/bos-universal-config.json) — this hub ships
+  that flag enabled by default. It is a documented no-op when `SCANNING_PAT`
+  is absent (the kit transparently falls back to `GITHUB_TOKEN`), so enabling
+  it ahead of provisioning the secret is safe.
+
+### Workflow-file propagation (`WORKFLOW_SYNC_PAT`)
+
+`GITHUB_TOKEN` can never push changes to `.github/workflows/**` — this is a
+hard GitHub platform restriction, not something a workflow's `permissions:`
+block can grant. Without a PAT, `bos-universal-sync.yml` skips the five
+managed kicker workflow files
+(`bos-universal-action-test-kicker.yml`, `bos-universal-launchpad-kicker.yml`,
+`bos-universal-marketplace-kicker.yml`, `bos-universal-security-kicker.yml`,
+`bos-universal-sync-kicker.yml`) and syncs every other managed file normally.
+
+1. Create a fine-grained PAT scoped to the repositories that install the
+   kicker workflows, with the **Workflows** repository permission set to
+   **Read and write** (a classic PAT with the `workflow` scope also works).
+2. Store it as an Actions secret named `WORKFLOW_SYNC_PAT` at the
+   organization or repository level.
+3. No further wiring is required: the sync kicker already forwards
+   `secrets.WORKFLOW_SYNC_PAT` unconditionally, and the reusable workflow
+   starts propagating the kicker files as soon as the secret exists.
 
 ## Development and validation
 
@@ -568,9 +817,7 @@ Run the repository contract before promotion:
 
 ```bash
 python3 scripts/test_universal_config_contract.py
-python3 -m py_compile \
-  .github/actions/sync-managed-files/sync.py \
-  scripts/test_universal_config_contract.py
+python3 -m py_compile scripts/test_universal_config_contract.py
 git diff --check
 ```
 

@@ -1,0 +1,11 @@
+{
+  "marketplace_kit": {
+    "profile": "strict",
+    "org_health_repo": "blackoutsecure/.github",
+    "check_org_health": true,
+    "community_health_source": "inherit",
+    "enable_security_scan": true,
+    "defer_to_code_scanning_kit": true,
+    "enable_ai_findings_summary": false
+  }
+}

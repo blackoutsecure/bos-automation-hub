@@ -1,10 +1,10 @@
-# Repository About-box synchronization (reusable).
+# Repository About-box synchronization.
 #
 # Centralizes the orchestration around the hub's `repo-metadata` composite:
 # token selection, released-tree checkout, write serialization, and outputs.
 # Real writes require an Administration-capable PAT. Dry runs may use the
 # job-scoped GITHUB_TOKEN because the composite does not call write endpoints.
-name: Repository metadata sync (reusable)
+name: Repository Metadata Sync
 
 "on":
   workflow_call:
@@ -198,7 +198,7 @@ jobs:
       - name: Synchronize repository metadata
         if: steps.token.outputs.available == 'true'
         id: metadata
-        uses: blackoutsecure/bos-automation-hub/.github/actions/repo-metadata@main
+        uses: blackoutsecure/bos-repo-about-sync-action@6fee8a6882bdd909a43911708be220c0df5fd44d # dev
         with:
           github_token: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token }}
           readme_path: ${{ inputs.readme_path }}

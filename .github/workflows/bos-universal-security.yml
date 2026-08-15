@@ -91,8 +91,18 @@
 #   https://github.com/blackoutsecure/bos-marketplace-kit
 # - bos-code-scanning-kit (umbrella scanner + posture audit):
 #   https://github.com/blackoutsecure/bos-code-scanning-kit
+#
+# Code-scanning config layering
+# ------------------------------
+# The code-scan job forwards an org-wide policy tier to the kit via
+# `global_config_path`, sourced from this hub's own
+# `sync-files/config/code-scanning-kit-global-config.json` (checked
+# out alongside the caller repo, mirroring the `bos-universal-sync.yml`
+# pattern). Per-repository overrides remain opt-in through a `code_scanning`
+# block in the caller's own `.github/bos-universal-config.json`, which the
+# kit discovers automatically as its repository-tier config.
 
-name: Blackout Secure universal security (reusable)
+name: Blackout Secure Universal Security
 
 on:
   workflow_call:
@@ -160,11 +170,34 @@ on:
         type: string
         required: false
         default: auto
+      code_scan_fail_on:
+        description: >-
+          Forwarded to bos-code-scanning-kit's `fail_on` input. `fail`
+          (default) exits non-zero on any posture FAIL or scanner
+          finding. `never` collects findings but always exits 0 —
+          useful for a first-time rollout on a noisy repository.
+        type: string
+        required: false
+        default: fail
+      code_scan_http_timeout:
+        description: >-
+          Forwarded to bos-code-scanning-kit's `http_timeout` input:
+          per-request HTTP timeout (seconds) for the posture audit's
+          GitHub REST calls. Bump on self-hosted runners with slow
+          egress. Bare integer string; no unit.
+        type: string
+        required: false
+        default: '20'
       config_authoritative:
-        description: Use bos-universal-config.json instead of direct gate inputs.
+        description: Use .github/bos-universal-config.json instead of direct gate inputs.
         type: boolean
         required: false
         default: false
+      hub_ref:
+        description: Hub runtime ref. Use auto to follow the event target branch.
+        type: string
+        required: false
+        default: auto
     secrets:
       scanning_pat:
         description: >-
@@ -191,13 +224,23 @@ jobs:
       contents: read
     outputs:
       gate: ${{ steps.resolve.outputs.gate }}
+      org: ${{ steps.config.outputs.organization }}
+      config: ${{ steps.config.outputs.cfg }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Checkout selected hub runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
+          path: hub-runtime
+          sparse-checkout: .github/actions/shared/universal-config
+          sparse-checkout-cone-mode: false
       - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+        uses: ./hub-runtime/.github/actions/shared/universal-config
         with:
           allow_missing: 'false'
       - name: Resolve security settings
@@ -219,6 +262,8 @@ jobs:
           INPUT_PR_TITLE_TYPES: ${{ inputs.pr_title_types }}
           INPUT_ENABLE_README: ${{ inputs.enable_readme_header_check }}
           INPUT_README_PROFILE: ${{ inputs.readme_header_profile }}
+          INPUT_CODE_SCAN_FAIL_ON: ${{ inputs.code_scan_fail_on }}
+          INPUT_CODE_SCAN_HTTP_TIMEOUT: ${{ inputs.code_scan_http_timeout }}
         shell: bash
         run: |
           set -euo pipefail
@@ -233,6 +278,7 @@ jobs:
               "node_version": "20",
               "enable_python_lint": False,
               "python_version": "3.11",
+              "python_packages": ["ruff>=0.6", "pytest>=8.0"],
               "enable_shell_lint": False,
               "enable_dependency_review": True,
               "enable_code_scan": True,
@@ -241,6 +287,8 @@ jobs:
               "pr_title_types": "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert",
               "enable_readme_header_check": True,
               "readme_header_profile": "auto",
+              "code_scan_fail_on": "fail",
+              "code_scan_http_timeout": "20",
           }
           configured = config.get("gate", {})
           if not isinstance(configured, dict):
@@ -269,6 +317,8 @@ jobs:
                   "pr_title_types": os.environ["INPUT_PR_TITLE_TYPES"] or gate["pr_title_types"],
                   "enable_readme_header_check": boolean("INPUT_ENABLE_README", True),
                   "readme_header_profile": os.environ["INPUT_README_PROFILE"] or "auto",
+                  "code_scan_fail_on": os.environ["INPUT_CODE_SCAN_FAIL_ON"] or "fail",
+                  "code_scan_http_timeout": os.environ["INPUT_CODE_SCAN_HTTP_TIMEOUT"] or "20",
               })
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("gate<<__BOS_GATE__\n")
@@ -286,13 +336,14 @@ jobs:
     needs: resolve-config
     if: ${{ fromJSON(needs.resolve-config.outputs.gate).enable_lint == true }}
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.timeout_minutes }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run kit lint composite
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@33472b3595a0381843093da9f6640c1b7a5a303a # v0.1.9
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@93affaddfa4f5b6e6c162112d334baa989a31d34 # v0.1.12
         with:
           severity: fail
 
@@ -300,7 +351,8 @@ jobs:
     needs: resolve-config
     if: ${{ fromJSON(needs.resolve-config.outputs.gate).enable_node_lint == true }}
     name: Node (ESLint + Prettier)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.timeout_minutes }}
     permissions:
       contents: read
     steps:
@@ -336,7 +388,8 @@ jobs:
     needs: resolve-config
     if: ${{ fromJSON(needs.resolve-config.outputs.gate).enable_python_lint == true }}
     name: Python (Ruff + pytest)
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.timeout_minutes }}
     permissions:
       contents: read
     steps:
@@ -347,13 +400,28 @@ jobs:
         with:
           python-version: ${{ fromJSON(needs.resolve-config.outputs.gate).python_version }}
       - name: Install dev dependencies
+        env:
+          GATE: ${{ needs.resolve-config.outputs.gate }}
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
-          if [[ -f requirements-dev.txt ]]; then
-            pip install -r requirements-dev.txt
-          else
-            pip install ruff pytest
-          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+
+          gate = json.loads(os.environ["GATE"])
+          packages = gate.get("python_packages", [])
+          if not isinstance(packages, list) or not packages:
+              raise SystemExit("gate.python_packages must be a non-empty array")
+          normalized = []
+          for package in packages:
+              if not isinstance(package, str) or not package.strip():
+                  raise SystemExit("gate.python_packages entries must be non-empty strings")
+              normalized.append(package.strip())
+          subprocess.check_call([sys.executable, "-m", "pip", "install", *normalized])
+          PY
       - name: Ruff
         run: ruff check .
       - name: Pytest
@@ -368,7 +436,8 @@ jobs:
     needs: resolve-config
     if: ${{ fromJSON(needs.resolve-config.outputs.gate).enable_shell_lint == true }}
     name: Shell validation
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.timeout_minutes }}
     permissions:
       contents: read
     steps:
@@ -413,7 +482,8 @@ jobs:
     needs: resolve-config
     if: ${{ fromJSON(needs.resolve-config.outputs.gate).enable_dependency_review == true && github.event_name == 'pull_request' }}
     name: Dependency review
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.timeout_minutes }}
     permissions:
       contents: read
       pull-requests: read
@@ -434,21 +504,41 @@ jobs:
     needs: resolve-config
     if: ${{ fromJSON(needs.resolve-config.outputs.gate).enable_code_scan == true }}
     name: Code scanning
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.timeout_minutes }}
     permissions:
       contents: read
       security-events: write
       actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Run bos-code-scanning-kit
-        uses: blackoutsecure/bos-code-scanning-kit@37ee8d5cf143be59b02dd9fcbb3070b174dc22e3 # v1
+      - name: Checkout canonical hub code-scanning global config
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          github_token: ${{ secrets.scanning_pat || secrets.GITHUB_TOKEN }}
-          fail_on: fail
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
+          path: hub-config
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: config/code-scanning-kit-global-config.json
+          sparse-checkout-cone-mode: false
+      - name: Run bos-code-scanning-kit
+        uses: blackoutsecure/bos-code-scanning-kit@ddf31a70cbc1f4e8d3d3e24d6dd358574a48c8bf # dev
+        with:
+          github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}
+          fail_on: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_fail_on }}
+          http_timeout: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_http_timeout }}
           enable_posture: 'true'
           enable_scanners: 'true'
           enable_upload: 'true'
+          # Distinct from `security-scan.yml`'s own kit call (category
+          # `bos-code-scanning-kit-launchpad`) so a push that fires both this
+          # PR/push gate AND Launchpad's release-time scan for the same commit
+          # doesn't race two uploads onto the same Code Scanning category.
+          category: bos-code-scanning-kit-gate
+          use_global_config: 'true'
+          global_config_path: hub-config/config/code-scanning-kit-global-config.json
+          config: .github/bos-universal-config.json
 
   # -----------------------------------------------------------------
   # 5. Pinned actions — ensures every third-party `uses:` reference in
@@ -467,7 +557,8 @@ jobs:
     needs: resolve-config
     if: ${{ fromJSON(needs.resolve-config.outputs.gate).enable_pinned_actions_check == true }}
     name: Pinned actions
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.timeout_minutes }}
     permissions:
       contents: read
     steps:
@@ -489,7 +580,8 @@ jobs:
     needs: resolve-config
     if: ${{ fromJSON(needs.resolve-config.outputs.gate).enable_readme_header_check == true }}
     name: README header
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.timeout_minutes }}
     permissions:
       contents: read
     steps:
@@ -508,7 +600,8 @@ jobs:
     needs: resolve-config
     if: ${{ fromJSON(needs.resolve-config.outputs.gate).enable_pr_title_check == true && github.event_name == 'pull_request' }}
     name: PR title format
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.runs_on }}
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.org).workflows.security.timeout_minutes }}
     permissions:
       pull-requests: read
     steps:
@@ -522,7 +615,7 @@ jobs:
           subjectPatternError: |
             PR title subject must be at least 3 characters after the
             `<type>:` prefix. Examples:
-              feat(sync): add target_repo_role to bos-universal-config.json
+              feat(sync): add target_repo_role to .github/bos-universal-config.json
               fix(lint): allow `truthy: on/off` in yamllint default
 
   # -----------------------------------------------------------------
@@ -554,11 +647,28 @@ jobs:
       - pinned-actions
       - readme-header
       - pr-title
+    # Deliberately a literal runner and no org-derived job-level
+    # expression: this is the required status check, so it must still
+    # render a report when `resolve-config` itself failed.
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions: {}
     steps:
-      - name: Evaluate gate results
+      - name: Checkout selected hub reporting action
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
+          path: hub-runtime
+          sparse-checkout: .github/actions/shared/job-report
+          sparse-checkout-cone-mode: false
+      - name: Build gate findings
+        id: findings
         env:
+          ORG: ${{ needs.resolve-config.outputs.org }}
+          GATE: ${{ needs.resolve-config.outputs.gate }}
+          CONFIG: ${{ needs.resolve-config.outputs.config }}
+          R_CONFIG: ${{ needs.resolve-config.result }}
           R_LINT: ${{ needs.lint.result }}
           R_NODE: ${{ needs.node-lint.result }}
           R_PYTHON: ${{ needs.python-lint.result }}
@@ -568,21 +678,161 @@ jobs:
           R_PINNED: ${{ needs.pinned-actions.result }}
           R_README: ${{ needs.readme-header.result }}
           R_PRTITLE: ${{ needs.pr-title.result }}
+        shell: bash
         run: |
           set -euo pipefail
-          fail=0
-          for name in LINT NODE PYTHON SHELL DEPREVIEW CODESCAN PINNED README PRTITLE; do
-            var="R_${name}"
-            res="${!var}"
-            case "$res" in
-              success|skipped) printf '✓ %-12s %s\n' "$name" "$res" ;;
-              *)               printf '✗ %-12s %s\n' "$name" "$res"; fail=1 ;;
-            esac
-          done
-          if [ "$fail" -eq 1 ]; then
-            echo ""
-            echo "One or more required gates failed or were cancelled."
-            exit 1
-          fi
-          echo ""
-          echo "All gates green or intentionally skipped."
+          python3 - <<'PY'
+          import json
+          import os
+
+          # A skipped gate is a deliberate configuration choice, not a
+          # silent pass — it reports as `skip` (Not Assessed) so the
+          # report never implies coverage the run did not provide.
+          STATUS = {
+              "success": "pass",
+              "skipped": "skip",
+              "failure": "fail",
+              "cancelled": "fail",
+          }
+          GATES = [
+              ("SG001", "R_CONFIG", "Universal config", "quality",
+               "Fix `.github/bos-universal-config.json` so every downstream gate can resolve its policy."),
+              ("SG010", "R_LINT", "Workflow / Markdown / YAML lint", "quality",
+               "Run the kit lint composite locally and correct the reported files."),
+              ("SG011", "R_NODE", "Node (ESLint + Prettier)", "quality",
+               "Run `npm run lint` and `npx prettier --check` locally, then commit the fixes."),
+              ("SG012", "R_PYTHON", "Python (Ruff + pytest)", "quality",
+               "Run `ruff check .` and `pytest -q` locally, then commit the fixes."),
+              ("SG013", "R_SHELL", "Shell (ShellCheck + Bats)", "quality",
+               "Run ShellCheck and Bats locally and correct the reported scripts."),
+              ("SG020", "R_DEPREVIEW", "Dependency review", "security",
+               "Remove or upgrade the flagged dependency, or correct its license."),
+              ("SG021", "R_CODESCAN", "Code scanning + posture audit", "security",
+               "Review the SARIF findings on the Security tab and remediate the reported rules."),
+              ("SG022", "R_PINNED", "Pinned third-party actions", "security",
+               "Pin every third-party `uses:` reference to a 40-char commit SHA."),
+              ("SG030", "R_README", "Canonical README header", "compliance",
+               "Restore the canonical Blackout Secure README header for this repo profile."),
+              ("SG031", "R_PRTITLE", "Conventional PR title", "compliance",
+               "Retitle the PR as `<type>: <subject>` using an allowed conventional-commit type."),
+          ]
+
+          org = json.loads(os.environ["ORG"] or "{}")
+          gate = json.loads(os.environ["GATE"] or "{}")
+          config = json.loads(os.environ.get("CONFIG") or "{}")
+          # `resolve-config` may itself have failed, so every org lookup
+          # below degrades to the documented default rather than making
+          # the required check unrenderable.
+          org_workflow = (org.get("workflows") or {}).get("security") or {}
+          org_reporting = org.get("reporting") or {}
+          runs_on = org_workflow.get("runs_on") or "ubuntu-latest"
+          timeout_minutes = org_workflow.get("timeout_minutes") or 30
+
+          findings = []
+          for rule_id, env_name, control, group, remediation in GATES:
+              result = os.environ.get(env_name, "") or "skipped"
+              severity = STATUS.get(result, "fail")
+              if severity == "fail":
+                  advice = remediation
+              elif severity == "skip":
+                  advice = "Enable this gate in `.github/bos-universal-config.json` to obtain a verdict."
+              else:
+                  advice = "—"
+              findings.append({
+                  "id": rule_id,
+                  "severity": severity,
+                  "control": control,
+                  "evidence": f"job result: {result}",
+                  "remediation": advice,
+                  "group": group,
+              })
+
+          organization = config.get("organization") or {}
+          workflow_config = (organization.get("workflows") or {}).get("security") or {}
+          gate_config = config.get("gate") or config.get("security") or {}
+          context_rows = []
+          if (organization.get("runners") or {}).get("default") is not None:
+              context_rows.append({
+                  "label": "Runner", "value": runs_on,
+                  "meaning": "Explicitly configured by `organization.runners.default`.",
+              })
+          if workflow_config.get("timeout_minutes") is not None:
+              context_rows.append({
+                  "label": "Job timeout", "value": f"{timeout_minutes} min",
+                  "meaning": "Explicitly configured by `organization.workflows.security.timeout_minutes`.",
+              })
+          if "code_scan_fail_on" in gate_config:
+              context_rows.append({
+                  "label": "Code-scan fail policy", "value": gate.get("code_scan_fail_on"),
+                  "meaning": "Forwarded to bos-code-scanning-kit's `fail_on` input.",
+              })
+          if "fail_on" in (organization.get("reporting") or {}):
+              context_rows.append({
+                  "label": "Report fail policy", "value": org_reporting.get("fail_on"),
+                  "meaning": "Severity tier that makes this required check exit non-zero.",
+              })
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"fail_on={org_reporting.get('fail_on', 'fail')}\n")
+              handle.write(
+                  "enable_summary="
+                  f"{str(org_reporting.get('enable_job_summary', True)).lower()}\n"
+              )
+              handle.write(
+                  "enable_annotations="
+                  f"{str(org_reporting.get('enable_annotations', True)).lower()}\n"
+              )
+              handle.write(
+                  f"title_prefix={org_reporting.get('title_prefix', 'Blackout Secure')}\n"
+              )
+              handle.write(
+                  "enable_html="
+                  f"{str(org_reporting.get('enable_html', True)).lower()}\n"
+              )
+              handle.write(
+                  "enable_pdf="
+                  f"{str(org_reporting.get('enable_pdf', False)).lower()}\n"
+              )
+              handle.write(f"html_path={org_reporting.get('html_path', 'blackout-secure-report.html')}\n")
+              handle.write(f"pdf_path={org_reporting.get('pdf_path', 'blackout-secure-report.pdf')}\n")
+              handle.write(f"artifact_name={org_reporting.get('artifact_name', 'blackout-secure-audit-report')}\n")
+              for name, value in (
+                  ("findings", json.dumps(findings, separators=(",", ":"))),
+                  ("context_rows", json.dumps(context_rows, separators=(",", ":"))),
+              ):
+                  handle.write(f"{name}<<__BOS_EOF__\n{value}\n__BOS_EOF__\n")
+          PY
+      - name: Publish security gate report
+        uses: ./hub-runtime/.github/actions/shared/job-report
+        with:
+          title: ${{ steps.findings.outputs.title_prefix }} Security Gate Report
+          subject: >-
+            **Repository:** `${{ github.repository }}`  ·
+            **Ref:** `${{ github.ref_name }}`  ·
+            **Event:** `${{ github.event_name }}`
+          findings: ${{ steps.findings.outputs.findings }}
+          context_rows: ${{ steps.findings.outputs.context_rows }}
+          groups: >-
+            {"quality":{"title":"Code quality","blurb":"Lint, formatting, and test gates"},
+             "security":{"title":"Security","blurb":"Supply chain, code scanning, and posture controls"},
+             "compliance":{"title":"Compliance","blurb":"Repository policy and release-notes hygiene"}}
+          fail_on: ${{ steps.findings.outputs.fail_on }}
+          enable_summary: ${{ steps.findings.outputs.enable_summary }}
+          enable_annotations: ${{ steps.findings.outputs.enable_annotations }}
+          enable_html: ${{ steps.findings.outputs.enable_html }}
+          enable_pdf: ${{ steps.findings.outputs.enable_pdf }}
+          html_path: ${{ steps.findings.outputs.html_path }}
+          pdf_path: ${{ steps.findings.outputs.pdf_path }}
+          footer: >-
+            This report was generated by the Blackout Secure universal security
+            workflow (`bos-universal-security.yml`).
+      - name: Upload security audit report
+        if: ${{ always() && steps.findings.outputs.enable_html == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.findings.outputs.artifact_name || 'blackout-secure-audit-report' }}
+          path: |
+            ${{ steps.findings.outputs.html_path || 'blackout-secure-report.html' }}
+            ${{ steps.findings.outputs.pdf_path }}
+          if-no-files-found: warn
+          retention-days: 14

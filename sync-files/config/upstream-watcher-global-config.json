@@ -1,0 +1,15 @@
+{
+  "upstream_watcher": {
+    "tracker_path": ".github/tracked-release.json",
+    "strip_v_prefix": true,
+    "include_prereleases": false,
+    "user_agent": "blackoutsecure-bos-upstream-watcher",
+    "ai": {
+      "enable_ai_release_summary": true,
+      "enable_ai_error_remediation": true,
+      "ai_release_summary_provider": "auto",
+      "local_heuristic_fallback": true,
+      "timeout_seconds": 20
+    }
+  }
+}

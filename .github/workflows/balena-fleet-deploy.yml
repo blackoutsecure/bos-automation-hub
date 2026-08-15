@@ -1,4 +1,4 @@
-name: Balena Fleet Deploy (reusable)
+name: Balena Fleet Deploy
 
 "on":
   workflow_call:

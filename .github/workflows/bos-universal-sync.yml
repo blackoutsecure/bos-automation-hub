@@ -1,28 +1,14 @@
-# One backend for hub-local and consumer managed-file reconciliation.
-# Event-driven runs read `sync_files` from bos-universal-config.json
-# Reusable callers may either rely on that config or provide explicit inputs.
-name: Blackout Secure universal sync (reusable)
+# Hub-local reusable workflow for the published managed-file sync action.
+# The sync engine and service catalog live in bos-managed-file-sync-action.
+# Named "managed file sync", not "universal", since it only ever does one
+# thing; filename stays bos-universal-sync.yml to keep uses: refs stable.
+name: Blackout Secure Managed File Sync
 
 "on":
-  schedule:
-    - cron: '11 14 * * 1'
-  push:
-    paths:
-      - bos-universal-config.json
-      - .github/workflows/bos-universal-sync.yml
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Run mode.
-        type: choice
-        options: [commit, check]
-        default: commit
   workflow_call:
     inputs:
       services:
-        description: >-
-          Optional whitespace-separated service list. When empty, services and
-          settings are read from bos-universal-config.json.
+        description: Optional service override passed to the published sync action.
         required: false
         type: string
         default: ''
@@ -32,35 +18,39 @@ name: Blackout Secure universal sync (reusable)
         type: string
         default: ''
       commit_message:
-        description: Optional commit message override.
+        description: Optional explicit commit message override.
         required: false
         type: string
-        default: ''
-      git_user_name:
-        description: Optional Git author name override.
-        required: false
-        type: string
-        default: ''
-      git_user_email:
-        description: Optional Git author email override.
-        required: false
-        type: string
-        default: ''
-      push_retries:
-        description: Optional push retry override.
-        required: false
-        type: number
-        default: 0
+        default: 'chore: sync managed files'
       runs_on:
-        description: Optional runner override.
+        description: >-
+          Optional runner override. Defaults to
+          `organization.workflows.sync.runs_on` from the universal config.
         required: false
         type: string
         default: ''
       timeout_minutes:
-        description: Optional per-job timeout override.
+        description: >-
+          Optional per-job timeout override. `0` (default) defers to
+          `organization.workflows.sync.timeout_minutes`.
         required: false
         type: number
         default: 0
+      hub_ref:
+        description: Hub runtime ref. Use auto to follow the event target branch.
+        required: false
+        type: string
+        default: auto
+    secrets:
+      workflow_sync_pat:
+        description: >-
+          Optional PAT with the Workflows: write permission. The default
+          GITHUB_TOKEN can never push changes to .github/workflows/**
+          (a hard GitHub platform restriction, not a `permissions:`
+          setting). Without this secret, the two managed kicker
+          workflow files are skipped; every other managed file still
+          syncs normally with GITHUB_TOKEN.
+        required: false
     outputs:
       changed:
         description: '`true` when files changed or would change.'
@@ -81,113 +71,40 @@ concurrency:
 
 jobs:
   resolve-config:
-    name: Resolve sync config
-    if: >-
-      github.event_name != 'push'
-      || github.ref_name == github.event.repository.default_branch
+    name: Resolve organization config
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
       contents: read
     outputs:
-      sync: ${{ steps.resolve.outputs.sync }}
+      org: ${{ steps.config.outputs.organization }}
+      config: ${{ steps.config.outputs.cfg }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Load repository config
+      - name: Checkout selected hub runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
+          path: hub-runtime
+          sparse-checkout: .github/actions/shared/universal-config
+          sparse-checkout-cone-mode: false
+      - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+        uses: ./hub-runtime/.github/actions/shared/universal-config
         with:
-          allow_missing: ${{ inputs.services != '' }}
-
-      - name: Resolve explicit inputs and config
-        id: resolve
-        shell: bash
-        env:
-          CONFIG_SYNC: ${{ steps.config.outputs.sync }}
-          SERVICES: ${{ inputs.services }}
-          MODE: ${{ inputs.mode }}
-          COMMIT_MESSAGE: ${{ inputs.commit_message }}
-          GIT_USER_NAME: ${{ inputs.git_user_name }}
-          GIT_USER_EMAIL: ${{ inputs.git_user_email }}
-          PUSH_RETRIES: ${{ inputs.push_retries }}
-          RUNS_ON: ${{ inputs.runs_on }}
-          TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
-          DEFAULT_RUNNER: ${{ vars.DEFAULT_RUNNER }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-
-          config = json.loads(os.environ["CONFIG_SYNC"])
-          explicit_services = os.environ.get("SERVICES", "").strip()
-          services = explicit_services.split() if explicit_services else config["services"]
-          direct_call = bool(explicit_services)
-
-          def text(name, config_key):
-              return os.environ.get(name, "").strip() or str(config[config_key])
-
-          def number(name, config_key):
-              raw = os.environ.get(name, "").strip()
-              return int(raw) if raw and int(raw) > 0 else int(config[config_key])
-
-          runs_on = os.environ.get("RUNS_ON", "").strip()
-          if not runs_on:
-              runs_on = (
-                  os.environ.get("DEFAULT_RUNNER", "").strip()
-                  if direct_call
-                  else str(config["runs_on"])
-              )
-
-          resolved = {
-              "enabled": bool(services),
-              "services": services,
-              "mode": text("MODE", "mode"),
-              "commit_message": text("COMMIT_MESSAGE", "commit_message"),
-              "git_user_name": text("GIT_USER_NAME", "git_user_name"),
-              "git_user_email": text("GIT_USER_EMAIL", "git_user_email"),
-              "push_retries": number("PUSH_RETRIES", "push_retries"),
-              "runs_on": runs_on,
-              "timeout_minutes": number("TIMEOUT_MINUTES", "timeout_minutes"),
-          }
-
-          if resolved["mode"] not in {"commit", "check"}:
-              raise SystemExit("sync mode must be 'commit' or 'check'")
-          if not 1 <= resolved["push_retries"] <= 10:
-              raise SystemExit("push_retries must be in 1-10")
-          if resolved["timeout_minutes"] < 1:
-              raise SystemExit("timeout_minutes must be positive")
-          if resolved["enabled"] and not resolved["runs_on"]:
-              raise SystemExit(
-                  "runs_on is required; set sync_files.runs_on, pass runs_on, "
-                  "or define vars.DEFAULT_RUNNER for an explicit-service call"
-              )
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"sync={json.dumps(resolved, separators=(',', ':'))}\n")
-          PY
-
-      - name: Validate selected runner
-        if: ${{ fromJson(steps.resolve.outputs.sync).enabled == true }}
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
-        with:
-          default_runner: ${{ fromJson(steps.resolve.outputs.sync).runs_on }}
-          runner_x64: ${{ vars.RUNNER_X64 }}
-          runner_arm64: ${{ vars.RUNNER_ARM64 }}
+          allow_missing: 'true'
 
   sync:
-    name: Sync managed files (${{ fromJson(needs.resolve-config.outputs.sync).mode }})
     needs: resolve-config
-    if: >-
-      !cancelled()
-      && needs.resolve-config.result == 'success'
-      && fromJson(needs.resolve-config.outputs.sync).enabled == true
-    runs-on: ${{ fromJSON(startsWith(fromJson(needs.resolve-config.outputs.sync).runs_on, '[') && fromJson(needs.resolve-config.outputs.sync).runs_on || format('"{0}"', fromJson(needs.resolve-config.outputs.sync).runs_on)) }}
-    timeout-minutes: ${{ fromJson(needs.resolve-config.outputs.sync).timeout_minutes }}
+    name: Sync managed files (${{ inputs.mode || 'commit' }})
+    # Workflow input wins over the organization default so a caller can
+    # still pin one run to a specific runner. Both a bare label and a
+    # JSON-array label list are accepted.
+    runs-on: ${{ inputs.runs_on != '' && fromJSON(startsWith(inputs.runs_on, '[') && inputs.runs_on || format('"{0}"', inputs.runs_on)) || fromJSON(needs.resolve-config.outputs.org).workflows.sync.runs_on }}
+    timeout-minutes: ${{ inputs.timeout_minutes || fromJSON(needs.resolve-config.outputs.org).workflows.sync.timeout_minutes }}
     permissions:
       contents: write
     outputs:
@@ -195,71 +112,266 @@ jobs:
       changed_files: ${{ steps.sync.outputs.changed_files }}
       commit_sha: ${{ steps.commit.outputs.commit_sha }}
     steps:
+      - name: Resolve workflow sync capability
+        id: workflow-pat
+        env:
+          HAS_WORKFLOW_PAT: ${{ secrets.WORKFLOW_SYNC_PAT != '' && 'true' || 'false' }}
+        run: echo "has_pat=${HAS_WORKFLOW_PAT}" >> "${GITHUB_OUTPUT}"
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Checkout canonical hub workflow templates
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
+          path: hub-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Ensure managed-file-sync global config is available
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_path="hub-source/sync-files/config/managed-file-sync-global-config.json"
+          if [[ ! -f "${config_path}" ]]; then
+            mkdir -p "$(dirname "${config_path}")"
+            git -C hub-source show "HEAD:sync-files/config/managed-file-sync-global-config.json" > "${config_path}"
+          fi
+          test -s "${config_path}"
+
       - name: Sync configured services
         id: sync
-        uses: blackoutsecure/bos-automation-hub/.github/actions/sync-managed-files@main
+        uses: blackoutsecure/bos-managed-file-sync-action@f6802f4443566d8443809f6f0e21576f345e8fdf # dev
         with:
-          services: ${{ join(fromJson(needs.resolve-config.outputs.sync).services, ' ') }}
-          fail_on_drift: ${{ fromJson(needs.resolve-config.outputs.sync).mode == 'check' }}
+          # The action auto-discovers .github/bos-universal-config.json.
+          use_global_config: 'auto'
+          global_config_path: hub-source/sync-files/config/managed-file-sync-global-config.json
+          managed_files_path: hub-source/sync-files
+          config_json: >-
+            ${{
+              steps.workflow-pat.outputs.has_pat != 'true'
+              && '{"managed_file_sync":{"disabled_services":["bos_universal_security_kicker","bos_universal_sync_kicker"]}}'
+              || ''
+            }}
+          services: ${{ inputs.services }}
+          dry_run: ${{ (inputs.mode || 'commit') == 'check' }}
+          fail_on_drift: ${{ (inputs.mode || 'commit') == 'check' }}
+          show_diff: 'true'
+
+      - name: Note workflow sync skip
+        if: steps.workflow-pat.outputs.has_pat != 'true'
+        run: |
+          echo "::notice::Managed kicker workflow files were not updated because \`workflow_sync_pat\` was not provided. GITHUB_TOKEN can never write to .github/workflows/**; other managed files still synced normally."
 
       - name: Commit and push
         id: commit
         if: >-
-          fromJson(needs.resolve-config.outputs.sync).mode == 'commit'
+          (inputs.mode || 'commit') == 'commit'
           && steps.sync.outputs.changed == 'true'
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/commit-and-push@main
+        uses: ./hub-source/.github/actions/shared/commit-and-push
         with:
           files: ${{ steps.sync.outputs.changed_files }}
-          message: ${{ fromJson(needs.resolve-config.outputs.sync).commit_message }}
-          git_user_name: ${{ fromJson(needs.resolve-config.outputs.sync).git_user_name }}
-          git_user_email: ${{ fromJson(needs.resolve-config.outputs.sync).git_user_email }}
-          push_retries: ${{ fromJson(needs.resolve-config.outputs.sync).push_retries }}
+          message: "${{ inputs.commit_message || 'chore: sync managed files' }}"
 
-      - name: Job summary
-        if: always()
+      - name: Build sync findings
+        id: findings
+        if: ${{ always() }}
         env:
-          SYNC: ${{ needs.resolve-config.outputs.sync }}
+          MODE: ${{ inputs.mode || 'commit' }}
+          SYNC_RESULT: ${{ steps.sync.outcome }}
           CHANGED: ${{ steps.sync.outputs.changed }}
           CHANGED_FILES: ${{ steps.sync.outputs.changed_files }}
           COMMIT_SHA: ${{ steps.commit.outputs.commit_sha }}
+          HAS_PAT: ${{ steps.workflow-pat.outputs.has_pat }}
+          RUNS_ON: ${{ toJSON(fromJSON(needs.resolve-config.outputs.org).workflows.sync.runs_on) }}
+          REPORTING: ${{ toJSON(fromJSON(needs.resolve-config.outputs.org).reporting) }}
+          CONFIG: ${{ needs.resolve-config.outputs.config }}
+        shell: bash
         run: |
+          set -euo pipefail
           python3 - <<'PY'
           import json
           import os
 
-          sync_raw = os.environ.get("SYNC", "")
-          sync_obj = {}
+          mode = os.environ.get("MODE") or "commit"
+          sync_result = os.environ.get("SYNC_RESULT") or "skipped"
+          changed = (os.environ.get("CHANGED") or "").lower() == "true"
+          changed_files = [
+              line.strip()
+              for line in (os.environ.get("CHANGED_FILES") or "").splitlines()
+              if line.strip()
+          ]
+          commit_sha = (os.environ.get("COMMIT_SHA") or "").strip()
+          has_pat = (os.environ.get("HAS_PAT") or "false").lower() == "true"
 
-          if sync_raw:
-              try:
-                  sync_obj = json.loads(sync_raw)
-              except json.JSONDecodeError:
-                  sync_obj = {}
+          findings = []
+          if sync_result == "success":
+              findings.append({
+                  "id": "MS001", "severity": "pass", "group": "sync",
+                  "control": "Managed-file reconciliation",
+                  "evidence": f"engine completed in `{mode}` mode",
+              })
+          else:
+              findings.append({
+                  "id": "MS001", "severity": "fail", "group": "sync",
+                  "control": "Managed-file reconciliation",
+                  "evidence": f"engine result: {sync_result}",
+                  "remediation": (
+                      "Read the managed-file-sync error above. Config errors exit 2 and "
+                      "usually mean an unknown service or an unreachable config tier."
+                  ),
+              })
 
-          mode = str(sync_obj.get("mode", "unknown"))
-          services = sync_obj.get("services", [])
-          services_text = " ".join(str(s) for s in services) if isinstance(services, list) else str(services or "")
+          # In `check` mode drift is the finding; in `commit` mode drift is
+          # expected input and only an uncommitted change is noteworthy.
+          if mode == "check":
+              findings.append({
+                  "id": "MS010",
+                  "severity": "fail" if changed else "pass",
+                  "group": "sync",
+                  "control": "Managed-file drift gate",
+                  "evidence": (
+                      f"{len(changed_files)} file(s) out of sync" if changed
+                      else "working tree matches the managed catalog"
+                  ),
+                  "remediation": (
+                      "Re-run this workflow in `commit` mode, or apply the diff above locally."
+                      if changed else "—"
+                  ),
+              })
+          else:
+              findings.append({
+                  "id": "MS010",
+                  "severity": "pass",
+                  "group": "sync",
+                  "control": "Managed-file drift applied",
+                  "evidence": (
+                      f"{len(changed_files)} file(s) updated in commit `{commit_sha[:7]}`"
+                      if commit_sha else
+                      f"{len(changed_files)} file(s) changed"
+                      if changed else "no drift detected"
+                  ),
+              })
 
-          changed = os.environ.get("CHANGED", "false")
-          commit_sha = os.environ.get("COMMIT_SHA", "").strip()
-          changed_files = os.environ.get("CHANGED_FILES", "")
+          findings.append({
+              "id": "MS020",
+              "severity": "pass" if has_pat else "skip",
+              "group": "credentials",
+              "control": "Workflow-file sync capability",
+              "evidence": (
+                  "`workflow_sync_pat` present; managed kicker workflows are in scope"
+                  if has_pat else
+                  "`workflow_sync_pat` absent; managed kicker workflows were skipped"
+              ),
+              "remediation": (
+                  "—" if has_pat else
+                  "Add a `WORKFLOW_SYNC_PAT` secret with `Workflows: write`. "
+                  "GITHUB_TOKEN can never write to `.github/workflows/**`."
+              ),
+          })
 
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("## Sync managed files\n\n")
-              summary.write(f"- Mode: `{mode}`\n")
-              summary.write(f"- Services: `{services_text}`\n")
-              summary.write(f"- Changed: `{changed}`\n")
-              if commit_sha:
-                  summary.write(f"- Commit: `{commit_sha}`\n")
-              if changed == "true":
-                  summary.write("\n### Files\n")
-                  for file in changed_files.splitlines():
-                      if file.strip():
-                          summary.write(f"- `{file}`\n")
+          for path in changed_files[:50]:
+              findings.append({
+                  "id": "MS030", "severity": "pass", "group": "files",
+                  "control": "Managed file",
+                  "evidence": f"`{path}`",
+                  "remediation": "Pending" if mode == "check" else "Applied",
+              })
+
+          config = json.loads(os.environ.get("CONFIG") or "{}")
+          organization = config.get("organization") or {}
+          workflow_config = (organization.get("workflows") or {}).get("sync") or {}
+          context_rows = [
+              {"label": "Sync engine", "value": "Blackout Secure Managed File Sync",
+               "meaning": "Upstream package responsible for reconciliation and its native job summary."},
+              {"label": "Sync engine ref", "value": "f6802f4443566d8443809f6f0e21576f345e8fdf",
+               "meaning": "Pinned action ref; source: https://github.com/blackoutsecure/bos-managed-file-sync-action."},
+              {"label": "Mode", "value": mode,
+               "meaning": "`commit` writes and pushes; `check` is a read-only drift gate."},
+              {"label": "Changed files", "value": len(changed_files),
+               "meaning": "Managed files the engine created, updated, or removed."},
+          ]
+          if workflow_config.get("runs_on") is not None:
+              context_rows.append({
+                  "label": "Runner", "value": json.loads(os.environ["RUNS_ON"]),
+                  "meaning": "Explicitly configured by `organization.workflows.sync.runs_on`.",
+              })
+          if commit_sha:
+              context_rows.append({
+                  "label": "Commit", "value": commit_sha,
+                  "meaning": "Commit created by this run, when drift was applied.",
+              })
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              reporting = json.loads(os.environ.get("REPORTING") or "{}")
+              handle.write(f"fail_on={reporting.get('fail_on', 'fail')}\n")
+              handle.write(
+                  "enable_summary="
+                  f"{str(reporting.get('enable_job_summary', True)).lower()}\n"
+              )
+              handle.write(
+                  "enable_annotations="
+                  f"{str(reporting.get('enable_annotations', True)).lower()}\n"
+              )
+              handle.write(
+                  f"title_prefix={reporting.get('title_prefix', 'Blackout Secure')}\n"
+              )
+              handle.write(
+                  "enable_html="
+                  f"{str(reporting.get('enable_html', True)).lower()}\n"
+              )
+              handle.write(
+                  "enable_pdf="
+                  f"{str(reporting.get('enable_pdf', False)).lower()}\n"
+              )
+              handle.write(f"html_path={reporting.get('html_path', 'blackout-secure-report.html')}\n")
+              handle.write(f"pdf_path={reporting.get('pdf_path', 'blackout-secure-report.pdf')}\n")
+              handle.write(f"artifact_name={reporting.get('artifact_name', 'blackout-secure-audit-report')}\n")
+              for name, value in (
+                  ("findings", json.dumps(findings, separators=(",", ":"))),
+                  ("context_rows", json.dumps(context_rows, separators=(",", ":"))),
+              ):
+                  handle.write(f"{name}<<__BOS_EOF__\n{value}\n__BOS_EOF__\n")
           PY
+
+      - name: Publish managed file sync report
+        if: ${{ always() }}
+        uses: ./hub-source/.github/actions/shared/job-report
+        with:
+          title: ${{ steps.findings.outputs.title_prefix }} Managed File Sync Report
+          subject: >-
+            **Repository:** `${{ github.repository }}`  ·
+            **Ref:** `${{ github.ref_name }}`  ·
+            **Mode:** `${{ inputs.mode || 'commit' }}`
+          findings: ${{ steps.findings.outputs.findings }}
+          context_rows: ${{ steps.findings.outputs.context_rows }}
+          groups: >-
+            {"sync":{"title":"Reconciliation","blurb":"Engine result and drift disposition"},
+             "credentials":{"title":"Credentials","blurb":"Token reach and resulting scope limits"},
+             "files":{"title":"Managed files","blurb":"Per-file outcome for this run"}}
+          fail_on: ${{ steps.findings.outputs.fail_on }}
+          enable_summary: ${{ steps.findings.outputs.enable_summary }}
+          enable_annotations: ${{ steps.findings.outputs.enable_annotations }}
+          enable_html: ${{ steps.findings.outputs.enable_html }}
+          enable_pdf: ${{ steps.findings.outputs.enable_pdf }}
+          html_path: ${{ steps.findings.outputs.html_path }}
+          pdf_path: ${{ steps.findings.outputs.pdf_path }}
+          footer: >-
+            This report was generated by the Blackout Secure managed file sync
+            workflow (`bos-universal-sync.yml`).
+      - name: Upload managed file sync audit report
+        if: ${{ always() && steps.findings.outputs.enable_html == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.findings.outputs.artifact_name || 'blackout-secure-audit-report' }}
+          path: |
+            ${{ steps.findings.outputs.html_path || 'blackout-secure-report.html' }}
+            ${{ steps.findings.outputs.pdf_path }}
+          if-no-files-found: warn
+          retention-days: 14
