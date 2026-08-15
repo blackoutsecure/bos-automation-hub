@@ -46,6 +46,22 @@ The launchpad can compose:
 - security scanning;
 - repository metadata updates.
 
+Launchpad intentionally has one managed event kicker rather than separate
+release, deployment, and metadata kickers. The reusable
+[`bos-universal-launchpad.yml`](.github/workflows/bos-universal-launchpad.yml)
+already splits those concerns into independent backend jobs with their own
+`needs`, permissions, outputs, and skip gates. Keeping one event front door
+means the repository config is parsed once, `force_run` has one meaning, and
+secrets are routed through one trusted boundary. The managed kicker therefore
+contains only event routing, config-to-workflow input forwarding, and the
+static backend call; stage implementation belongs in the hub backend.
+
+Do not add a second Launchpad kicker for a single stage unless that stage needs
+a different trigger or permission boundary. Security, managed-file sync,
+action-test, and Marketplace remain separate kickers because their triggers
+and trust models are materially different from Launchpad's release/deploy
+orchestration.
+
 Consumer behavior is data-driven through `.github/bos-universal-config.json`; managed
 workflow files are not edited in consumer repositories.
 

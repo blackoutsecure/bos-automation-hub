@@ -360,6 +360,8 @@ def main() -> None:
     assert "security_scan.use_advanced_pat" in readme
     assert "bos-launchpad-release.yml" not in readme_header_action
     assert "bos-universal-launchpad-kicker.yml" in readme_header_action
+    assert "Launchpad intentionally has one managed event kicker" in readme
+    assert "stage implementation belongs in the hub backend" in readme
     assert "# Blackout Secure README Header Audit" in readme_header_action
     assert "outcome=${outcome}" in readme_header_action
     assert "RH001" in readme_header_action and "RH030" in readme_header_action
@@ -694,14 +696,14 @@ def main() -> None:
     )
     assert "use_global_config: 'true'" in gate_workflow
     assert "config: .github/bos-universal-config.json" in gate_workflow
-    assert "bos-code-scanning-kit@8f8145afd7d1faf0a28792f6105103d9666c978c" in gate_workflow
+    assert "bos-code-scanning-kit@ddf31a70cbc1f4e8d3d3e24d6dd358574a48c8bf" in gate_workflow
     standalone_scan_workflow = (
         ROOT / ".github/workflows/security-scan.yml"
     ).read_text()
     assert "sparse-checkout: config/code-scanning-kit-global-config.json" in standalone_scan_workflow
     assert "use_global_config: 'true'" in standalone_scan_workflow
     assert "config: .github/bos-universal-config.json" in standalone_scan_workflow
-    assert "bos-code-scanning-kit@8f8145afd7d1faf0a28792f6105103d9666c978c" in standalone_scan_workflow
+    assert "bos-code-scanning-kit@ddf31a70cbc1f4e8d3d3e24d6dd358574a48c8bf" in standalone_scan_workflow
     global_sync_config = json.loads(
         (ROOT / "sync-files/config/managed-file-sync-global-config.json").read_text()
     )
@@ -756,7 +758,7 @@ def main() -> None:
     assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
     assert "use_global_config: 'auto'" in sync_backend
-    assert "bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a" in sync_backend
+    assert "bos-managed-file-sync-action@f6802f4443566d8443809f6f0e21576f345e8fdf" in sync_backend
     assert "uses: ./hub-source/.github/actions/shared/commit-and-push" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend

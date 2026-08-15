@@ -26,7 +26,9 @@ review surface for hub-specific release content.
 
 - [`bos-universal-launchpad-kicker.yml`](workflows/bos-universal-launchpad-kicker.yml)
   is the managed release/deploy caller. It reads `.github/bos-universal-config.json`
-  and calls the promoted hub runtime on `@main`.
+  and calls the promoted hub runtime on `@main`. Launchpad stays one front door;
+  its backend workflow owns separate monitor, release, Cloudflare, security,
+  and metadata jobs so config and permissions are resolved once.
 - [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
   is the managed PR and merge-queue caller for shared lint, dependency review,
   code scanning, and repository policy. Pin `security (dev) / Security summary`

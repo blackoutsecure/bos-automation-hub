@@ -147,7 +147,7 @@ jobs:
 
       - name: Sync configured services
         id: sync
-        uses: blackoutsecure/bos-managed-file-sync-action@c8b42d7258a919aa72b82e8ef63829af9fa3ad6a # dev
+        uses: blackoutsecure/bos-managed-file-sync-action@f6802f4443566d8443809f6f0e21576f345e8fdf # dev
         with:
           # The action auto-discovers .github/bos-universal-config.json.
           use_global_config: 'auto'
@@ -290,7 +290,7 @@ jobs:
           context_rows = [
               {"label": "Sync engine", "value": "Blackout Secure Managed File Sync",
                "meaning": "Upstream package responsible for reconciliation and its native job summary."},
-              {"label": "Sync engine ref", "value": "c8b42d7258a919aa72b82e8ef63829af9fa3ad6a",
+              {"label": "Sync engine ref", "value": "f6802f4443566d8443809f6f0e21576f345e8fdf",
                "meaning": "Pinned action ref; source: https://github.com/blackoutsecure/bos-managed-file-sync-action."},
               {"label": "Mode", "value": mode,
                "meaning": "`commit` writes and pushes; `check` is a read-only drift gate."},
