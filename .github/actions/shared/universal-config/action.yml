@@ -209,6 +209,11 @@ runs:
         # dev source branch -> prerelease, main -> latest, anything else ->
         # none. Explicit none/prerelease/latest always wins over branch.
         global_marketplace_raw = as_dict(global_cfg.get("marketplace"))
+        global_repo_metadata = as_dict(global_marketplace_raw.get("repo_metadata"))
+        repo_metadata = dict(global_repo_metadata)
+        repo_metadata.update(as_dict(marketplace_raw.get("repo_metadata")))
+        if repo_metadata:
+            marketplace["repo_metadata"] = repo_metadata
         release_label = str(
             marketplace_raw.get("release_label")
             or global_marketplace_raw.get("release_label")

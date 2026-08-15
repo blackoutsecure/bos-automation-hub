@@ -31,6 +31,16 @@ name: Repository Metadata Sync
         required: false
         type: number
         default: 350
+      description_mode:
+        description: '`auto` uses AI then README; `fallback` skips AI; `existing` leaves the description unchanged.'
+        required: false
+        type: string
+        default: auto
+      description_fallback:
+        description: 'Deterministic description used by fallback mode.'
+        required: false
+        type: string
+        default: ''
       homepage:
         description: 'Explicit homepage URL. Empty preserves it; `__unset__` clears it.'
         required: false
@@ -80,7 +90,7 @@ name: Repository Metadata Sync
         description: 'GitHub Models model identifier.'
         required: false
         type: string
-        default: 'openai/gpt-4o-mini'
+        default: auto
       show_releases:
         description: 'Request the Releases repository-home widget.'
         required: false
@@ -235,6 +245,8 @@ jobs:
           readme_path: ${{ inputs.readme_path }}
           description: ${{ inputs.description }}
           description_max_length: ${{ inputs.description_max_length }}
+          description_mode: ${{ inputs.description_mode }}
+          description_fallback: ${{ inputs.description_fallback }}
           homepage: ${{ inputs.homepage }}
           topics: ${{ inputs.topics }}
           generate_topics: ${{ inputs.generate_topics }}
