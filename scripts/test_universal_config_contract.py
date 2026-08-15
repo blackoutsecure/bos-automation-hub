@@ -401,7 +401,8 @@ def main() -> None:
     assert marketplace_kicker.count("marketplace-repo-guard.yml@main") == 1
     assert marketplace_kicker.count("release-promote.yml@main") == 1
     assert marketplace_kicker.count("repo-metadata-sync.yml@main") == 1
-    assert "options: [validate, name-check, release, metadata]" in marketplace_kicker
+    assert "options: [validate, name-check, promote, release, metadata]" in marketplace_kicker
+    assert "publish_release:" in marketplace_kicker
     assert "default: release" in marketplace_kicker
     assert "needs.release.outputs.tag_name" in marketplace_kicker
     assert "needs.release.result == 'success'" in marketplace_kicker

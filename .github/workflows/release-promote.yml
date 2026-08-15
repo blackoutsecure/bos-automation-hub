@@ -146,6 +146,14 @@ name: Marketplace Promotion Release
         required: false
         type: boolean
         default: false
+      publish_release:
+        description: >-
+          When `true` (default), publish a GitHub Release after promotion.
+          Set `false` for a promote-only operation that updates the target
+          branch and tag without creating release notes or a GitHub Release.
+        required: false
+        type: boolean
+        default: true
       update_major_tag:
         description: >-
           When `true` (default), force-push the floating major tag
@@ -509,7 +517,10 @@ jobs:
   release:
     name: GitHub Release
     needs: promote
-    if: ${{ needs.promote.outputs.promoted == 'true' && !inputs.dry_run }}
+    if: >-
+      ${{ needs.promote.outputs.promoted == 'true'
+      && !inputs.dry_run
+      && inputs.publish_release == true }}
     permissions:
       # `contents: write` to publish the GitHub Release tag/body via the
       # nested `github-release.yml`. `models: read` cascades into the
