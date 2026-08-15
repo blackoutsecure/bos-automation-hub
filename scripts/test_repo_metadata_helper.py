@@ -11,7 +11,6 @@ import unittest
 from pathlib import Path
 from types import ModuleType
 
-
 ROOT = Path(__file__).resolve().parent.parent
 ACTION_ROOT = ROOT / ".github/actions/repo-metadata"
 

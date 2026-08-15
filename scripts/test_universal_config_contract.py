@@ -13,7 +13,6 @@ import textwrap
 from pathlib import Path
 from urllib.parse import unquote
 
-
 ROOT = Path(__file__).resolve().parent.parent
 
 
