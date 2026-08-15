@@ -417,7 +417,7 @@ def main() -> None:
         kicker_body = kicker_path.read_text()
         assert "parse-config" not in kicker_body
         assert "target-ref" not in kicker_body
-        assert "actions/shared/resolve-hub-ref@main" in kicker_body
+        assert "uses: ./hub-runtime/.github/actions/shared/resolve-hub-ref" in kicker_body
 
     resolver = (ROOT / ".github/actions/shared/resolve-hub-ref/action.yml").read_text()
     assert "name: Resolve hub ref" in resolver
