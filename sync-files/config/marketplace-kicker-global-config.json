@@ -1,6 +1,8 @@
 {
   "marketplace": {
     "release_label": "auto",
+    "require_source_release": true,
+    "source_release_max_age_hours": 168,
     "repo_metadata": {
       "ai_model": "auto",
       "description_mode": "auto",
