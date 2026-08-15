@@ -110,7 +110,7 @@ name: GitHub Release Publisher
           Only consulted when `ai_changelog == 'true'`.
         required: false
         type: string
-        default: 'openai/gpt-4o-mini'
+        default: auto
     outputs:
       release_id:
         description: 'GitHub Release ID.'
