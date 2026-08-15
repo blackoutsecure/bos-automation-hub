@@ -6,10 +6,12 @@ Managed-file synchronization is provided by
 Consumer repositories select its services in the `managed_file_sync` section
 of `.github/bos-universal-config.json`. The global policy enables
 organization-wide `shellcheck`, Security kicker, and Sync kicker defaults;
-repository-specific kickers remain available as global service definitions
-and must be selected by repositories that need them. The global policy also
-sets `take_over_managed_files: true` so organization-owned blocks can replace
-competing managed blocks.
+repository-specific kickers (`bos_universal_launchpad_kicker`,
+`bos_universal_marketplace_kicker`, `bos_universal_upstream_kicker`,
+`bos_universal_action_test_kicker`) remain available as global service
+definitions and must be selected by repositories that need them. The global
+policy also sets `take_over_managed_files: true` so organization-owned blocks
+can replace competing managed blocks.
 This repository's own sync wrappers use `.github/bos-universal-config.json` as
 the repo layer and check out the shared global policy at
 `sync-files/config/managed-file-sync-global-config.json`.
@@ -23,9 +25,12 @@ table in the hub README for the full key mapping; this file doesn't repeat it.
 
 ## Active templates
 
-Canonical workflow and dotfile templates live under [`workflows/`](workflows/)
-and [`dotfiles/`](dotfiles/). These files remain the normal authoring and
-review surface for hub-specific release content.
+Canonical workflow templates live under [`workflows/`](workflows/). These
+files remain the normal authoring and review surface for hub-specific release
+content. Generic dotfile services (`shellcheck`, `yamllint`, `markdownlint`,
+`editorconfig`, `common`, `lf_line_endings`, `prettier`) are defined inline
+(`content_lines`) in `bos-managed-file-sync-action`'s own bundled marketplace
+config — there is no hub-local dotfile source directory to maintain.
 
 - [`bos-universal-launchpad-kicker.yml`](workflows/bos-universal-launchpad-kicker.yml)
   is the managed release/deploy caller. It reads `.github/bos-universal-config.json`
@@ -68,9 +73,10 @@ them directly. A repository opts into the callers it needs, for example:
 Enable the published managed-file sync action alongside whichever other
 managed callers the repository needs. GitHub still requires one event-trigger
 workflow per repository; `.github/bos-universal-config.json` controls sync behavior
-through `managed_file_sync`. The `editorconfig` service is provided by the
-published action's default catalog; hub-specific templates remain under the
-local `dotfiles/` source directory.
+through `managed_file_sync`. The `editorconfig` service, like the other
+generic dotfile services, is provided by the published action's default
+catalog — the hub only defines its own workflow and community-health/
+github-meta/org-profile content here.
 
 ## Ownership modes
 
@@ -108,10 +114,17 @@ being copied into normal product repositories. Product repositories use the
 default `target_repo_role: consumer` and inherit community-health files and
 templates from GitHub's organization repository.
 
-The organization-default targets are the repository root files
+The organization-default service is selected only by the dedicated
+`blackoutsecure/.github` repository's `.github/bos-universal-config.json`.
+Its targets are the repository root files
 `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `SUPPORT.md`;
-`.github/FUNDING.yml`; `.github/PULL_REQUEST_TEMPLATE.md`;
+`FUNDING.yml`; `.github/PULL_REQUEST_TEMPLATE.md`;
 `.github/ISSUE_TEMPLATE/*`; and `profile/README.md`.
+These files are not copied into product repositories because GitHub already
+uses the organization repository's community-health and template files as
+defaults there. Product repositories should retain only repository-specific
+metadata such as `CODEOWNERS`, dependabot policy, workflows, and universal
+configuration.
 
 ## Branch policy
 
