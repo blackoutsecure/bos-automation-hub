@@ -102,7 +102,7 @@
 # block in the caller's own `.github/bos-universal-config.json`, which the
 # kit discovers automatically as its repository-tier config.
 
-name: Blackout Secure universal security (reusable)
+name: Blackout Secure Universal Security
 
 on:
   workflow_call:
@@ -531,6 +531,11 @@ jobs:
           enable_posture: 'true'
           enable_scanners: 'true'
           enable_upload: 'true'
+          # Distinct from `security-scan.yml`'s own kit call (category
+          # `bos-code-scanning-kit-launchpad`) so a push that fires both this
+          # PR/push gate AND Launchpad's release-time scan for the same commit
+          # doesn't race two uploads onto the same Code Scanning category.
+          category: bos-code-scanning-kit-gate
           use_global_config: 'true'
           global_config_path: hub-config/config/code-scanning-kit-global-config.json
           config: .github/bos-universal-config.json

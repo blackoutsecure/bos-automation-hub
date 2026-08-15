@@ -1,4 +1,4 @@
-name: Monitor Upstream Release (reusable)
+name: Blackout Secure Upstream Watcher
 
 "on":
   workflow_call:
@@ -14,7 +14,7 @@ name: Monitor Upstream Release (reusable)
           run; rewritten each time the upstream version changes.
         required: false
         type: string
-        default: .github/upstream/tracked-release.json
+        default: .github/tracked-release.json
       target_workflows:
         description: >-
           Newline-separated list of workflow file names (e.g. `release.yml`)

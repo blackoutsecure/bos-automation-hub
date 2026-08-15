@@ -58,7 +58,7 @@
 # this workflow the same way as every other hub-managed kicker, through
 # `action_test` in `.github/bos-universal-config.json`, not `with:`.
 
-name: Blackout Secure universal action test (reusable)
+name: Blackout Secure Universal Action Test
 
 on:
   workflow_call:

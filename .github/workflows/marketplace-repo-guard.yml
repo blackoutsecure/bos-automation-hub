@@ -1,4 +1,4 @@
-# Marketplace repo compliance guard (reusable).
+# Marketplace repo compliance guard.
 #
 # Fails fast on PRs / pushes that would put `.github/workflows/*.yml`
 # (or other operator-listed paths) onto the default branch, breaking
@@ -37,7 +37,7 @@
 # guard primitive lives in the published
 # [bos-marketplace-kit](https://github.com/marketplace/actions/blackout-secure-marketplace-kit)
 # Action — this workflow is the consumer-facing reusable shell.
-name: Marketplace repo guard (reusable)
+name: Marketplace Repo Guard
 
 "on":
   workflow_call:

@@ -33,7 +33,7 @@
 #   * Existing tags cannot be overwritten.
 #   * `source_branch` and `target_branch` must differ.
 #   * Tag must match SemVer (`vX.Y.Z[-suffix]`).
-name: Marketplace promotion release (reusable)
+name: Marketplace Promotion Release
 
 "on":
   workflow_call:

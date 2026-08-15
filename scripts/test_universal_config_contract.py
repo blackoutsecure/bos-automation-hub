@@ -341,7 +341,7 @@ def main() -> None:
     assert "      config_authoritative: true\n" in security_job
     assert "  workflow_dispatch:" in gate_workflow
     assert (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
-    assert "name: Blackout Secure universal security (reusable)" in gate_workflow
+    assert "name: Blackout Secure Universal Security" in gate_workflow
     assert "name: security" in security_kicker
     assert "name: Security summary" in gate_workflow
     assert "kit_version:" not in gate_workflow
@@ -479,10 +479,10 @@ def main() -> None:
         ROOT / ".github/workflows/release-promote.yml"
     ).read_text()
     assert artifact_release.startswith(
-        "# Tag-driven release **pipeline** (reusable meta-workflow)."
+        "# Tag-driven release **pipeline**."
     )
-    assert "name: Artifact release (reusable)" in artifact_release
-    assert "name: Marketplace promotion release (reusable)" in marketplace_promote
+    assert "name: Artifact Release" in artifact_release
+    assert "name: Marketplace Promotion Release" in marketplace_promote
     assert "release.yml@main" in workflow
     assert "release-promote.yml@main" in marketplace_kicker
     assert "release-promote.yml" not in artifact_release
@@ -606,7 +606,7 @@ def main() -> None:
         assert refs and set(refs) == expected_refs, refs
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
-    assert "name: Blackout Secure managed file sync (reusable)" in sync_backend
+    assert "name: Blackout Secure Managed File Sync" in sync_backend
     assert "uses: ./hub-runtime/.github/actions/shared/universal-config" in sync_backend
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "github.event_name == 'merge_group'" in sync_backend
@@ -801,7 +801,7 @@ def main() -> None:
     assert "disabled_services" in sync_backend
     assert "bos_universal_sync_kicker" in sync_backend
     managed_sync_caller = sync_kicker
-    assert "name: Blackout Secure managed file sync (kicker)" in managed_sync_caller
+    assert "name: Blackout Secure Managed File Sync" in managed_sync_caller
     assert "name: Resolve target hub ref" in managed_sync_caller
     assert "sync-dev:" in managed_sync_caller
     assert "sync-main:" in managed_sync_caller

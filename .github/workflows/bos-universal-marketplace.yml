@@ -1,4 +1,4 @@
-# Marketplace Action CI (reusable).
+# Marketplace Action CI.
 #
 # Standard PR-time CI loop for a GitHub Marketplace Action repo:
 # wraps the [`bos-marketplace-kit`](https://github.com/marketplace/actions/blackout-secure-marketplace-kit)
@@ -35,7 +35,7 @@
 # this workflow for pull requests, development-branch pushes, and optional
 # one-shot manual checks. Generic lint and security run independently through
 # `bos-universal-security-kicker.yml`.
-name: Blackout Secure universal Marketplace (reusable)
+name: Blackout Secure Universal Marketplace
 
 "on":
   workflow_call:

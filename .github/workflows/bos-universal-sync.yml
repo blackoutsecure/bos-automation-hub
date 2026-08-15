@@ -2,7 +2,7 @@
 # The sync engine and service catalog live in bos-managed-file-sync-action.
 # Named "managed file sync", not "universal", since it only ever does one
 # thing; filename stays bos-universal-sync.yml to keep uses: refs stable.
-name: Blackout Secure managed file sync (reusable)
+name: Blackout Secure Managed File Sync
 
 "on":
   workflow_call:
@@ -152,7 +152,7 @@ jobs:
           # The action auto-discovers .github/bos-universal-config.json.
           use_global_config: 'auto'
           global_config_path: hub-source/sync-files/config/managed-file-sync-global-config.json
-          managed_files_path: hub-source/sync-files/workflows
+          managed_files_path: hub-source/sync-files
           config_json: >-
             ${{
               steps.workflow-pat.outputs.has_pat != 'true'

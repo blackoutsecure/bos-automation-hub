@@ -1,4 +1,4 @@
-name: Cloudflare Pages Deploy (reusable)
+name: Cloudflare Pages Deploy
 
 "on":
   workflow_call:

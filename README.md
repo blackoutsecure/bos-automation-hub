@@ -88,7 +88,7 @@ re-pin branch protection whenever a gate moved between groups:
 
 The hub itself runs
 [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)
-directly. Use **Actions → Blackout Secure universal security (reusable) → Run
+directly. Use **Actions → Blackout Secure Universal Security → Run
 workflow** on `dev` for a manual scan; it loads the current `security` section
 from `.github/bos-universal-config.json`, just like the sync backend. The managed
 [`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml)
@@ -171,7 +171,7 @@ different trust and permission boundaries:
 | --- | --- | --- |
 | `bos-universal-security.yml` (universal security) | Pull request / merge queue; read-mostly | Lint, tests, dependency review, code scanning, and policy checks before merge. |
 | `bos-universal-marketplace-kicker.yml` | Marketplace PR, trusted-target PR, or manual release/metadata operation | Validate Actions, guard the workflow-free stable branch, promote releases, and refresh the repository About box. |
-| `bos-universal-launchpad.yml` | Push, schedule, or manual caller; publish permissions | Monitor upstreams, run the release-blocking security scan, and coordinate delivery. |
+| `bos-universal-launchpad.yml` | Push, schedule, or manual caller; publish permissions | Sync managed files ahead of the run, monitor upstreams, run the release-blocking security scan (or, via `operation: security_only`, just that scan), and coordinate delivery. |
 | `bos-universal-sync-kicker.yml` | Config push, schedule, or manual dispatch; repository contents write | Resolve the target hub branch and invoke the reusable sync workflow. |
 | `bos-universal-upstream-kicker.yml` | Schedule, watcher-config push, or manual dispatch; repository contents/actions write | Resolve the target hub branch and invoke the config-driven upstream monitor. |
 | `release.yml` (artifact release) | Called by Universal or another trusted workflow | Publish Docker, Balena, and GitHub Release artifacts for an already-approved version. |
@@ -237,7 +237,27 @@ checks when an additional human approval gate is needed.
 The Universal Launchpad retains a release-blocking scan. Scheduled and manual
 releases need a fresh assessment even when no PR triggered the universal
 security kicker. This is defense in depth at a different trust boundary, not a
-second consumer security workflow.
+second consumer security workflow. The kicker's `operation: security_only`
+dispatch input runs just that scan (every publish/deploy stage forced off)
+without removing or duplicating the PR-time security kicker — the two run at
+different trust boundaries (pre-merge, read-mostly vs. release-time, publish
+permissions) and neither can substitute for the other. Repositories that
+enable both the security kicker's own `schedule` trigger and Launchpad's
+default-on `security_scan.enable` should expect the same scan to run on both
+cadences; disable one of the two schedules in `.github/bos-universal-config.json`
+if that duplication isn't wanted.
+
+The Launchpad kicker's leading `sync-check` job (managed-file sync in `commit`
+mode) does not replace the standalone `bos-universal-sync-kicker.yml`: the
+sync kicker is the only sync trigger for repositories without Launchpad, and
+its push trigger has no branch restriction, while Launchpad's push trigger is
+`main`-only. `sync-check` is skipped on `schedule` runs for this reason — the
+sync kicker's own weekly cron and config-push trigger already own periodic
+reconciliation, so Launchpad's 6h cron doesn't need to repeat it. On `push`/
+`workflow_dispatch`, `sync-check` still runs, and only guarantees a given
+Launchpad run isn't executed against a stale kicker file or config — if it
+commits a change to either, this run defers to the fresh one the commit's
+push retriggers.
 
 The Marketplace kicker combines three event-scoped jobs in one managed file.
 Its `pull_request_target` guard reads trusted default-branch configuration and

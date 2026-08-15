@@ -74,7 +74,7 @@
 #     monitor ran on. It is **not** reachable in static-site mode (no tag
 #     to resolve) — for tag-driven container releases without upstream
 #     polling, call `release.yml` directly instead.
-name: Blackout Secure Launchpad (reusable meta-workflow)
+name: Blackout Secure Launchpad
 
 "on":
   workflow_call:
@@ -89,7 +89,7 @@ name: Blackout Secure Launchpad (reusable meta-workflow)
         description: 'Repo-relative path to the tracking JSON file.'
         required: false
         type: string
-        default: .github/upstream/tracked-release.json
+        default: .github/tracked-release.json
       force_run:
         description: >-
           When `true`, run the pipeline even if the upstream version is

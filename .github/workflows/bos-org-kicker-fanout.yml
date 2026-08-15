@@ -4,7 +4,7 @@
 # organization that already has that kicker installed. Requires an
 # Actions: write / Metadata: read credential covering the org, because the
 # job-scoped GITHUB_TOKEN cannot dispatch workflows in other repositories.
-name: Blackout Secure org kicker fan-out
+name: Blackout Secure Org Kicker Fan-Out
 
 run-name: >-
   Org fan-out / ${{ inputs.kicker }}${{ inputs.dry_run && ' (dry run)' || '' }}
@@ -144,6 +144,18 @@ jobs:
 
             if ! gh api "repos/${full_name}/actions/workflows/${WORKFLOW_FILE}" \
                  --silent >/dev/null 2>&1; then
+              skipped=$((skipped + 1))
+              continue
+            fi
+
+            # Per-repo opt-out: a repository variable named `AUTO_HUB_SYNC`
+            # set to `false` skips this repo entirely, regardless of the
+            # dry-run/manual distinction below. Missing variable (404) or any
+            # other value means "participate" (opt-out, not opt-in).
+            opt_out_value=$(gh api "repos/${full_name}/actions/variables/AUTO_HUB_SYNC" \
+              --jq '.value' 2>/dev/null || true)
+            if [ "${opt_out_value}" = "false" ]; then
+              echo "| ${full_name} | skipped (AUTO_HUB_SYNC=false) |" >> "${GITHUB_STEP_SUMMARY}"
               skipped=$((skipped + 1))
               continue
             fi
