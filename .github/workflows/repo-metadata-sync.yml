@@ -56,6 +56,21 @@ name: Repository Metadata Sync
         required: false
         type: number
         default: 20
+      primary_category:
+        description: 'Marketplace primary category slug, auto, or empty to skip.'
+        required: false
+        type: string
+        default: auto
+      secondary_category:
+        description: 'Marketplace secondary category slug, auto, or empty to skip.'
+        required: false
+        type: string
+        default: auto
+      marketplace_slug:
+        description: 'Marketplace listing slug used for category comparison.'
+        required: false
+        type: string
+        default: ''
       ai_enabled:
         description: 'Use GitHub Models for README-derived description and topics.'
         required: false
@@ -119,6 +134,18 @@ name: Repository Metadata Sync
       applied:
         description: '`true` when the composite completed at least one API write.'
         value: ${{ jobs.sync.outputs.applied }}
+      primary_category:
+        description: 'Resolved primary Marketplace category slug.'
+        value: ${{ jobs.sync.outputs.primary_category }}
+      secondary_category:
+        description: 'Resolved secondary Marketplace category slug.'
+        value: ${{ jobs.sync.outputs.secondary_category }}
+      primary_category_confidence:
+        description: 'AI confidence for the primary category.'
+        value: ${{ jobs.sync.outputs.primary_category_confidence }}
+      secondary_category_confidence:
+        description: 'AI confidence for the secondary category.'
+        value: ${{ jobs.sync.outputs.secondary_category_confidence }}
       skipped:
         description: '`true` when no write-capable token was available.'
         value: ${{ jobs.sync.outputs.skipped }}
@@ -146,6 +173,10 @@ jobs:
       topics_source: ${{ steps.metadata.outputs.topics_source }}
       ai_used: ${{ steps.metadata.outputs.ai_used }}
       applied: ${{ steps.metadata.outputs.applied }}
+      primary_category: ${{ steps.metadata.outputs.primary_category }}
+      secondary_category: ${{ steps.metadata.outputs.secondary_category }}
+      primary_category_confidence: ${{ steps.metadata.outputs.primary_category_confidence }}
+      secondary_category_confidence: ${{ steps.metadata.outputs.secondary_category_confidence }}
       skipped: ${{ steps.token.outputs.available != 'true' }}
     steps:
       - name: Resolve metadata token
@@ -198,7 +229,7 @@ jobs:
       - name: Synchronize repository metadata
         if: steps.token.outputs.available == 'true'
         id: metadata
-        uses: blackoutsecure/bos-repo-about-sync-action@6fee8a6882bdd909a43911708be220c0df5fd44d # dev
+        uses: blackoutsecure/bos-repo-about-sync-action@0957f213e77746dcdd24a806554db148292ae64c # dev
         with:
           github_token: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token }}
           readme_path: ${{ inputs.readme_path }}
@@ -209,6 +240,9 @@ jobs:
           generate_topics: ${{ inputs.generate_topics }}
           topics_fallback: ${{ inputs.topics_fallback }}
           max_topics: ${{ inputs.max_topics }}
+          primary_category: ${{ inputs.primary_category }}
+          secondary_category: ${{ inputs.secondary_category }}
+          marketplace_slug: ${{ inputs.marketplace_slug }}
           ai_enabled: ${{ inputs.ai_enabled }}
           ai_model: ${{ inputs.ai_model }}
           show_releases: ${{ inputs.show_releases }}
