@@ -111,6 +111,11 @@ name: Repository Metadata Sync
         required: false
         type: boolean
         default: false
+      report_annotations:
+        description: 'Emit actionable GitHub annotations for report warnings and errors.'
+        required: false
+        type: boolean
+        default: true
     secrets:
       REPO_ADMIN_PAT:
         description: >-
@@ -159,6 +164,15 @@ name: Repository Metadata Sync
       skipped:
         description: '`true` when no write-capable token was available.'
         value: ${{ jobs.sync.outputs.skipped }}
+      changed:
+        description: '`true` when desired metadata differed from the current snapshot.'
+        value: ${{ jobs.sync.outputs.changed }}
+      report:
+        description: 'Detailed Markdown field report.'
+        value: ${{ jobs.sync.outputs.report }}
+      report_json:
+        description: 'Structured JSON field report.'
+        value: ${{ jobs.sync.outputs.report_json }}
 
 permissions:
   contents: read
@@ -187,6 +201,9 @@ jobs:
       secondary_category: ${{ steps.metadata.outputs.secondary_category }}
       primary_category_confidence: ${{ steps.metadata.outputs.primary_category_confidence }}
       secondary_category_confidence: ${{ steps.metadata.outputs.secondary_category_confidence }}
+      changed: ${{ steps.metadata.outputs.changed }}
+      report: ${{ steps.metadata.outputs.report }}
+      report_json: ${{ steps.metadata.outputs.report_json }}
       skipped: ${{ steps.token.outputs.available != 'true' }}
     steps:
       - name: Resolve metadata token
@@ -239,7 +256,7 @@ jobs:
       - name: Synchronize repository metadata
         if: steps.token.outputs.available == 'true'
         id: metadata
-        uses: blackoutsecure/bos-repo-about-sync-action@0957f213e77746dcdd24a806554db148292ae64c # dev
+        uses: blackoutsecure/bos-repo-about-sync-action@f1b08228a6ddcef32a23a09a2fde804eb8fc693f # dev
         with:
           github_token: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token }}
           readme_path: ${{ inputs.readme_path }}
@@ -261,3 +278,4 @@ jobs:
           show_deployments: ${{ inputs.show_deployments }}
           show_packages: ${{ inputs.show_packages }}
           dry_run: ${{ inputs.dry_run }}
+          report_annotations: ${{ inputs.report_annotations }}
