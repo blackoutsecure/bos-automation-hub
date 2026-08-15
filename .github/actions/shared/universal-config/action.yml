@@ -202,6 +202,28 @@ runs:
             marketplace[path_field] = marketplace_paths(
                 marketplace_raw.get(path_field), path_field
             )
+
+        # release_label: repo config > org-wide global config > "auto".
+        # "auto" is resolved by the caller (it needs github.event.repository
+        # .default_branch, which this composite doesn't have access to) —
+        # dev source branch -> prerelease, main -> latest, anything else ->
+        # none. Explicit none/prerelease/latest always wins over branch.
+        global_marketplace_raw = as_dict(global_cfg.get("marketplace"))
+        release_label = str(
+            marketplace_raw.get("release_label")
+            or global_marketplace_raw.get("release_label")
+            or "auto"
+        ).strip().lower()
+        if release_label not in ("auto", "none", "prerelease", "latest"):
+            error(
+                f"::error file={config_path}::marketplace.release_label must be "
+                f"one of auto, none, prerelease, latest (got '{release_label}')."
+            )
+            sys.exit(1)
+        marketplace["release_label"] = release_label
+        if "source_branch" not in marketplace and global_marketplace_raw.get("source_branch"):
+            marketplace["source_branch"] = str(global_marketplace_raw["source_branch"])
+
         cfg["marketplace"] = marketplace
 
         if require_marketplace_enabled and marketplace.get("enabled") is not True:
