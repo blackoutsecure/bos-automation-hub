@@ -33,23 +33,14 @@ jobs:
     outputs:
       target_ref: ${{ steps.target_ref.outputs.ref }}
     steps:
-      # `uses:` refs cannot be dynamic, so resolve which hub branch this
-      # run targets here and pick the matching static-ref job below.
       - name: Resolve target hub ref
         id: target_ref
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          MERGE_GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          case "${EVENT_NAME}" in
-            pull_request|pull_request_target) ref="${BASE_REF}" ;;
-            merge_group) ref="${MERGE_GROUP_BASE_REF#refs/heads/}" ;;
-            *) ref="${REF_NAME}" ;;
-          esac
-          [ "${ref}" = "dev" ] || ref="main"
-          echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-hub-ref@main
+        with:
+          event_name: ${{ github.event_name }}
+          base_ref: ${{ github.base_ref }}
+          merge_group_base_ref: ${{ github.event.merge_group.base_ref }}
+          ref_name: ${{ github.ref_name }}
 
   security-dev:
     name: security (dev)

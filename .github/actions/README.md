@@ -7,6 +7,11 @@ downstream callers that pin to this hub. Layout:
   `blackoutsecure/bos-automation-hub/.github/actions/shared/<name>@<ref>`.
 - `<name>/` — used by one workflow in this repo only.
 
+The shared `resolve-hub-ref` action centralizes the small amount of branch
+routing required by managed kickers. Kicker files should keep only event
+triggers, resolver inputs, static `@dev`/`@main` jobs, and secret inheritance;
+configuration and execution belong in the reusable backend workflow.
+
 ## Published orchestration actions
 
 [`repo-metadata`](repo-metadata/action.yml) is the shared composite that

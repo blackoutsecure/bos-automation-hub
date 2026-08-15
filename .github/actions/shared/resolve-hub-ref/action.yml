@@ -1,0 +1,42 @@
+name: Resolve hub ref
+author: Blackout Secure
+description: Resolve the dev or main hub runtime ref for the current GitHub event.
+inputs:
+  event_name:
+    description: github.event_name from the caller.
+    required: true
+  base_ref:
+    description: github.base_ref from pull request events.
+    required: false
+    default: ''
+  merge_group_base_ref:
+    description: github.event.merge_group.base_ref from merge-group events.
+    required: false
+    default: ''
+  ref_name:
+    description: github.ref_name from the caller.
+    required: true
+outputs:
+  ref:
+    description: Resolved hub runtime ref, either dev or main.
+    value: ${{ steps.resolve.outputs.ref }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve target ref
+      id: resolve
+      shell: bash
+      env:
+        EVENT_NAME: ${{ inputs.event_name }}
+        BASE_REF: ${{ inputs.base_ref }}
+        MERGE_GROUP_BASE_REF: ${{ inputs.merge_group_base_ref }}
+        REF_NAME: ${{ inputs.ref_name }}
+      run: |
+        set -euo pipefail
+        case "${EVENT_NAME}" in
+          pull_request|pull_request_target) ref="${BASE_REF}" ;;
+          merge_group) ref="${MERGE_GROUP_BASE_REF#refs/heads/}" ;;
+          *) ref="${REF_NAME}" ;;
+        esac
+        [[ "${ref}" == "dev" ]] || ref="main"
+        echo "ref=${ref}" >> "${GITHUB_OUTPUT}"
