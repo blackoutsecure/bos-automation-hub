@@ -747,7 +747,7 @@ def main() -> None:
     }
 
     assert (
-        "global_config_path: hub-config/config/code-scanning-kit-global-config.json"
+        "global_config_path: hub-config/sync-files/config/code-scanning-kit-global-config.json"
         in gate_workflow
     )
     assert "use_global_config: 'true'" in gate_workflow
@@ -756,7 +756,7 @@ def main() -> None:
     standalone_scan_workflow = (
         ROOT / ".github/workflows/security-scan.yml"
     ).read_text()
-    assert "sparse-checkout: config/code-scanning-kit-global-config.json" in standalone_scan_workflow
+    assert "sparse-checkout: sync-files/config/code-scanning-kit-global-config.json" in standalone_scan_workflow
     assert "use_global_config: 'true'" in standalone_scan_workflow
     assert "config: .github/bos-universal-config.json" in standalone_scan_workflow
     assert "bos-code-scanning-kit@4bbbd4f643acf5ba2fae4d8b3aba076e9438b06e" in standalone_scan_workflow

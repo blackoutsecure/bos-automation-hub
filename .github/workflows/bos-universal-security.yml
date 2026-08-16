@@ -575,7 +575,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
           sparse-checkout: |
-            config/code-scanning-kit-global-config.json
+            sync-files/config/code-scanning-kit-global-config.json
             .github/actions/shared/ai-remediation-pr
           sparse-checkout-cone-mode: false
       - name: Run bos-code-scanning-kit
@@ -594,7 +594,7 @@ jobs:
           # doesn't race two uploads onto the same Code Scanning category.
           category: bos-code-scanning-kit-gate
           use_global_config: 'true'
-          global_config_path: hub-config/config/code-scanning-kit-global-config.json
+          global_config_path: hub-config/sync-files/config/code-scanning-kit-global-config.json
           config: .github/bos-universal-config.json
       - name: Reconcile code-scanning recommendations
         id: remediation
