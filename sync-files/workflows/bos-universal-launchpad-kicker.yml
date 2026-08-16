@@ -52,6 +52,10 @@ run-name: >-
 permissions:
   contents: read
 
+concurrency:
+  group: bos-launchpad-kicker-${{ github.repository }}-${{ github.ref }}-${{ inputs.operation || 'full' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'release' }}
+
 jobs:
   # Cheap, config-free hub-ref resolution so `sync-check` (which must run
   # BEFORE `parse-config`, since it's a pre-flight) can still pick the

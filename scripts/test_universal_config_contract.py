@@ -447,12 +447,23 @@ def main() -> None:
         assert "parse-config" not in kicker_body
         assert "target-ref" not in kicker_body
         assert "uses: ./hub-runtime/.github/actions/shared/resolve-hub-ref" in kicker_body
+        assert "concurrency:" in kicker_body
+        assert "github.repository" in kicker_body
+        assert "cancel-in-progress:" in kicker_body
 
     action_test_kicker = (
         ROOT / "sync-files/workflows/bos-universal-action-test-kicker.yml"
     ).read_text()
     assert "'.github/workflows/bos-universal-action-test-kicker.yml'" in action_test_kicker
     assert "'**/bos-scan-*.sarif'" in action_test_kicker
+    for kicker_name in (
+        "bos-universal-upstream-kicker.yml",
+        "bos-universal-launchpad-kicker.yml",
+    ):
+        kicker_body = (ROOT / "sync-files/workflows" / kicker_name).read_text()
+        assert "concurrency:" in kicker_body
+        assert "github.repository" in kicker_body
+        assert "cancel-in-progress:" in kicker_body
 
     resolver = (ROOT / ".github/actions/shared/resolve-hub-ref/action.yml").read_text()
     assert "name: Resolve hub ref" in resolver
