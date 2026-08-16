@@ -825,7 +825,7 @@ def main() -> None:
     assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
     assert "use_global_config: 'auto'" in sync_backend
-    assert "bos-managed-file-sync-action@27cdeb1d5306fd8127997fa9efc37fe2442e3841" in sync_backend
+    assert "bos-managed-file-sync-action@7f78a726f0ab5cc9f2f63a9aec1d6786b10a624e" in sync_backend
     assert "uses: ./hub-source/.github/actions/shared/commit-and-push" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend
