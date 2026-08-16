@@ -815,7 +815,7 @@ def main() -> None:
     assert managed_sync_caller.count("secrets: inherit") == 2
     assert "workflow_sync_pat: ${{ secrets.WORKFLOW_SYNC_PAT }}" not in managed_sync_caller
 
-    assert security_kicker.count("secrets: inherit") == 2
+    assert security_kicker.count("secrets: inherit") == 3
     assert "scanning_pat: ${{ secrets.SCANNING_PAT }}" not in security_kicker
 
     launchpad_workflow = (
