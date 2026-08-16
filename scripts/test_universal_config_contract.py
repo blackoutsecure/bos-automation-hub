@@ -410,6 +410,7 @@ def main() -> None:
     assert "source_release_max_age_hours:" in marketplace_kicker
     assert "default: release" in marketplace_kicker
     assert "needs.release.outputs.tag_name" in marketplace_kicker
+    assert "checkout_ref: ${{ needs.release.result == 'success' && needs.release.outputs.tag_name ||" in marketplace_kicker
     assert "needs.release.result == 'success'" in marketplace_kicker
     assert "&& !inputs.dry_run" in marketplace_kicker
     assert "&& !inputs.draft" in marketplace_kicker
