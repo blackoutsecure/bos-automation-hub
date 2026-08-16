@@ -351,6 +351,9 @@ def main() -> None:
     assert "enable_marketplace_ci:" not in gate_workflow
     assert "  schedule:\n    - cron: '43 14 * * *'" in security_kicker
     assert "  push:\n    branches: [main, dev]" in security_kicker
+    assert "paths-ignore:" in security_kicker
+    assert "'**/bos-scan-*.sarif'" in security_kicker
+    assert "'**/bos-scan-*.json'" in security_kicker
     assert "enable_baseline:" not in gate_workflow
     assert "needs.resolve-config.outputs.gate" in gate_workflow
     assert "uses: ./hub-runtime/.github/actions/shared/universal-config" in gate_workflow
@@ -417,6 +420,8 @@ def main() -> None:
     assert "outputs.cfg" in marketplace_kicker
     assert "`.github/bos-universal-config.json`" in marketplace_kicker
     assert "config_path: .github/bos-universal-config.json" in marketplace_kicker
+    assert "'.github/workflows/bos-universal-marketplace-kicker.yml'" in marketplace_kicker
+    assert "'**/blackout-secure-audit-report.*'" in marketplace_kicker
     assert "pull_request_target:" in marketplace_kicker
     assert "github.event.repository.default_branch" in marketplace_kicker
     assert not re.search(r"source_branch:\s+dev\b", marketplace_kicker)
@@ -442,6 +447,12 @@ def main() -> None:
         assert "parse-config" not in kicker_body
         assert "target-ref" not in kicker_body
         assert "uses: ./hub-runtime/.github/actions/shared/resolve-hub-ref" in kicker_body
+
+    action_test_kicker = (
+        ROOT / "sync-files/workflows/bos-universal-action-test-kicker.yml"
+    ).read_text()
+    assert "'.github/workflows/bos-universal-action-test-kicker.yml'" in action_test_kicker
+    assert "'**/bos-scan-*.sarif'" in action_test_kicker
 
     resolver = (ROOT / ".github/actions/shared/resolve-hub-ref/action.yml").read_text()
     assert "name: Resolve hub ref" in resolver
