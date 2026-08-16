@@ -23,6 +23,12 @@ inputs:
     description: JSON array of label, value, and meaning configuration rows.
     required: false
     default: '[]'
+  automation_policy:
+    description: >-
+      JSON object describing recommendation, release, promotion, and
+      auto-merge policy. Defaults to notify-only with auto-merge disabled.
+    required: false
+    default: '{"recommendation_action":"notify","release_action":"notify","promotion_action":"notify","scorecard_action":"notify","allow_auto_merge":false}'
   subject:
     description: Optional report subject.
     required: false
@@ -101,6 +107,7 @@ runs:
         REPORT_FINDINGS: ${{ inputs.findings }}
         REPORT_GROUPS: ${{ inputs.groups }}
         REPORT_CONTEXT_ROWS: ${{ inputs.context_rows }}
+        REPORT_AUTOMATION_POLICY: ${{ inputs.automation_policy }}
         REPORT_SUBJECT: ${{ inputs.subject }}
         REPORT_FAIL_ON: ${{ inputs.fail_on }}
         REPORT_ENABLE_SUMMARY: ${{ inputs.enable_summary }}
@@ -161,6 +168,16 @@ runs:
         findings = load("findings", os.environ.get("REPORT_FINDINGS"), list, [])
         groups = load("groups", os.environ.get("REPORT_GROUPS"), dict, {})
         context = load("context_rows", os.environ.get("REPORT_CONTEXT_ROWS"), list, [])
+        automation_policy = load(
+          "automation_policy", os.environ.get("REPORT_AUTOMATION_POLICY"), dict,
+          {"recommendation_action": "notify", "release_action": "notify", "promotion_action": "notify", "scorecard_action": "notify", "allow_auto_merge": False},
+        )
+        allowed_actions = {"notify", "draft_pr", "pr", "auto_merge"}
+        for key in ("recommendation_action", "release_action", "promotion_action", "scorecard_action"):
+          if automation_policy.get(key, "notify") not in allowed_actions:
+            fail(f"automation_policy.{key} must be one of {sorted(allowed_actions)}.")
+        if automation_policy.get("allow_auto_merge", False) is not True:
+          automation_policy["allow_auto_merge"] = False
         fail_on = (os.environ.get("REPORT_FAIL_ON") or "fail").lower()
         if fail_on not in {"fail", "warn", "never"}:
             fail("fail_on must be fail, warn, or never.")
@@ -235,6 +252,18 @@ runs:
             markdown += ["## Configuration used", "", "| Setting | Value | What it means |", "| ------- | ----- | ------------- |"]
             markdown += [f"| {cell(row.get('label'))} | `{cell(row.get('value'))}` | {cell(row.get('meaning'))} |" for row in context_rows]
             markdown.append("")
+        markdown += [
+            "## Automation policy",
+            "",
+            "| Area | Action | Meaning |",
+            "| ---- | ------ | ------- |",
+            f"| Recommendations | `{cell(automation_policy.get('recommendation_action', 'notify'))}` | AI recommendations remain advisory unless an explicit PR mode is configured. |",
+            f"| Releases | `{cell(automation_policy.get('release_action', 'notify'))}` | Release actions require their configured approval workflow. |",
+            f"| Promotion | `{cell(automation_policy.get('promotion_action', 'notify'))}` | Branch promotion is not automatic from this report. |",
+            f"| Scorecard | `{cell(automation_policy.get('scorecard_action', 'notify'))}` | Scorecard findings are advisory unless a validated remediation PR exists. |",
+            f"| Auto-merge | `{str(automation_policy.get('allow_auto_merge', False)).lower()}` | Auto-merge is disabled unless explicitly enabled by a protected workflow. |",
+            "",
+          ]
         markdown += ["## Recommended Actions", ""] + [f"- {action}" for action in actions] + ["", "## Detailed Findings", ""]
         for key, group_title, blurb in ordered:
             rows = [item for item in normalized if item["group"] == key] if key else [item for item in normalized if item["group"] not in declared]
@@ -255,6 +284,14 @@ runs:
         commit_url = f"{server}/{repo}/commit/{sha}" if sha else ""
         html_rows = "".join(f"<tr><th>{esc(LABELS[key])}</th><td>{counts[key]}</td><td>{esc(MEANINGS[key])}</td></tr>" for key in LABELS if counts[key])
         html_context = "" if not context_rows else "<section><h2>Configuration used</h2><table><thead><tr><th>Setting</th><th>Value</th><th>What it means</th></tr></thead><tbody>" + "".join(f"<tr><th>{esc(row.get('label'))}</th><td><code>{esc(row.get('value'))}</code></td><td>{esc(row.get('meaning'))}</td></tr>" for row in context_rows) + "</tbody></table></section>"
+        html_policy = "<section><h2>Automation policy</h2><table><thead><tr><th>Area</th><th>Action</th><th>Meaning</th></tr></thead><tbody>" + "".join([
+          f"<tr><th>Recommendations</th><td><code>{esc(automation_policy.get('recommendation_action', 'notify'))}</code></td><td>AI recommendations remain advisory unless an explicit PR mode is configured.</td></tr>",
+          f"<tr><th>Releases</th><td><code>{esc(automation_policy.get('release_action', 'notify'))}</code></td><td>Release actions require their configured approval workflow.</td></tr>",
+          f"<tr><th>Promotion</th><td><code>{esc(automation_policy.get('promotion_action', 'notify'))}</code></td><td>Branch promotion is not automatic from this report.</td></tr>",
+          f"<tr><th>Scorecard</th><td><code>{esc(automation_policy.get('scorecard_action', 'notify'))}</code></td><td>Scorecard findings are advisory unless a validated remediation PR exists.</td></tr>",
+          f"<tr><th>Auto-merge</th><td><code>{str(automation_policy.get('allow_auto_merge', False)).lower()}</code></td><td>Auto-merge is disabled unless explicitly enabled by a protected workflow.</td></tr>",
+        ]) + "</tbody></table></section>"
+        html_context += html_policy
         html_findings = []
         for key, group_title, blurb in ordered:
             rows = [item for item in normalized if item["group"] == key] if key else [item for item in normalized if item["group"] not in declared]
