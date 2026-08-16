@@ -755,14 +755,14 @@ def main() -> None:
     )
     assert "use_global_config: 'true'" in gate_workflow
     assert "config: .github/bos-universal-config.json" in gate_workflow
-    assert "bos-code-scanning-kit@a9de86bcad1bbdbe54648811be0f69ef9fe3753a" in gate_workflow
+    assert "bos-code-scanning-kit@5a296bd467c94c2e1b1d545e488ffcccf9a0a152" in gate_workflow
     standalone_scan_workflow = (
         ROOT / ".github/workflows/security-scan.yml"
     ).read_text()
     assert "sparse-checkout: sync-files/config/code-scanning-kit-global-config.json" in standalone_scan_workflow
     assert "use_global_config: 'true'" in standalone_scan_workflow
     assert "config: .github/bos-universal-config.json" in standalone_scan_workflow
-    assert "bos-code-scanning-kit@a9de86bcad1bbdbe54648811be0f69ef9fe3753a" in standalone_scan_workflow
+    assert "bos-code-scanning-kit@5a296bd467c94c2e1b1d545e488ffcccf9a0a152" in standalone_scan_workflow
     global_sync_config = json.loads(
         (ROOT / "sync-files/config/managed-file-sync-global-config.json").read_text()
     )
