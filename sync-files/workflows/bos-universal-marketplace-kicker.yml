@@ -1,7 +1,7 @@
 # Blackout Secure universal Marketplace kicker (hub-managed).
 # Customize via `.github/bos-universal-config.json`, not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
-name: Blackout Secure Universal Marketplace
+name: '[KICKER] Blackout Secure Universal Marketplace'
 run-name: >-
   Blackout Secure / marketplace / ${{
     github.event_name == 'pull_request_target'

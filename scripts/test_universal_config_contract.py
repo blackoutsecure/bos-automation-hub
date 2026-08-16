@@ -340,8 +340,8 @@ def main() -> None:
     )[1]
     assert "      config_authoritative: true\n" in security_job
     assert "  workflow_dispatch:" in gate_workflow
-    assert (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
-    assert "name: Blackout Secure Universal Security" in gate_workflow
+    assert not (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
+    assert "name: '[RUNTIME] Blackout Secure Universal Security'" in gate_workflow
     assert "name: security" in security_kicker
     assert "name: Security summary" in gate_workflow
     assert "kit_version:" not in gate_workflow
@@ -472,7 +472,7 @@ def main() -> None:
     sync_kicker = (
         ROOT / "sync-files/workflows/bos-universal-sync-kicker.yml"
     ).read_text()
-    assert (ROOT / ".github/workflows/bos-universal-sync-kicker.yml").exists()
+    assert not (ROOT / ".github/workflows/bos-universal-sync-kicker.yml").exists()
     assert "parse_config:" in sync_kicker
     assert "resolve-target:" not in sync_kicker
     assert "bos-universal-sync.yml@dev" in sync_kicker
@@ -555,8 +555,6 @@ def main() -> None:
         "release-hub.yml",
         "bos-org-kicker-fanout.yml",
         "bos-hub-managed-sync-propagate.yml",
-        "bos-universal-security-kicker.yml",
-        "bos-universal-sync-kicker.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -632,7 +630,7 @@ def main() -> None:
         assert refs and set(refs) == expected_refs, refs
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
-    assert "name: Blackout Secure Managed File Sync" in sync_backend
+    assert "name: '[RUNTIME] Blackout Secure Managed File Sync'" in sync_backend
     assert "uses: ./hub-runtime/.github/actions/shared/universal-config" in sync_backend
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "github.event_name == 'merge_group'" in sync_backend
@@ -845,7 +843,7 @@ def main() -> None:
     assert "disabled_services" in sync_backend
     assert "bos_universal_sync_kicker" in sync_backend
     managed_sync_caller = sync_kicker
-    assert "name: Blackout Secure Managed File Sync" in managed_sync_caller
+    assert "name: '[KICKER] Blackout Secure Managed File Sync'" in managed_sync_caller
     assert "name: Resolve target hub ref" in managed_sync_caller
     assert "sync-dev:" in managed_sync_caller
     assert "sync-main:" in managed_sync_caller

@@ -35,7 +35,7 @@
 # this workflow for pull requests, development-branch pushes, and optional
 # one-shot manual checks. Generic lint and security run independently through
 # `bos-universal-security-kicker.yml`.
-name: Blackout Secure Universal Marketplace
+name: '[RUNTIME] Blackout Secure Universal Marketplace'
 
 "on":
   workflow_call:

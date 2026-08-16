@@ -102,7 +102,7 @@
 # block in the caller's own `.github/bos-universal-config.json`, which the
 # kit discovers automatically as its repository-tier config.
 
-name: Blackout Secure Universal Security
+name: '[RUNTIME] Blackout Secure Universal Security'
 
 on:
   workflow_call:

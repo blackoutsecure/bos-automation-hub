@@ -6,7 +6,7 @@
 # Required secrets:
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
 #   UPSTREAM_TOKEN (optional — only for private upstream repos)
-name: Blackout Secure Launchpad
+name: '[KICKER] Blackout Secure Launchpad'
 run-name: >-
   Blackout Secure Launchpad / ${{ github.event_name == 'workflow_dispatch' && inputs.operation || 'full' }} / ${{
     github.event_name == 'workflow_dispatch'

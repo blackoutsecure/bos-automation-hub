@@ -2,7 +2,7 @@
 # The sync engine and service catalog live in bos-managed-file-sync-action.
 # Named "managed file sync", not "universal", since it only ever does one
 # thing; filename stays bos-universal-sync.yml to keep uses: refs stable.
-name: Blackout Secure Managed File Sync
+name: '[RUNTIME] Blackout Secure Managed File Sync'
 
 "on":
   workflow_call:

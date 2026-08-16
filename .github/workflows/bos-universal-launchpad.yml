@@ -74,7 +74,7 @@
 #     monitor ran on. It is **not** reachable in static-site mode (no tag
 #     to resolve) — for tag-driven container releases without upstream
 #     polling, call `release.yml` directly instead.
-name: Blackout Secure Launchpad
+name: '[RUNTIME] Blackout Secure Launchpad'
 
 "on":
   workflow_call:
