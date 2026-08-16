@@ -130,12 +130,12 @@ runs:
         from pathlib import Path
 
         LABELS = {
-          "pass": "Pass",
-          "warn": "Warning",
-          "fail": "High",
-          "skip": "Not Assessed",
-          "not_applicable": "Not Applicable",
-          "disabled": "Disabled",
+          "pass": "✅ Pass",
+          "warn": "⚠️ Warning",
+          "fail": "🔴 High",
+          "skip": "⚪ Not Assessed",
+          "not_applicable": "➖ Not Applicable",
+          "disabled": "➖ Disabled",
         }
         MEANINGS = {
             "pass": "Control satisfied.",

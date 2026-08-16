@@ -647,7 +647,7 @@ def main() -> None:
     assert "Provided by [Blackout Secure](https://blackoutsecure.app)" in job_report
     assert "## Recommended Actions" in job_report
     assert "## Detailed Findings" in job_report
-    assert '"Not Assessed"' in job_report
+    assert '"⚪ Not Assessed"' in job_report
 
     report_refs = {
         "uses: ./hub-runtime/.github/actions/shared/job-report",
@@ -755,14 +755,14 @@ def main() -> None:
     )
     assert "use_global_config: 'true'" in gate_workflow
     assert "config: .github/bos-universal-config.json" in gate_workflow
-    assert "bos-code-scanning-kit@4bbbd4f643acf5ba2fae4d8b3aba076e9438b06e" in gate_workflow
+    assert "bos-code-scanning-kit@0a0ee566034ca27fdabfca8c631bd3d84d0257d3" in gate_workflow
     standalone_scan_workflow = (
         ROOT / ".github/workflows/security-scan.yml"
     ).read_text()
     assert "sparse-checkout: sync-files/config/code-scanning-kit-global-config.json" in standalone_scan_workflow
     assert "use_global_config: 'true'" in standalone_scan_workflow
     assert "config: .github/bos-universal-config.json" in standalone_scan_workflow
-    assert "bos-code-scanning-kit@4bbbd4f643acf5ba2fae4d8b3aba076e9438b06e" in standalone_scan_workflow
+    assert "bos-code-scanning-kit@0a0ee566034ca27fdabfca8c631bd3d84d0257d3" in standalone_scan_workflow
     global_sync_config = json.loads(
         (ROOT / "sync-files/config/managed-file-sync-global-config.json").read_text()
     )
