@@ -345,7 +345,7 @@ jobs:
           sparse-checkout-cone-mode: false
       - id: kit
         name: Run BOS Code Scanning Kit
-        uses: blackoutsecure/bos-code-scanning-kit@128eb1160eb602db3975b6948ea723339dffc175 # dev
+        uses: blackoutsecure/bos-code-scanning-kit@ebc4397baea0cfcc182ca8ade2b91b73ccd0c071 # dev
         with:
           github_token: ${{ (inputs.use_advanced_pat && secrets.SCANNING_PAT != '') && secrets.SCANNING_PAT || github.token }}
           enable_posture: ${{ inputs.enable_posture }}
