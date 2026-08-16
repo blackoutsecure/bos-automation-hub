@@ -343,7 +343,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run kit lint composite
-        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@3a760ecf7e2734687c17aeffbff5bc2ecbcf9010 # v0.1.14
+        uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@5424e908ce6778cd8eb0d97da5264ddc34fc5f0d # v0.1.17
         with:
           severity: fail
 
@@ -523,7 +523,7 @@ jobs:
           sparse-checkout: config/code-scanning-kit-global-config.json
           sparse-checkout-cone-mode: false
       - name: Run bos-code-scanning-kit
-        uses: blackoutsecure/bos-code-scanning-kit@ddf31a70cbc1f4e8d3d3e24d6dd358574a48c8bf # dev
+        uses: blackoutsecure/bos-code-scanning-kit@def252ab6c15d9ac98c83fb3dda1eb5f925b8a42 # v1.0.15
         with:
           github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}
           fail_on: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_fail_on }}

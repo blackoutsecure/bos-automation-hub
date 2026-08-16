@@ -430,7 +430,7 @@ def main() -> None:
         in marketplace_workflow
     )
     assert "config_path:             .github/bos-universal-config.json" in marketplace_workflow
-    assert "bos-marketplace-kit/.github/actions/check@3a760ecf7e2734687c17aeffbff5bc2ecbcf9010" in marketplace_workflow
+    assert "bos-marketplace-kit/.github/actions/check@5424e908ce6778cd8eb0d97da5264ddc34fc5f0d" in marketplace_workflow
 
     for kicker_path in (
         ROOT / "sync-files/workflows/bos-universal-action-test-kicker.yml",
@@ -469,7 +469,7 @@ def main() -> None:
     assert repo_metadata_workflow.count(
         "uses: blackoutsecure/bos-repo-about-sync-action@"
     ) == 1
-    assert "uses: blackoutsecure/bos-repo-about-sync-action@f1b08228a6ddcef32a23a09a2fde804eb8fc693f" in repo_metadata_workflow
+    assert "uses: blackoutsecure/bos-repo-about-sync-action@341c147611e2f9856f93b94c5198478f46aa5f61" in repo_metadata_workflow
     assert ".github/actions/repo-metadata@main" not in repo_metadata_workflow
     assert not (ROOT / ".github/actions/repo-metadata").exists()
     assert "secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token" in repo_metadata_workflow
@@ -719,14 +719,14 @@ def main() -> None:
     )
     assert "use_global_config: 'true'" in gate_workflow
     assert "config: .github/bos-universal-config.json" in gate_workflow
-    assert "bos-code-scanning-kit@ddf31a70cbc1f4e8d3d3e24d6dd358574a48c8bf" in gate_workflow
+    assert "bos-code-scanning-kit@def252ab6c15d9ac98c83fb3dda1eb5f925b8a42" in gate_workflow
     standalone_scan_workflow = (
         ROOT / ".github/workflows/security-scan.yml"
     ).read_text()
     assert "sparse-checkout: config/code-scanning-kit-global-config.json" in standalone_scan_workflow
     assert "use_global_config: 'true'" in standalone_scan_workflow
     assert "config: .github/bos-universal-config.json" in standalone_scan_workflow
-    assert "bos-code-scanning-kit@ddf31a70cbc1f4e8d3d3e24d6dd358574a48c8bf" in standalone_scan_workflow
+    assert "bos-code-scanning-kit@def252ab6c15d9ac98c83fb3dda1eb5f925b8a42" in standalone_scan_workflow
     global_sync_config = json.loads(
         (ROOT / "sync-files/config/managed-file-sync-global-config.json").read_text()
     )
@@ -801,7 +801,7 @@ def main() -> None:
     assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
     assert "use_global_config: 'auto'" in sync_backend
-    assert "bos-managed-file-sync-action@f6802f4443566d8443809f6f0e21576f345e8fdf" in sync_backend
+    assert "bos-managed-file-sync-action@1948555b727a2e9fcaf95696e4036d8a9e0cb40e" in sync_backend
     assert "uses: ./hub-source/.github/actions/shared/commit-and-push" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend
