@@ -580,7 +580,7 @@ jobs:
           sparse-checkout-cone-mode: false
       - name: Run bos-code-scanning-kit
         id: code_scan
-        uses: blackoutsecure/bos-code-scanning-kit@d92df83af0a9d327ca6cabf14d35f9e71e4ca8de # dev
+        uses: blackoutsecure/bos-code-scanning-kit@9d22481dd4695aee88bbdfb852c2abb2d42f93aa # dev
         with:
           github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}
           fail_on: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_fail_on }}
