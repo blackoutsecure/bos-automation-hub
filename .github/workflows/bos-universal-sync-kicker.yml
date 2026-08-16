@@ -30,6 +30,10 @@ run-name: >-
 permissions:
   contents: read
 
+concurrency:
+  group: bos-sync-kicker-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   parse_config:
     name: Resolve target hub ref
