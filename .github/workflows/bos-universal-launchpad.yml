@@ -1266,7 +1266,7 @@ jobs:
       security-events: write
       contents: read
       actions: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/security-scan.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/security-scan.yml@dev
     with:
       fail_on:              ${{ inputs.security_scan_fail_on }}
       enable_kit_composite: ${{ inputs.security_scan_enable_kit_composite }}
