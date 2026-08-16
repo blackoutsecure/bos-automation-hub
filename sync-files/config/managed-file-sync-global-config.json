@@ -1,5 +1,6 @@
 {
   "managed_file_sync": {
+    "managed_note": "",
     "take_over_managed_files": true,
     "cleanup_duplicate_lines": true,
     "managed_files_path": "sync-files",
