@@ -823,6 +823,10 @@ def main() -> None:
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" not in sync_backend
     assert "  workflow_dispatch:" not in sync_backend
+    assert "`workflow_sync_pat` present and workflow services completed successfully" in sync_backend
+    assert '"severity": "warn" if mode == "check" else "pass"' in sync_backend
+    assert "workflow-file state is unverified" in sync_backend
+    assert "Drift detected; rerun in `commit` mode" in sync_backend
     for runtime_name in (
         "bos-universal-action-test.yml",
         "bos-universal-marketplace.yml",
