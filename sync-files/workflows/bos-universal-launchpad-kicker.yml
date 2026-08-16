@@ -35,7 +35,6 @@ run-name: >-
       - 'root/**'
       - 'build/**'
       - 'scripts/**'
-      - '.github/upstream/**'
       - '.github/bos-universal-config.json'
       - '.github/workflows/bos-universal-launchpad-kicker.yml'
   workflow_dispatch:
