@@ -32,5 +32,12 @@
     "node_lint_mode": "auto",
     "python_lint_mode": "auto",
     "shell_lint_mode": "auto"
+  },
+  "remediation": {
+    "mode": "notify",
+    "min_confidence": "high",
+    "allow_workflow_changes": false,
+    "allow_security_control_changes": false,
+    "allow_auto_merge": false
   }
 }

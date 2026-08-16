@@ -671,11 +671,18 @@ def main() -> None:
     assert 'for key in LABELS if counts[key]' in job_report
 
     hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
-    assert set(hub_config_raw) == {"gate", "launchpad", "organization"}
+    assert set(hub_config_raw) == {"gate", "launchpad", "organization", "remediation"}
     assert hub_config_raw["gate"] == {
         "node_lint_mode": "auto",
         "python_lint_mode": "auto",
         "shell_lint_mode": "auto",
+    }
+    assert hub_config_raw["remediation"] == {
+        "mode": "notify",
+        "min_confidence": "high",
+        "allow_workflow_changes": False,
+        "allow_security_control_changes": False,
+        "allow_auto_merge": False,
     }
     hub_org = hub_config_raw["organization"]
     assert hub_org["runners"]["default"] == "ubuntu-latest"
