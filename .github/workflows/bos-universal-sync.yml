@@ -62,18 +62,6 @@ name: '[RUNTIME] Blackout Secure Managed File Sync'
         description: Created commit SHA, when applicable.
         value: ${{ jobs.sync.outputs.commit_sha }}
 
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: Run a drift check or commit managed-file changes.
-        type: choice
-        options: [check, commit]
-        default: check
-      services:
-        description: Optional comma-separated service override.
-        type: string
-        default: ''
-
 permissions:
   contents: read
 

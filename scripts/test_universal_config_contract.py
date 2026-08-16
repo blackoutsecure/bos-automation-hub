@@ -339,7 +339,7 @@ def main() -> None:
         1,
     )[1]
     assert "      config_authoritative: true\n" in security_job
-    assert "  workflow_dispatch:" in gate_workflow
+    assert "  workflow_dispatch:" not in gate_workflow
     assert not (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
     assert "name: '[RUNTIME] Blackout Secure Universal Security'" in gate_workflow
     assert "name: security" in security_kicker
@@ -555,6 +555,7 @@ def main() -> None:
         "release-hub.yml",
         "bos-org-kicker-fanout.yml",
         "bos-hub-managed-sync-propagate.yml",
+        "bos-hub-launchpad-kicker.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -818,8 +819,7 @@ def main() -> None:
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" not in sync_backend
-    assert "  workflow_dispatch:" in sync_backend
-    assert "default: check" in sync_backend
+    assert "  workflow_dispatch:" not in sync_backend
     for runtime_name in (
         "bos-universal-action-test.yml",
         "bos-universal-marketplace.yml",
@@ -828,12 +828,22 @@ def main() -> None:
     ):
         runtime_body = (ROOT / ".github/workflows" / runtime_name).read_text()
         assert "  workflow_call:" in runtime_body
-        assert "  workflow_dispatch:" in runtime_body
+        assert "  workflow_dispatch:" not in runtime_body
     launchpad_runtime = (
         ROOT / ".github/workflows/bos-universal-launchpad.yml"
     ).read_text()
     assert "  workflow_call:" in launchpad_runtime
     assert "  workflow_dispatch:" not in launchpad_runtime
+    hub_launchpad_kicker = (
+        ROOT / ".github/workflows/bos-hub-launchpad-kicker.yml"
+    ).read_text()
+    assert "name: '[KICKER] Blackout Secure Hub Launchpad'" in hub_launchpad_kicker
+    assert "  schedule:" in hub_launchpad_kicker
+    assert "  workflow_dispatch:" in hub_launchpad_kicker
+    assert "paths:" in hub_launchpad_kicker
+    assert "bos-hub-launchpad-kicker.yml" not in hub_launchpad_kicker.split(
+        "      - '", 1
+    )[0]
     assert "global_config_json" not in sync_backend
     assert (
         "global_config_path: hub-source/sync-files/config/managed-file-sync-global-config.json"

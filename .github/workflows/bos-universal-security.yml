@@ -207,17 +207,6 @@ on:
           absent — sufficient for PS001 only.
         required: false
 
-  workflow_dispatch:
-    inputs:
-      config_authoritative:
-        description: Read security policy from .github/bos-universal-config.json.
-        type: boolean
-        default: true
-      hub_ref:
-        description: Hub runtime ref. Use auto to follow the current branch.
-        type: string
-        default: auto
-
 permissions: {}
 
 concurrency:

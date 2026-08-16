@@ -319,8 +319,6 @@ name: '[RUNTIME] Blackout Secure Universal Marketplace'
           SVG. Empty when `run_branding_preview: false`.
         value: ${{ jobs.branding-preview.outputs.artifact }}
 
-  workflow_dispatch:
-
 permissions:
   contents: read
 
