@@ -27,5 +27,10 @@
       "generate_topics": true,
       "topics_fallback": "github-actions automation reusable-workflows composite-actions devops ci-cd workflow-automation"
     }
+  },
+  "gate": {
+    "node_lint_mode": "auto",
+    "python_lint_mode": "auto",
+    "shell_lint_mode": "auto"
   }
 }

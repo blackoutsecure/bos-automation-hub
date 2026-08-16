@@ -122,12 +122,21 @@ runs:
         import sys
         from pathlib import Path
 
-        LABELS = {"pass": "Pass", "warn": "Warning", "fail": "High", "skip": "Not Assessed"}
+        LABELS = {
+          "pass": "Pass",
+          "warn": "Warning",
+          "fail": "High",
+          "skip": "Not Assessed",
+          "not_applicable": "Not Applicable",
+          "disabled": "Disabled",
+        }
         MEANINGS = {
             "pass": "Control satisfied.",
             "warn": "Advisory drift; review recommended.",
             "fail": "Required control failed and must be corrected.",
             "skip": "Not evaluated on this run; coverage cannot be inferred.",
+            "not_applicable": "The repository or event does not provide the inputs required by this control.",
+            "disabled": "Explicitly disabled by repository or organization policy.",
         }
         UNSET = {"", "(none)", "(unset)", "n/a", "not configured"}
 
@@ -177,7 +186,7 @@ runs:
                 fail(f"findings[{index}] must be an object.")
             severity = str(item.get("severity") or "").lower()
             if severity not in LABELS:
-                fail(f"findings[{index}].severity must be pass, warn, fail, or skip.")
+              fail(f"findings[{index}].severity must be pass, warn, fail, skip, not_applicable, or disabled.")
             normalized.append({
                 "id": str(item.get("id") or f"BR{index + 1:03d}"),
                 "severity": severity,

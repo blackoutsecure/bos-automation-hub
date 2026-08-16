@@ -270,16 +270,17 @@ jobs:
           python3 - <<'PY'
           import json
           import os
+          from pathlib import Path
 
           config = json.loads(os.environ["CONFIG"])
           gate = {
               "enable_lint": True,
-              "enable_node_lint": False,
+              "node_lint_mode": "auto",
               "node_version": "20",
-              "enable_python_lint": False,
+              "python_lint_mode": "auto",
               "python_version": "3.11",
               "python_packages": ["ruff>=0.6", "pytest>=8.0"],
-              "enable_shell_lint": False,
+              "shell_lint_mode": "auto",
               "enable_dependency_review": True,
               "enable_code_scan": True,
               "enable_pinned_actions_check": True,
@@ -320,6 +321,60 @@ jobs:
                   "code_scan_fail_on": os.environ["INPUT_CODE_SCAN_FAIL_ON"] or "fail",
                   "code_scan_http_timeout": os.environ["INPUT_CODE_SCAN_HTTP_TIMEOUT"] or "20",
               })
+
+                  ignored = {".git", "node_modules", "vendor", "dist", "build", "target", "out", ".venv", "venv", "env", ".tox", "__pycache__"}
+                  node_extensions = {".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"}
+                  python_markers = {"pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile", "poetry.lock"}
+                  node_markers = {"package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"}
+                  code_signals = {"node": set(), "python": set(), "shell": set()}
+                  for directory, dirnames, filenames in os.walk(os.environ.get("GITHUB_WORKSPACE", ".")):
+                    dirnames[:] = [name for name in dirnames if name not in ignored]
+                    for filename in filenames:
+                      suffix = Path(filename).suffix.lower()
+                      if suffix in node_extensions or filename in node_markers:
+                        code_signals["node"].add(filename if filename in node_markers else suffix)
+                      if suffix == ".py" or filename in python_markers or (filename.startswith("requirements-") and suffix == ".txt"):
+                        code_signals["python"].add(filename if filename in python_markers else suffix)
+                      if suffix in {".sh", ".bash", ".bats"}:
+                        code_signals["shell"].add(suffix)
+
+                  def configured_mode(name):
+                    mode_key = f"{name}_lint_mode"
+                    legacy_key = f"enable_{name}_lint"
+                    if mode_key in configured:
+                      value = configured[mode_key]
+                    elif legacy_key in configured:
+                      value = configured[legacy_key]
+                    elif not use_config:
+                      value = os.environ.get(f"INPUT_ENABLE_{name.upper()}_LINT", "")
+                      value = value if value else "auto"
+                    else:
+                      value = gate[mode_key]
+                    if isinstance(value, bool):
+                      return "true" if value else "false"
+                    if value not in {"auto", "true", "false"}:
+                      raise SystemExit(f"gate.{mode_key} must be auto, true, or false")
+                    return value
+
+                  quality = {}
+                  for name in ("node", "python", "shell"):
+                    mode = configured_mode(name)
+                    signals = sorted(code_signals[name])
+                    if mode == "true":
+                      status = "applicable"
+                      reason = "Explicitly enabled by policy."
+                    elif mode == "false":
+                      status = "disabled"
+                      reason = "Explicitly disabled by policy."
+                    elif signals:
+                      status = "applicable"
+                      reason = f"{name.title()} signals detected: {', '.join(signals)}."
+                    else:
+                      status = "not_applicable"
+                      reason = f"No {name.title()} source or package metadata detected."
+                    quality[name] = {"mode": mode, "status": status, "signals": signals, "reason": reason}
+                    gate[f"enable_{name}_lint"] = status == "applicable"
+                  gate["quality_applicability"] = quality
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write("gate<<__BOS_GATE__\n")
               output.write(json.dumps(gate, separators=(",", ":")) + "\n")
@@ -716,6 +771,7 @@ jobs:
               ("SG031", "R_PRTITLE", "Conventional PR title", "compliance",
                "Retitle the PR as `<type>: <subject>` using an allowed conventional-commit type."),
           ]
+              QUALITY_GATES = {"SG011": "node", "SG012": "python", "SG013": "shell"}
 
           org = json.loads(os.environ["ORG"] or "{}")
           gate = json.loads(os.environ["GATE"] or "{}")
@@ -732,17 +788,26 @@ jobs:
           for rule_id, env_name, control, group, remediation in GATES:
               result = os.environ.get(env_name, "") or "skipped"
               severity = STATUS.get(result, "fail")
-              if severity == "fail":
+              quality_name = QUALITY_GATES.get(rule_id)
+              quality = (gate.get("quality_applicability") or {}).get(quality_name or "")
+              if result == "skipped" and isinstance(quality, dict) and quality.get("status") in {"not_applicable", "disabled"}:
+                severity = quality["status"]
+                evidence = f"job result: skipped; {quality.get('reason', 'No applicability details were reported.')}"
+                advice = quality.get("reason", "No applicability details were reported.")
+              elif severity == "fail":
+                evidence = f"job result: {result}"
                   advice = remediation
               elif severity == "skip":
+                evidence = f"job result: {result}"
                   advice = "Enable this gate in `.github/bos-universal-config.json` to obtain a verdict."
               else:
+                evidence = f"job result: {result}"
                   advice = "—"
               findings.append({
                   "id": rule_id,
                   "severity": severity,
                   "control": control,
-                  "evidence": f"job result: {result}",
+                  "evidence": evidence,
                   "remediation": advice,
                   "group": group,
               })

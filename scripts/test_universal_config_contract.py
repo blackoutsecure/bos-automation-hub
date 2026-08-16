@@ -671,7 +671,12 @@ def main() -> None:
     assert 'for key in LABELS if counts[key]' in job_report
 
     hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
-    assert set(hub_config_raw) == {"launchpad", "organization"}
+    assert set(hub_config_raw) == {"gate", "launchpad", "organization"}
+    assert hub_config_raw["gate"] == {
+        "node_lint_mode": "auto",
+        "python_lint_mode": "auto",
+        "shell_lint_mode": "auto",
+    }
     hub_org = hub_config_raw["organization"]
     assert hub_org["runners"]["default"] == "ubuntu-latest"
     assert hub_org["reporting"]["fail_on"] == "fail"
@@ -763,7 +768,11 @@ def main() -> None:
     hub_config = cfg_from(
         run_universal_config_raw((ROOT / ".github/bos-universal-config.json").read_text())
     )
-    assert "gate" not in hub_config
+    assert hub_config["gate"] == {
+        "node_lint_mode": "auto",
+        "python_lint_mode": "auto",
+        "shell_lint_mode": "auto",
+    }
     assert hub_config["repo_metadata"] == {
         "enable": True,
         "homepage": "https://github.com/blackoutsecure/bos-automation-hub",
