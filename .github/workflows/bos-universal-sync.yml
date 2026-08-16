@@ -216,6 +216,7 @@ jobs:
                   "id": "MS001", "severity": "pass", "group": "sync",
                   "control": "Managed-file reconciliation",
                   "evidence": f"engine completed in `{mode}` mode",
+                  "remediation": "No action needed.",
               })
           else:
               findings.append({
@@ -242,7 +243,7 @@ jobs:
                   ),
                   "remediation": (
                       "Re-run this workflow in `commit` mode, or apply the diff above locally."
-                      if changed else "—"
+                      if changed else "No action needed."
                   ),
               })
           else:
@@ -256,6 +257,11 @@ jobs:
                       if commit_sha else
                       f"{len(changed_files)} file(s) changed"
                       if changed else "no drift detected"
+                  ),
+                  "remediation": (
+                      "Applied automatically by the managed sync commit — no action needed."
+                      if commit_sha or changed else
+                      "No action needed — working tree already matched the managed catalog."
                   ),
               })
 
