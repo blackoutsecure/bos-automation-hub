@@ -147,7 +147,7 @@ jobs:
 
       - name: Sync configured services
         id: sync
-        uses: blackoutsecure/bos-managed-file-sync-action@b689dc61c83cbf958e1acb3717c215b0ffe4da69 # dev
+        uses: blackoutsecure/bos-managed-file-sync-action@ec3701f92a86d220fc0c3c8327624315ce0c98fa # dev
         with:
           # The action auto-discovers .github/bos-universal-config.json.
           use_global_config: 'auto'
