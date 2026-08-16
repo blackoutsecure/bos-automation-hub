@@ -734,11 +734,8 @@ def main() -> None:
     assert "exclude_services" not in sync_policy
     assert "exclude_sevices" not in sync_policy
     assert sync_policy["take_over_managed_files"] is True
-    # The hub is checked out into `sync-files/`, and its canonical template
-    # root is `sync-files/` itself (not just `sync-files/workflows/`) so
-    # `content_file` entries can also reach `sync-files/community-health/`,
-    # `sync-files/github-meta/`, and `sync-files/org-profile/` (see
-    # `org_defaults` below) alongside the `workflows/` subdirectory.
+    # The hub is checked out into `sync-files/`; content_file paths are
+    # explicit beneath that root, including the workflows/ subdirectory.
     assert sync_policy["managed_files_path"] == "sync-files"
     assert sync_policy["services"] == [
         "shellcheck",
@@ -753,7 +750,7 @@ def main() -> None:
         "files": [
             {
                 "path": ".github/workflows/bos-universal-upstream-kicker.yml",
-                "content_file": "bos-universal-upstream-kicker.yml",
+                "content_file": "workflows/bos-universal-upstream-kicker.yml",
             }
         ],
     }

@@ -16,7 +16,7 @@
         "files": [
           {
             "path": ".github/workflows/bos-universal-security-kicker.yml",
-            "content_file": "bos-universal-security-kicker.yml"
+            "content_file": "workflows/bos-universal-security-kicker.yml"
           }
         ]
       },
@@ -25,7 +25,7 @@
         "files": [
           {
             "path": ".github/workflows/bos-universal-sync-kicker.yml",
-            "content_file": "bos-universal-sync-kicker.yml"
+            "content_file": "workflows/bos-universal-sync-kicker.yml"
           }
         ]
       },
@@ -34,7 +34,7 @@
         "files": [
           {
             "path": ".github/workflows/bos-universal-action-test-kicker.yml",
-            "content_file": "bos-universal-action-test-kicker.yml"
+            "content_file": "workflows/bos-universal-action-test-kicker.yml"
           }
         ]
       },
@@ -43,7 +43,7 @@
         "files": [
           {
             "path": ".github/workflows/bos-universal-marketplace-kicker.yml",
-            "content_file": "bos-universal-marketplace-kicker.yml"
+            "content_file": "workflows/bos-universal-marketplace-kicker.yml"
           }
         ]
       },
@@ -52,7 +52,7 @@
         "files": [
           {
             "path": ".github/workflows/bos-universal-upstream-kicker.yml",
-            "content_file": "bos-universal-upstream-kicker.yml"
+            "content_file": "workflows/bos-universal-upstream-kicker.yml"
           }
         ]
       },
@@ -61,7 +61,7 @@
         "files": [
           {
             "path": ".github/workflows/bos-universal-launchpad-kicker.yml",
-            "content_file": "bos-universal-launchpad-kicker.yml"
+            "content_file": "workflows/bos-universal-launchpad-kicker.yml"
           }
         ]
       },
