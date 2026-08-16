@@ -1,7 +1,6 @@
 # Normalize line endings to LF for all text files (default).
 # Without this, contributors on Windows can silently commit CRLF
 # in shell scripts and break the `#!/bin/bash` interpreter line.
-* text=auto eol=lf
 
 # Explicit text files — pin LF even when Git's auto-detection is unsure.
 *.sh           text eol=lf
