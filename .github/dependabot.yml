@@ -1,14 +1,5 @@
 version: 2
 updates:
-      prefix: "ci"
-      - github-actions
-    groups:
-      docker-actions:
-        patterns:
-          - "docker/*"
-      github-actions:
-        patterns:
-          - "actions/*"
 
 # >>> managed-file-sync:dependabot_actions >>>
 # Managed by Blackout Secure Managed File Sync — configure services in .github/bos-universal-config.json.
