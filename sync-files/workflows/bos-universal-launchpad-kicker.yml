@@ -6,7 +6,7 @@
 # Required secrets:
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
 #   UPSTREAM_TOKEN (optional — only for private upstream repos)
-name: Blackout Secure Launchpad
+name: '[KICKER] Blackout Secure Launchpad'
 run-name: >-
   Blackout Secure Launchpad / ${{ github.event_name == 'workflow_dispatch' && inputs.operation || 'full' }} / ${{
     github.event_name == 'workflow_dispatch'
@@ -35,7 +35,6 @@ run-name: >-
       - 'root/**'
       - 'build/**'
       - 'scripts/**'
-      - '.github/upstream/**'
       - '.github/bos-universal-config.json'
       - '.github/workflows/bos-universal-launchpad-kicker.yml'
   workflow_dispatch:
@@ -52,6 +51,10 @@ run-name: >-
 
 permissions:
   contents: read
+
+concurrency:
+  group: bos-launchpad-kicker-${{ github.repository }}-${{ github.ref }}-${{ inputs.operation || 'full' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'release' }}
 
 jobs:
   # Cheap, config-free hub-ref resolution so `sync-check` (which must run

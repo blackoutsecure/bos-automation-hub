@@ -1,0 +1,43 @@
+name: AI remediation PR reconciliation
+description: Link existing remediation PRs and optionally create draft or normal PRs from validated patches.
+author: Blackout Secure
+inputs:
+  recommendations:
+    description: Path to a JSON array or wrapped object of structured remediation recommendations.
+    required: true
+  mode:
+    description: notify, draft_pr, or pr. notify is the default.
+    required: false
+    default: notify
+  token:
+    description: GitHub token with contents and pull-request write access when creating PRs.
+    required: false
+    default: ''
+  base:
+    description: Target branch for remediation PRs.
+    required: false
+    default: ''
+  labels:
+    description: Comma-separated labels applied to created remediation PRs.
+    required: false
+    default: blackout-secure-remediation,ai-recommendation
+outputs:
+  report:
+    description: JSON reconciliation report containing recommendation status and Open PR links.
+    value: ${{ steps.reconcile.outputs.report }}
+runs:
+  using: composite
+  steps:
+    - id: reconcile
+      name: Reconcile remediation recommendations
+      shell: bash
+      env:
+        REMEDIATION_RECOMMENDATIONS: ${{ inputs.recommendations }}
+        REMEDIATION_MODE: ${{ inputs.mode }}
+        REMEDIATION_TOKEN: ${{ inputs.token || github.token }}
+        REMEDIATION_BASE: ${{ inputs.base || github.event.repository.default_branch }}
+        REMEDIATION_LABELS: ${{ inputs.labels }}
+        REMEDIATION_REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/reconcile.py"

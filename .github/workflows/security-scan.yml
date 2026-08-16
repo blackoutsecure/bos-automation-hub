@@ -341,11 +341,11 @@ jobs:
           path: hub-config
           fetch-depth: 1
           persist-credentials: false
-          sparse-checkout: config/code-scanning-kit-global-config.json
+          sparse-checkout: sync-files/config/code-scanning-kit-global-config.json
           sparse-checkout-cone-mode: false
       - id: kit
         name: Run BOS Code Scanning Kit
-        uses: blackoutsecure/bos-code-scanning-kit@def252ab6c15d9ac98c83fb3dda1eb5f925b8a42 # v1.0.15
+        uses: blackoutsecure/bos-code-scanning-kit@b69500c85971a6df06e33f7b56881682bd09c2a2 # dev
         with:
           github_token: ${{ (inputs.use_advanced_pat && secrets.SCANNING_PAT != '') && secrets.SCANNING_PAT || github.token }}
           enable_posture: ${{ inputs.enable_posture }}
@@ -357,7 +357,7 @@ jobs:
           # `bos-code-scanning-kit-gate`) — see that workflow for why.
           category: bos-code-scanning-kit-launchpad
           use_global_config: 'true'
-          global_config_path: hub-config/config/code-scanning-kit-global-config.json
+          global_config_path: hub-config/sync-files/config/code-scanning-kit-global-config.json
           config: .github/bos-universal-config.json
 
   codeql:

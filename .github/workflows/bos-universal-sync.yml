@@ -2,7 +2,7 @@
 # The sync engine and service catalog live in bos-managed-file-sync-action.
 # Named "managed file sync", not "universal", since it only ever does one
 # thing; filename stays bos-universal-sync.yml to keep uses: refs stable.
-name: Blackout Secure Managed File Sync
+name: '[RUNTIME] Blackout Secure Managed File Sync'
 
 "on":
   workflow_call:
@@ -147,7 +147,7 @@ jobs:
 
       - name: Sync configured services
         id: sync
-        uses: blackoutsecure/bos-managed-file-sync-action@1948555b727a2e9fcaf95696e4036d8a9e0cb40e # v1.0.14
+        uses: blackoutsecure/bos-managed-file-sync-action@ec3701f92a86d220fc0c3c8327624315ce0c98fa # dev
         with:
           # The action auto-discovers .github/bos-universal-config.json.
           use_global_config: 'auto'
@@ -216,6 +216,7 @@ jobs:
                   "id": "MS001", "severity": "pass", "group": "sync",
                   "control": "Managed-file reconciliation",
                   "evidence": f"engine completed in `{mode}` mode",
+                  "remediation": "No action needed.",
               })
           else:
               findings.append({
@@ -242,7 +243,7 @@ jobs:
                   ),
                   "remediation": (
                       "Re-run this workflow in `commit` mode, or apply the diff above locally."
-                      if changed else "—"
+                      if changed else "No action needed."
                   ),
               })
           else:
@@ -257,20 +258,33 @@ jobs:
                       f"{len(changed_files)} file(s) changed"
                       if changed else "no drift detected"
                   ),
+                  "remediation": (
+                      "Applied automatically by the managed sync commit — no action needed."
+                      if commit_sha or changed else
+                      "No action needed — working tree already matched the managed catalog."
+                  ),
               })
 
           findings.append({
               "id": "MS020",
-              "severity": "pass" if has_pat else "skip",
+              "severity": (
+                "skip" if not has_pat else
+                "pass" if sync_result == "success" else
+                "warn"
+              ),
               "group": "credentials",
               "control": "Workflow-file sync capability",
               "evidence": (
-                  "`workflow_sync_pat` present; managed kicker workflows are in scope"
-                  if has_pat else
+                "`workflow_sync_pat` present and workflow services completed successfully"
+                if has_pat and sync_result == "success" else
+                "`workflow_sync_pat` present, but sync did not complete; workflow-file state is unverified"
+                if has_pat else
                   "`workflow_sync_pat` absent; managed kicker workflows were skipped"
               ),
               "remediation": (
-                  "—" if has_pat else
+                "—" if has_pat and sync_result == "success" else
+                "Review and fix the sync-engine failure, then rerun in `commit` mode to verify managed workflow files."
+                if has_pat else
                   "Add a `WORKFLOW_SYNC_PAT` secret with `Workflows: write`. "
                   "GITHUB_TOKEN can never write to `.github/workflows/**`."
               ),
@@ -278,10 +292,14 @@ jobs:
 
           for path in changed_files[:50]:
               findings.append({
-                  "id": "MS030", "severity": "pass", "group": "files",
+                "id": "MS030", "severity": "warn" if mode == "check" else "pass", "group": "files",
                   "control": "Managed file",
                   "evidence": f"`{path}`",
-                  "remediation": "Pending" if mode == "check" else "Applied",
+                "remediation": (
+                  "Drift detected; rerun in `commit` mode to apply this file."
+                  if mode == "check" else
+                  "Applied by the managed sync commit."
+                ),
               })
 
           config = json.loads(os.environ.get("CONFIG") or "{}")
