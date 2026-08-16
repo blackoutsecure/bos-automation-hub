@@ -720,7 +720,10 @@ def main() -> None:
             "workflows": {
                 "require_permissions_block": "fail",
                 "forbid_write_all": "fail",
-                "require_pinned_actions": "fail",
+                "require_pinned_actions": "warn",
+                "allow_tag_pin": [
+                    "blackoutsecure/bos-automation-hub",
+                ],
             },
             "branches": {
                 "main": {
