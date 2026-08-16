@@ -773,7 +773,6 @@ def main() -> None:
         "files": [
             {
                 "path": ".github/workflows/bos-universal-upstream-kicker.yml",
-                "include_managed_note": False,
                 "content_file": "workflows/bos-universal-upstream-kicker.yml",
             }
         ],
