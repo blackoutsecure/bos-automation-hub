@@ -256,7 +256,7 @@ jobs:
       - name: Synchronize repository metadata
         if: steps.token.outputs.available == 'true'
         id: metadata
-        uses: blackoutsecure/bos-repo-about-sync-action@a27c9f14613a2f99f3d18579a85f880cd421c520 # v0.1.12
+        uses: blackoutsecure/bos-repo-about-sync-action@5e7ab26d4cfb1ed23e7f0c76615d2348b445729d # v0.1.22
         with:
           github_token: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token }}
           readme_path: ${{ inputs.readme_path }}

@@ -1,0 +1,120 @@
+# Keep first-party Blackout Secure action pins on their newest tag.
+#
+# `uses:` cannot contain expressions, so no workflow can resolve "latest"
+# at run time without giving up SHA pinning. This job does the resolution
+# out-of-band instead: it reads `.github/action-pins.json`, resolves the
+# newest tag for each listed action (ranking stable releases AND
+# pre-releases together by SemVer, because `GET /releases/latest` silently
+# skips pre-releases), rewrites the pinned SHA plus its trailing `# <tag>`
+# comment, and opens a PR.
+#
+# Pins therefore stay immutable and reviewable, so PS012
+# (`require_pinned_actions`), Marketplace SC002 hygiene, and CodeQL
+# `actions/unpinned-tag` all keep passing — while a bad upstream release
+# lands as a reviewable PR instead of instantly breaking every consumer.
+#
+# Requires `WORKFLOW_SYNC_PAT`: GITHUB_TOKEN can never write to
+# `.github/workflows/**`, which is where most of these pins live.
+name: Sync first-party action pins
+
+"on":
+  schedule:
+    # Daily, offset off the hour to avoid the top-of-hour scheduling surge.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Resolve and report drift without opening a PR.'
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: sync-action-pins-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Resolve newest tags and repin
+    # Pinned to a GitHub-hosted runner: this job only shells out to the
+    # GitHub API and needs no self-hosted capability.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Resolve workflow-write capability
+        id: pat
+        env:
+          HAS_WORKFLOW_PAT: ${{ secrets.WORKFLOW_SYNC_PAT != '' && 'true' || 'false' }}
+        run: echo "has_pat=${HAS_WORKFLOW_PAT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}
+          persist-credentials: true
+
+      - name: Resolve newest tags and rewrite pins
+        id: sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/sync_action_pins.py --write
+
+      - name: Report drift without publishing
+        if: steps.sync.outputs.changed == 'true' && inputs.dry_run
+        run: |
+          set -euo pipefail
+          echo "::notice::Pin drift detected. Dry run requested, so no PR was opened."
+          git --no-pager diff
+
+      - name: Explain missing workflow token
+        if: steps.sync.outputs.changed == 'true' && !inputs.dry_run && steps.pat.outputs.has_pat != 'true'
+        run: |
+          set -euo pipefail
+          echo "::warning::Action pins are stale but WORKFLOW_SYNC_PAT is not configured. GITHUB_TOKEN cannot write to .github/workflows/**, so no PR was opened."
+          git --no-pager diff
+
+      - name: Open pin-bump pull request
+        if: steps.sync.outputs.changed == 'true' && !inputs.dry_run && steps.pat.outputs.has_pat == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_SYNC_PAT }}
+          BRANCH: automation/action-pins
+        run: |
+          set -euo pipefail
+
+          git config user.name 'blackout-secure-bot'
+          git config user.email 'bot@users.noreply.github.com'
+
+          cat > "${RUNNER_TEMP}/pr-body.md" <<'BODY'
+          Automated by `.github/workflows/sync-action-pins.yml`.
+
+          Each pin below now tracks the newest tag for its repository, ranking
+          stable releases and pre-releases together by SemVer precedence
+          (`GET /releases/latest` is not used, because it skips pre-releases).
+
+          Review the upstream release notes before merging: merging adopts
+          these versions across every repository that consumes the hub.
+
+          Reproduce locally with `python3 scripts/sync_action_pins.py --check`.
+          BODY
+
+          git checkout -B "${BRANCH}"
+          # `-u` stages tracked modifications only, so unrelated untracked
+          # files on the runner can never ride along in the bump commit.
+          git add -u -- .github sync-files
+          git commit -m 'chore(deps): bump first-party action pins to newest tags'
+          git push --force-with-lease origin "${BRANCH}"
+
+          if [ -z "$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[].number')" ]; then
+            gh pr create \
+              --head "${BRANCH}" \
+              --base "${GITHUB_REF_NAME}" \
+              --title 'chore(deps): bump first-party action pins to newest tags' \
+              --body-file "${RUNNER_TEMP}/pr-body.md"
+          else
+            echo "::notice::Existing pin-bump PR updated with the newest resolutions."
+          fi

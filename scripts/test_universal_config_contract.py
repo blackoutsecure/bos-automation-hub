@@ -41,6 +41,18 @@ def caller_input_names(body: str, workflow_name: str) -> set[str]:
     return set(re.findall(r"^      ([a-z][a-z0-9_]+):", inputs, re.MULTILINE))
 
 
+def assert_first_party_pin(body: str, action: str) -> None:
+    """First-party actions must be pinned to a SHA carrying its version tag.
+
+    The SHA itself is deliberately not asserted: `sync-action-pins.yml`
+    rewrites it whenever upstream publishes a newer tag. What matters to the
+    contract is the shape — an immutable 40-hex commit plus the `# vX.Y.Z`
+    provenance comment — so a bump never silently degrades to a branch ref.
+    """
+    pattern = re.escape(f"uses: {action}@") + r"[0-9a-f]{40} # v\d+\.\d+\.\d+"
+    assert re.search(pattern, body), action
+
+
 def assert_markdown_links_exist(path: Path) -> None:
     missing = set()
     for raw_target in re.findall(r"\[[^]]+\]\(([^)]+)\)", path.read_text()):
@@ -308,7 +320,7 @@ def main() -> None:
     assert "config_path: .github/bos-universal-config.json" in action_test_workflow
 
     monitor_workflow = (ROOT / ".github/workflows/monitor-upstream-release.yml").read_text()
-    assert "bos-upstream-watcher@c91a6fd7d42161f1b37ab6da12ca6a6bbaabe739" in monitor_workflow
+    assert_first_party_pin(monitor_workflow, "blackoutsecure/bos-upstream-watcher")
     assert "config_path: .github/bos-universal-config.json" in monitor_workflow
     assert "global_config_path: hub-config/sync-files/config/upstream-watcher-global-config.json" in monitor_workflow
     assert "use_global_config: 'auto'" in monitor_workflow
@@ -436,7 +448,10 @@ def main() -> None:
         in marketplace_workflow
     )
     assert "config_path:             .github/bos-universal-config.json" in marketplace_workflow
-    assert "bos-marketplace-kit/.github/actions/check@5424e908ce6778cd8eb0d97da5264ddc34fc5f0d" in marketplace_workflow
+    assert_first_party_pin(
+        marketplace_workflow,
+        "blackoutsecure/bos-marketplace-kit/.github/actions/check",
+    )
 
     for kicker_path in (
         ROOT / "sync-files/workflows/bos-universal-action-test-kicker.yml",
@@ -492,7 +507,9 @@ def main() -> None:
     assert repo_metadata_workflow.count(
         "uses: blackoutsecure/bos-repo-about-sync-action@"
     ) == 1
-    assert "uses: blackoutsecure/bos-repo-about-sync-action@a27c9f14613a2f99f3d18579a85f880cd421c520" in repo_metadata_workflow
+    assert_first_party_pin(
+        repo_metadata_workflow, "blackoutsecure/bos-repo-about-sync-action"
+    )
     assert ".github/actions/repo-metadata@main" not in repo_metadata_workflow
     assert not (ROOT / ".github/actions/repo-metadata").exists()
     assert "secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token" in repo_metadata_workflow
@@ -554,6 +571,7 @@ def main() -> None:
         "lint.yml",
         "openwrt-readsb-wiedehopf-bump.yml",
         "release-hub.yml",
+        "sync-action-pins.yml",
         "bos-org-kicker-fanout.yml",
         "bos-hub-managed-sync-propagate.yml",
         "bos-hub-launchpad-kicker.yml",
@@ -748,7 +766,161 @@ def main() -> None:
         "enable_security_scan": True,
         "defer_to_code_scanning_kit": True,
         "enable_ai_findings_summary": False,
+        "version": "auto",
+        "license": "auto",
     }
+
+    # ── Site-generator audit policy ────────────────────────────────────
+    # The sitemap and security.txt generators resolve config in
+    # marketplace -> global -> repository order. The hub owns the global
+    # tier for both; `fail_on: never` keeps a failing control visible in
+    # the report without blocking a deploy.
+    global_sitemap_config = json.loads(
+        (ROOT / "sync-files/config/sitemap-generator-global-config.json").read_text()
+    )
+    sitemap_audit = global_sitemap_config["sitemap"]["audit"]
+    assert sitemap_audit["enable"] is True
+    assert sitemap_audit["fail_on"] == "never"
+    assert sitemap_audit["rules"]["require_https"] == "fail"
+    assert sitemap_audit["rules"]["require_same_origin"] == "fail"
+    assert global_sitemap_config["sitemap"]["remediation"] == {
+        "enable_ai_findings_summary": False
+    }
+
+    global_securitytxt_config = json.loads(
+        (ROOT / "sync-files/config/securitytxt-generator-global-config.json").read_text()
+    )
+    securitytxt_audit = global_securitytxt_config["security_txt"]["audit"]
+    assert securitytxt_audit["enable"] is True
+    assert securitytxt_audit["fail_on"] == "never"
+    assert securitytxt_audit["expires_max_days"] == 365
+    for required_rule in (
+        "require_contact",
+        "require_expires",
+        "expires_not_expired",
+        "valid_contact_uri",
+        "require_https_uris",
+        "well_known_location",
+    ):
+        assert securitytxt_audit["rules"][required_rule] == "fail", required_rule
+    assert global_securitytxt_config["security_txt"]["remediation"] == {
+        "enable_ai_findings_summary": False
+    }
+
+    cloudflare_workflow = (ROOT / ".github/workflows/deploy-cloudflare-pages.yml").read_text()
+    assert "generator_audit:" in cloudflare_workflow
+    assert "generator_audit_fail_on:" in cloudflare_workflow
+    assert (
+        "global_config_path: hub-generator-config/sync-files/config/"
+        "sitemap-generator-global-config.json" in cloudflare_workflow
+    )
+    assert (
+        "global_config_path: hub-generator-config/sync-files/config/"
+        "securitytxt-generator-global-config.json" in cloudflare_workflow
+    )
+    assert (
+        "global_config_path: hub-generator-config/sync-files/config/"
+        "robotstxt-generator-global-config.json" in cloudflare_workflow
+    )
+    assert (
+        "global_config_path: hub-generator-config/sync-files/config/"
+        "web-manifest-generator-global-config.json" in cloudflare_workflow
+    )
+    # Audit artefacts land outside `deploy_dir` so they are never published.
+    assert "path: generator-audit/" in cloudflare_workflow
+
+    global_humanstxt_config = json.loads(
+        (ROOT / "sync-files/config/humanstxt-generator-global-config.json").read_text()
+    )
+    humanstxt_audit = global_humanstxt_config["humans_txt"]["audit"]
+    assert humanstxt_audit["enable"] is True
+    assert humanstxt_audit["fail_on"] == "never"
+    for required_rule in (
+        "require_team_section",
+        "require_site_section",
+        "require_https_urls",
+        "valid_section_syntax",
+    ):
+        assert humanstxt_audit["rules"][required_rule] == "fail", required_rule
+    assert global_humanstxt_config["humans_txt"]["remediation"] == {
+        "enable_ai_findings_summary": False
+    }
+
+    global_robotstxt_config = json.loads(
+        (ROOT / "sync-files/config/robotstxt-generator-global-config.json").read_text()
+    )
+    robotstxt_audit = global_robotstxt_config["robots_txt"]["audit"]
+    assert robotstxt_audit["enable"] is True
+    assert robotstxt_audit["fail_on"] == "never"
+    assert robotstxt_audit["max_size_kb"] == 500
+    for required_rule in (
+        "require_user_agent",
+        "require_sitemap",
+        "forbid_disallow_all",
+        "valid_directives",
+        "forbid_html_content",
+    ):
+        assert robotstxt_audit["rules"][required_rule] == "fail", required_rule
+    assert global_robotstxt_config["robots_txt"]["remediation"] == {
+        "enable_ai_findings_summary": False
+    }
+
+    global_web_manifest_config = json.loads(
+        (ROOT / "sync-files/config/web-manifest-generator-global-config.json").read_text()
+    )
+    web_manifest_audit = global_web_manifest_config["web_manifest"]["audit"]
+    assert web_manifest_audit["enable"] is True
+    assert web_manifest_audit["fail_on"] == "never"
+    assert web_manifest_audit["max_size_kb"] == 128
+    for required_rule in (
+        "require_name",
+        "require_icons",
+        "require_start_url",
+        "require_display",
+        "require_192_icon",
+        "require_512_icon",
+        "valid_json",
+    ):
+        assert web_manifest_audit["rules"][required_rule] == "fail", required_rule
+    assert global_web_manifest_config["web_manifest"]["remediation"] == {
+        "enable_ai_findings_summary": False
+    }
+
+    # The inline humans.txt block stands in for `bos-humanstxt-generator`
+    # until that action publishes a taggable release, so it must still emit
+    # humanstxt.org-standard banners and field names.
+    assert "/* HUMANS.TXT */" in cloudflare_workflow
+    assert "Last update: ${last_update}" in cloudflare_workflow
+    assert "/* NOTES */" not in cloudflare_workflow
+
+    # Every first-party action pinned in this repo must be tracked by the
+    # pin bumper, otherwise its SHA silently goes stale.
+    action_pins = json.loads((ROOT / ".github/action-pins.json").read_text())
+    tracked = {entry["repository"] for entry in action_pins["repositories"]}
+    for generator in (
+        "blackoutsecure/bos-sitemap-generator",
+        "blackoutsecure/bos-securitytxt-generator",
+        "blackoutsecure/bos-robotstxt-generator",
+        "blackoutsecure/bos-web-application-manifest-generator",
+    ):
+        assert generator in tracked, generator
+
+    launchpad_workflow = (ROOT / ".github/workflows/bos-universal-launchpad.yml").read_text()
+    assert cloudflare_workflow.count("generator_audit_artifact_name") >= 2
+    assert launchpad_workflow.count("cloudflare_generator_audit:") >= 1
+    assert launchpad_workflow.count("generator_audit_fail_on:") >= 3
+
+    launchpad_kicker = (
+        ROOT / "sync-files/workflows/bos-universal-launchpad-kicker.yml"
+    ).read_text()
+    assert launchpad_kicker.count("cloudflare_generator_audit:") == 2
+    assert launchpad_kicker.count("cloudflare_generator_audit_fail_on:") == 2
+
+    universal_config_action = (
+        ROOT / ".github/actions/shared/universal-config/action.yml"
+    ).read_text()
+    assert '"generator_audit": cloudflare_raw.get("generator_audit") is True' in universal_config_action
+    assert '"generator_audit_fail_on"' in universal_config_action
 
     assert (
         "global_config_path: hub-config/sync-files/config/code-scanning-kit-global-config.json"
@@ -756,14 +928,16 @@ def main() -> None:
     )
     assert "use_global_config: 'true'" in gate_workflow
     assert "config: .github/bos-universal-config.json" in gate_workflow
-    assert "bos-code-scanning-kit@b69500c85971a6df06e33f7b56881682bd09c2a2" in gate_workflow
+    assert_first_party_pin(gate_workflow, "blackoutsecure/bos-code-scanning-kit")
     standalone_scan_workflow = (
         ROOT / ".github/workflows/security-scan.yml"
     ).read_text()
     assert "sparse-checkout: sync-files/config/code-scanning-kit-global-config.json" in standalone_scan_workflow
     assert "use_global_config: 'true'" in standalone_scan_workflow
     assert "config: .github/bos-universal-config.json" in standalone_scan_workflow
-    assert "bos-code-scanning-kit@b69500c85971a6df06e33f7b56881682bd09c2a2" in standalone_scan_workflow
+    assert_first_party_pin(
+        standalone_scan_workflow, "blackoutsecure/bos-code-scanning-kit"
+    )
     global_sync_config = json.loads(
         (ROOT / "sync-files/config/managed-file-sync-global-config.json").read_text()
     )
@@ -867,7 +1041,9 @@ def main() -> None:
     assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
     assert "use_global_config: 'auto'" in sync_backend
-    assert "bos-managed-file-sync-action@ec3701f92a86d220fc0c3c8327624315ce0c98fa" in sync_backend
+    assert_first_party_pin(
+        sync_backend, "blackoutsecure/bos-managed-file-sync-action"
+    )
     assert "uses: ./hub-source/.github/actions/shared/commit-and-push" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend

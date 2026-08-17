@@ -262,6 +262,11 @@ runs:
             "generate_security_txt": cloudflare_raw.get("generate_security_txt") is True,
             "generate_humans_txt": cloudflare_raw.get("generate_humans_txt") is True,
             "security_contact": str(cloudflare_raw.get("security_contact") or ""),
+            "generator_audit": cloudflare_raw.get("generator_audit") is True,
+            "generator_audit_fail_on": str(cloudflare_raw.get("generator_audit_fail_on") or "never"),
+            "generator_audit_artifact_name": str(
+                cloudflare_raw.get("generator_audit_artifact_name") or "site-compliance-reports"
+            ),
             "generate_manifest": cloudflare_raw.get("generate_manifest") is True,
             "manifest_name": str(cloudflare_raw.get("manifest_name") or ""),
             "manifest_short_name": str(cloudflare_raw.get("manifest_short_name") or ""),

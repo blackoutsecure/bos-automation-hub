@@ -352,7 +352,7 @@ jobs:
 
       - name: Discover upstream version
         id: discover
-        uses: blackoutsecure/bos-upstream-watcher@c91a6fd7d42161f1b37ab6da12ca6a6bbaabe739 # dev
+        uses: blackoutsecure/bos-upstream-watcher@1a336966520af363c9b76cdd34c0f1443b723179 # v1.1.3
         with:
           config_path: .github/bos-universal-config.json
           global_config_path: hub-config/sync-files/config/upstream-watcher-global-config.json

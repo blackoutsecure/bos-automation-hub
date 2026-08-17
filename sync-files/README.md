@@ -18,6 +18,13 @@ the repo layer and check out the shared global policy at
 The upstream monitor also loads
 `sync-files/config/upstream-watcher-global-config.json` and merges any
 repository-specific `upstream_watcher` section from the universal config.
+The Cloudflare deploy workflow loads
+`sync-files/config/sitemap-generator-global-config.json`,
+`sync-files/config/securitytxt-generator-global-config.json`,
+`sync-files/config/robotstxt-generator-global-config.json`,
+`sync-files/config/humanstxt-generator-global-config.json`, and
+`sync-files/config/web-manifest-generator-global-config.json` as the global
+tier for the site generators' built-in compliance audits.
 Settings may be authored as flat top-level keys or grouped under a named
 section per service (`launchpad`, `marketplace`, `security`, plus a
 `general` catch-all for anything else) — see the ["Config sections"](../README.md#config-sections)

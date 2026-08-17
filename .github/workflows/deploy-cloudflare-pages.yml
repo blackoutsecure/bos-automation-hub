@@ -199,6 +199,32 @@ name: Cloudflare Pages Deploy
         type: boolean
         default: false
 
+      # ── Generator compliance audit ─────────────────────────────────
+      # The sitemap and security.txt generators each ship a posture audit
+      # (SEO / RFC 9116). The hub supplies org-wide rule severities from
+      # `sync-files/config/*-generator-global-config.json`; these inputs
+      # control the run disposition and where the reports land.
+      generator_audit:
+        description: >-
+          Run the sitemap and security.txt generators' built-in compliance
+          audits and collect their reports. Disabled by default so existing
+          consumers keep byte-identical deploy behaviour.
+        required: false
+        type: boolean
+        default: false
+      generator_audit_fail_on:
+        description: >-
+          Audit exit policy forwarded to both generators: `fail` blocks the
+          deploy on any failing control, `never` keeps the audit advisory.
+        required: false
+        type: string
+        default: 'never'
+      generator_audit_artifact_name:
+        description: 'Artifact name for the collected generator audit reports.'
+        required: false
+        type: string
+        default: 'site-compliance-reports'
+
       # ── robots.txt generator ───────────────────────────────────────
       generate_robots:
         description: 'Run the Blackout Secure robots.txt generator before deploy.'
@@ -971,12 +997,38 @@ jobs:
       # them together with the rest of the actions in this repo.
       # ──────────────────────────────────────────────────────────────
 
+      # Org-wide audit policy for the site generators (sitemap, robots.txt,
+      # security.txt, web app manifest).
+      # Sparse-checked-out next to the deploy tree so the generators can
+      # merge it beneath any repository-level config the consumer ships.
+      - name: Checkout generator audit policy
+        if: inputs.generator_audit && (inputs.generate_sitemap || inputs.generate_security_txt || inputs.generate_robots || inputs.generate_manifest)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: main
+          path: hub-generator-config
+          persist-credentials: false
+          sparse-checkout: |
+            sync-files/config/sitemap-generator-global-config.json
+            sync-files/config/securitytxt-generator-global-config.json
+            sync-files/config/robotstxt-generator-global-config.json
+            sync-files/config/web-manifest-generator-global-config.json
+          sparse-checkout-cone-mode: false
+
       - name: Generate sitemap
         if: inputs.generate_sitemap
         uses: blackoutsecure/bos-sitemap-generator@fee1be2a6770cd2ee4b6424ccb67ab1ff6bf554a # v1.0.2
         with:
           site_url: ${{ inputs.site_url }}
           public_dir: ${{ inputs.deploy_dir }}
+          enable_audit: ${{ inputs.generator_audit }}
+          use_global_config: ${{ inputs.generator_audit && 'true' || 'false' }}
+          global_config_path: hub-generator-config/sync-files/config/sitemap-generator-global-config.json
+          audit_fail_on: ${{ inputs.generator_audit && inputs.generator_audit_fail_on || '' }}
+          sarif_output: ${{ inputs.generator_audit && 'generator-audit/sitemap-audit.sarif' || '' }}
+          report_json: ${{ inputs.generator_audit && 'generator-audit/sitemap-audit.json' || '' }}
+          recommendations_json: ${{ inputs.generator_audit && 'generator-audit/sitemap-recommendations.json' || '' }}
 
       - name: Generate Web App Manifest
         if: inputs.generate_manifest
@@ -993,6 +1045,13 @@ jobs:
           categories: ${{ inputs.manifest_categories }}
           public_dir: ${{ inputs.deploy_dir }}
           icons_dir: ${{ inputs.manifest_icons_dir }}
+          enable_audit: ${{ inputs.generator_audit }}
+          use_global_config: ${{ inputs.generator_audit && 'true' || 'false' }}
+          global_config_path: hub-generator-config/sync-files/config/web-manifest-generator-global-config.json
+          audit_fail_on: ${{ inputs.generator_audit && inputs.generator_audit_fail_on || '' }}
+          sarif_output: ${{ inputs.generator_audit && 'generator-audit/web-manifest-audit.sarif' || '' }}
+          report_json: ${{ inputs.generator_audit && 'generator-audit/web-manifest-audit.json' || '' }}
+          recommendations_json: ${{ inputs.generator_audit && 'generator-audit/web-manifest-recommendations.json' || '' }}
 
       - name: Generate _redirects
         if: inputs.generate_redirects
@@ -1009,6 +1068,13 @@ jobs:
         with:
           site_url: ${{ inputs.site_url }}
           public_dir: ${{ inputs.deploy_dir }}
+          enable_audit: ${{ inputs.generator_audit }}
+          use_global_config: ${{ inputs.generator_audit && 'true' || 'false' }}
+          global_config_path: hub-generator-config/sync-files/config/robotstxt-generator-global-config.json
+          audit_fail_on: ${{ inputs.generator_audit && inputs.generator_audit_fail_on || '' }}
+          sarif_output: ${{ inputs.generator_audit && 'generator-audit/robotstxt-audit.sarif' || '' }}
+          report_json: ${{ inputs.generator_audit && 'generator-audit/robotstxt-audit.json' || '' }}
+          recommendations_json: ${{ inputs.generator_audit && 'generator-audit/robotstxt-recommendations.json' || '' }}
 
       - name: Generate security.txt
         if: inputs.generate_security_txt
@@ -1017,7 +1083,18 @@ jobs:
           security_contact: ${{ inputs.security_contact }}
           site_url: ${{ inputs.site_url }}
           public_dir: ${{ inputs.deploy_dir }}
+          enable_audit: ${{ inputs.generator_audit }}
+          use_global_config: ${{ inputs.generator_audit && 'true' || 'false' }}
+          global_config_path: hub-generator-config/sync-files/config/securitytxt-generator-global-config.json
+          audit_fail_on: ${{ inputs.generator_audit && inputs.generator_audit_fail_on || '' }}
+          sarif_output: ${{ inputs.generator_audit && 'generator-audit/securitytxt-audit.sarif' || '' }}
+          report_json: ${{ inputs.generator_audit && 'generator-audit/securitytxt-audit.json' || '' }}
+          recommendations_json: ${{ inputs.generator_audit && 'generator-audit/securitytxt-recommendations.json' || '' }}
 
+      # Emits humanstxt.org-standard field names under the standard TEAM,
+      # THANKS, and SITE banners so the file satisfies the same controls
+      # `bos-humanstxt-generator` audits. Swap this block for that action
+      # once it publishes a taggable release the pin bumper can track.
       - name: Generate humans.txt
         if: inputs.generate_humans_txt
         env:
@@ -1031,24 +1108,31 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${DEPLOY_DIR}"
+          last_update="$(date -u +'%Y/%m/%d')"
           generated_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           repo_url="${SERVER_URL}/${REPO}"
           run_url="${repo_url}/actions/runs/${RUN_ID}"
           site_url="${SITE_URL:-${repo_url}}"
 
           cat > "${DEPLOY_DIR}/humans.txt" <<EOF
+          /* HUMANS.TXT */
+          /* humanstxt.org */
+
           /* TEAM */
-          Organization: ${OWNER}
-          Repository: ${repo_url}
+            Name: ${OWNER}
+            Title: Maintainers
+            Contact: ${repo_url}
+
+          /* THANKS */
+            Blackout Secure Launchpad
+            ${repo_url}
 
           /* SITE */
-          Site: ${site_url}
-          Build run: ${run_url}
-          Generated (UTC): ${generated_at}
-          Standards: HTML5, CSS3
-
-          /* NOTES */
-          This file is generated by Blackout Secure Launchpad during publish.
+            Last update: ${last_update}
+            Standards: HTML5, CSS3
+            Site: ${site_url}
+            Build: ${run_url}
+            Generated: ${generated_at}
           EOF
 
       # Hub-local composite action — not pinned because it lives in the
@@ -1073,6 +1157,18 @@ jobs:
           common_sitemap_xml_cache_control: ${{ inputs.common_sitemap_xml_cache_control }}
           common_humans_txt_cache_control: ${{ inputs.common_humans_txt_cache_control }}
           custom_rules: ${{ inputs.headers_custom_rules }}
+
+      # Audit reports live outside `deploy_dir`, so they are collected as a
+      # build artifact rather than published with the site.
+      - name: Upload generator audit reports
+        if: inputs.generator_audit && always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.generator_audit_artifact_name }}
+          path: generator-audit/
+          if-no-files-found: ignore
+          retention-days: 30
+
           replace_existing: ${{ inputs.headers_replace_existing }}
 
       # ──────────────────────────────────────────────────────────────

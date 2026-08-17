@@ -306,6 +306,9 @@ jobs:
       cloudflare_generate_security_txt:     ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_security_txt == true }}
       cloudflare_generate_humans_txt:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_humans_txt == true }}
       cloudflare_security_contact:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.security_contact || '' }}
+      cloudflare_generator_audit:           ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generator_audit == true }}
+      cloudflare_generator_audit_fail_on:   ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generator_audit_fail_on || 'never' }}
+      cloudflare_generator_audit_artifact_name: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generator_audit_artifact_name || 'site-compliance-reports' }}
       cloudflare_generate_manifest:         ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_manifest == true }}
       cloudflare_manifest_name:             ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_name || '' }}
       cloudflare_manifest_short_name:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_short_name || '' }}
@@ -491,6 +494,9 @@ jobs:
       cloudflare_generate_security_txt:     ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_security_txt == true }}
       cloudflare_generate_humans_txt:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_humans_txt == true }}
       cloudflare_security_contact:          ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.security_contact || '' }}
+      cloudflare_generator_audit:           ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generator_audit == true }}
+      cloudflare_generator_audit_fail_on:   ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generator_audit_fail_on || 'never' }}
+      cloudflare_generator_audit_artifact_name: ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generator_audit_artifact_name || 'site-compliance-reports' }}
       cloudflare_generate_manifest:         ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.generate_manifest == true }}
       cloudflare_manifest_name:             ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_name || '' }}
       cloudflare_manifest_short_name:       ${{ fromJson(needs.parse-config.outputs.cfg).cloudflare.manifest_short_name || '' }}

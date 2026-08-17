@@ -562,6 +562,25 @@ name: '[RUNTIME] Blackout Secure Launchpad'
         required: false
         type: boolean
         default: false
+      cloudflare_generator_audit:
+        description: >-
+          Run the sitemap and security.txt generators' built-in compliance
+          audits and collect their reports as a build artifact.
+        required: false
+        type: boolean
+        default: false
+      cloudflare_generator_audit_fail_on:
+        description: >-
+          Generator audit exit policy: `fail` blocks the deploy on any failing
+          control, `never` keeps the audit advisory.
+        required: false
+        type: string
+        default: 'never'
+      cloudflare_generator_audit_artifact_name:
+        description: 'Artifact name for the collected generator audit reports.'
+        required: false
+        type: string
+        default: 'site-compliance-reports'
       cloudflare_generate_robots:
         description: 'Run the Blackout Secure robots.txt generator before deploy.'
         required: false
@@ -1541,6 +1560,9 @@ jobs:
       generate_security_txt:      ${{ inputs.cloudflare_generate_security_txt }}
       generate_humans_txt:        ${{ inputs.cloudflare_generate_humans_txt }}
       security_contact:           ${{ inputs.cloudflare_security_contact }}
+      generator_audit:            ${{ inputs.cloudflare_generator_audit }}
+      generator_audit_fail_on:    ${{ inputs.cloudflare_generator_audit_fail_on }}
+      generator_audit_artifact_name: ${{ inputs.cloudflare_generator_audit_artifact_name }}
       generate_manifest:          ${{ inputs.cloudflare_generate_manifest }}
       manifest_name:              ${{ inputs.cloudflare_manifest_name }}
       manifest_short_name:        ${{ inputs.cloudflare_manifest_short_name }}
@@ -1622,6 +1644,9 @@ jobs:
       generate_security_txt:      ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_security_txt }}
       generate_humans_txt:        ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_humans_txt }}
       security_contact:           ${{ fromJson(needs.parse-config.outputs.cloudflare).security_contact }}
+      generator_audit:            ${{ fromJson(needs.parse-config.outputs.cloudflare).generator_audit }}
+      generator_audit_fail_on:    ${{ fromJson(needs.parse-config.outputs.cloudflare).generator_audit_fail_on }}
+      generator_audit_artifact_name: ${{ fromJson(needs.parse-config.outputs.cloudflare).generator_audit_artifact_name }}
       generate_manifest:          ${{ fromJson(needs.parse-config.outputs.cloudflare).generate_manifest }}
       manifest_name:              ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_name }}
       manifest_short_name:        ${{ fromJson(needs.parse-config.outputs.cloudflare).manifest_short_name }}

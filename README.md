@@ -108,6 +108,67 @@ passes via `global_config_path`. A repository can layer its own overrides with
 a `code_scanning` block in its own `.github/bos-universal-config.json`, which
 `bos-code-scanning-kit` receives explicitly as its repository-tier config.
 
+## Site generator compliance audit
+
+The published site generators
+([`bos-sitemap-generator`](https://github.com/blackoutsecure/bos-sitemap-generator),
+[`bos-securitytxt-generator`](https://github.com/blackoutsecure/bos-securitytxt-generator),
+[`bos-robotstxt-generator`](https://github.com/blackoutsecure/bos-robotstxt-generator),
+[`bos-humanstxt-generator`](https://github.com/blackoutsecure/bos-humanstxt-generator),
+[`bos-web-application-manifest-generator`](https://github.com/blackoutsecure/bos-web-application-manifest-generator))
+each ship a posture audit — SEO/sitemaps.org rules for the first, RFC 9116 for
+the second, RFC 9309 for the third, humanstxt.org for the fourth, and the W3C
+Web App Manifest / PWA installability criteria for the fifth — resolved through
+the same marketplace → global → repository config cascade the code-scanning kit
+uses. The hub owns the global tier:
+
+- [sync-files/config/sitemap-generator-global-config.json](sync-files/config/sitemap-generator-global-config.json)
+- [sync-files/config/securitytxt-generator-global-config.json](sync-files/config/securitytxt-generator-global-config.json)
+- [sync-files/config/robotstxt-generator-global-config.json](sync-files/config/robotstxt-generator-global-config.json)
+- [sync-files/config/humanstxt-generator-global-config.json](sync-files/config/humanstxt-generator-global-config.json)
+- [sync-files/config/web-manifest-generator-global-config.json](sync-files/config/web-manifest-generator-global-config.json)
+
+All set `fail_on: never`, so a failing control is fully reported without
+blocking a deploy until a repository opts up. `enable_ai_findings_summary` is
+`false` org-wide, matching the code-scanning kit policy — the generators fall
+back to their deterministic local summary.
+
+[`deploy-cloudflare-pages.yml`](.github/workflows/deploy-cloudflare-pages.yml)
+sparse-checks-out those policy files into `hub-generator-config/` and passes
+each generator its `global_config_path`. Enable the audit through
+`cloudflare.generator_audit` in `bos-launchpad-config.json`:
+
+```json
+{
+  "cloudflare": {
+    "generate_sitemap": true,
+    "generate_robots": true,
+    "generate_security_txt": true,
+    "security_contact": "security@example.com",
+    "generator_audit": true,
+    "generator_audit_fail_on": "never"
+  }
+}
+```
+
+Audit artefacts (SARIF, JSON report, recommendations) are written to
+`generator-audit/` — deliberately outside `deploy_dir`, so they are collected as
+the `site-compliance-reports` build artifact and never published with the site.
+Each generator also appends its Markdown report to the job step summary.
+
+> The generator `uses:` pins in `deploy-cloudflare-pages.yml` must reach the
+> releases that carry these inputs before `generator_audit` has any effect.
+> All four site generators are now tracked in
+> [`.github/action-pins.json`](.github/action-pins.json), so `sync-action-pins.yml`
+> bumps them automatically once those releases land.
+
+`humans.txt` is still emitted by an inline block in
+`deploy-cloudflare-pages.yml` rather than by `bos-humanstxt-generator`, because
+that action has no taggable release for the pin bumper to resolve yet. The block
+now emits humanstxt.org-standard field names under the standard `TEAM`,
+`THANKS`, and `SITE` banners, so swapping it for the action is a drop-in change
+once a release exists.
+
 ## Managed file sync
 
 [`bos-universal-sync.yml`](.github/workflows/bos-universal-sync.yml) is a thin
@@ -817,6 +878,7 @@ Run the repository contract before promotion:
 
 ```bash
 python3 scripts/test_universal_config_contract.py
+python3 scripts/test_sync_action_pins.py
 python3 -m py_compile scripts/test_universal_config_contract.py
 git diff --check
 ```
@@ -824,6 +886,32 @@ git diff --check
 The contract verifies universal config and gate input forwarding, managed-service
 output, branch/ref ownership, semantic runtime promotion, and internal README
 links. [`lint.yml`](.github/workflows/lint.yml) runs it in CI.
+
+### First-party action pins
+
+Hub references to first-party Blackout Secure actions stay pinned to immutable
+commit SHAs, each carrying a `# vX.Y.Z` provenance comment. `uses:` cannot
+contain expressions, so "always use the latest tag" is resolved out-of-band
+rather than at run time — which keeps `PS012` (`require_pinned_actions`),
+Marketplace SC002 hygiene, and CodeQL `actions/unpinned-tag` satisfied.
+
+[`sync-action-pins.yml`](.github/workflows/sync-action-pins.yml) runs daily,
+resolves the newest tag for every action listed in
+[`action-pins.json`](.github/action-pins.json), rewrites any stale pin, and
+opens a PR. Resolution ranks stable releases **and** pre-releases together by
+SemVer precedence, because `GET /releases/latest` silently excludes
+pre-releases and would otherwise report an older version.
+
+```bash
+python3 scripts/sync_action_pins.py --check   # report drift, exit 1 when stale
+python3 scripts/sync_action_pins.py --write   # rewrite pins in place
+```
+
+Bumping requires `WORKFLOW_SYNC_PAT`, since `GITHUB_TOKEN` can never write to
+`.github/workflows/**`. Without it the job reports drift and exits cleanly.
+The shared
+[`resolve-latest-action-ref`](.github/actions/shared/resolve-latest-action-ref/action.yml)
+composite exposes the same resolution to any workflow that needs a tag or SHA.
 
 ## License
 
