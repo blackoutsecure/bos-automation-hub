@@ -1528,7 +1528,7 @@ jobs:
       )
     permissions:
       contents: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@dev
     with:
       cloudflare_project_name:    ${{ inputs.cloudflare_project_name }}
       deployment_environment:     ${{ inputs.cloudflare_deployment_environment }}
@@ -1615,7 +1615,7 @@ jobs:
       )
     permissions:
       contents: read
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/deploy-cloudflare-pages.yml@dev
     with:
       cloudflare_project_name:    ${{ fromJson(needs.parse-config.outputs.cloudflare).project_name }}
       deployment_environment:     ${{ fromJson(needs.parse-config.outputs.cloudflare).deployment_environment }}

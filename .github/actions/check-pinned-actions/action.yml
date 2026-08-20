@@ -47,6 +47,7 @@ runs:
         # specific action (e.g. a trusted first-party GitHub action), add
         # its `owner/repo` here, ONE PER LINE. Default: none.
         ALLOW_TAG_PIN: |
+          blackoutsecure/bos-automation-hub
       run: |
         set -euo pipefail
 
