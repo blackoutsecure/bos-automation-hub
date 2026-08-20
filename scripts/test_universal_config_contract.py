@@ -416,6 +416,11 @@ def main() -> None:
     assert marketplace_kicker.count("marketplace-repo-guard.yml@main") == 1
     assert marketplace_kicker.count("release-promote.yml@main") == 1
     assert marketplace_kicker.count("repo-metadata-sync.yml@dev") == 1
+    assert marketplace_kicker.count("repo-metadata-sync.yml@main") == 1
+    assert "metadata-dev:" in marketplace_kicker
+    assert "metadata-main:" in marketplace_kicker
+    assert "needs.parse_config.outputs.target_ref == 'dev'" in marketplace_kicker
+    assert "needs.parse_config.outputs.target_ref == 'main'" in marketplace_kicker
     assert "options: [validate, name-check, promote, release, metadata]" in marketplace_kicker
     assert "publish_release:" in marketplace_kicker
     assert "require_source_release:" in marketplace_kicker
