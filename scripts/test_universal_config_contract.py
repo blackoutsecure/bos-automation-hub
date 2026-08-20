@@ -354,6 +354,7 @@ def main() -> None:
     assert "  workflow_dispatch:" not in gate_workflow
     assert not (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
     assert "name: '[RUNTIME] Blackout Secure Universal Security'" in gate_workflow
+    assert '"python_packages": ["ruff>=0.6", "pytest>=8.0", "PyYAML>=6.0"]' in gate_workflow
     assert "name: security" in security_kicker
     assert "name: Security summary" in gate_workflow
     assert "kit_version:" not in gate_workflow

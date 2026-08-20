@@ -277,7 +277,7 @@ jobs:
               "node_version": "20",
               "python_lint_mode": "auto",
               "python_version": "3.11",
-              "python_packages": ["ruff>=0.6", "pytest>=8.0"],
+              "python_packages": ["ruff>=0.6", "pytest>=8.0", "PyYAML>=6.0"],
               "shell_lint_mode": "auto",
               "enable_dependency_review": True,
               "enable_code_scan": True,
