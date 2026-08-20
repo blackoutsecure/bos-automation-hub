@@ -27,6 +27,10 @@ run-name: >-
 
 permissions:
   contents: read
+  actions: write
+  pull-requests: write
+  security-events: write
+  models: read
 
 concurrency:
   group: bos-hub-launchpad-${{ github.repository }}-${{ github.ref }}
