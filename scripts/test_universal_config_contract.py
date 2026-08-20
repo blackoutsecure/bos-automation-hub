@@ -421,6 +421,29 @@ def main() -> None:
     assert "metadata-main:" in marketplace_kicker
     assert "needs.parse_config.outputs.target_ref == 'dev'" in marketplace_kicker
     assert "needs.parse_config.outputs.target_ref == 'main'" in marketplace_kicker
+
+    marketplace_ruleset_path = (
+        ROOT / "scripts/marketplace-repo/main-protection-ruleset.json"
+    )
+    marketplace_ruleset = json.loads(marketplace_ruleset_path.read_text())
+    assert marketplace_ruleset["name"] == "marketplace-action-default-branch-guard"
+    assert marketplace_ruleset["target"] == "branch"
+    assert marketplace_ruleset["enforcement"] == "active"
+    assert marketplace_ruleset["bypass_actors"] == [{
+        "actor_id": "BYPASS_ACTOR_ID_PLACEHOLDER",
+        "actor_type": "Integration",
+        "bypass_mode": "always",
+    }]
+    assert marketplace_ruleset["conditions"]["ref_name"]["include"] == [
+        "~DEFAULT_BRANCH"
+    ]
+    ruleset_types = {rule["type"] for rule in marketplace_ruleset["rules"]}
+    assert {"deletion", "non_fast_forward", "pull_request", "file_path_restriction"} <= ruleset_types
+    marketplace_ruleset_readme = (
+        ROOT / "scripts/marketplace-repo/README.md"
+    ).read_text()
+    assert "does not satisfy `PS020` on its own" in marketplace_ruleset_readme
+
     assert "options: [validate, name-check, promote, release, metadata]" in marketplace_kicker
     assert "publish_release:" in marketplace_kicker
     assert "require_source_release:" in marketplace_kicker
