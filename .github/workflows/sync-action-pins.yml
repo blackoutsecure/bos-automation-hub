@@ -107,7 +107,16 @@ jobs:
           # files on the runner can never ride along in the bump commit.
           git add -u -- .github sync-files
           git commit -m 'chore(deps): bump first-party action pins to newest tags'
-          git push --force-with-lease origin "${BRANCH}"
+          # The checkout starts from the triggering branch, so it does not
+          # necessarily have a fresh remote-tracking ref for an existing PR
+          # branch. Resolve the current branch SHA immediately before the
+          # guarded force-push instead of using a stale implicit lease.
+          remote_sha="$(git ls-remote --heads origin "refs/heads/${BRANCH}" | awk '{print $1}')"
+          if [ -n "${remote_sha}" ]; then
+            git push --force-with-lease="refs/heads/${BRANCH}:${remote_sha}" origin "${BRANCH}"
+          else
+            git push origin "${BRANCH}"
+          fi
 
           if [ -z "$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[].number')" ]; then
             gh pr create \
