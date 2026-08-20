@@ -647,7 +647,7 @@ jobs:
           # Need full history so the composite can diff against base.
           fetch-depth: 0
       - name: Check `uses:` pinning
-        uses: ./.github/actions/check-pinned-actions
+        uses: blackoutsecure/bos-automation-hub/.github/actions/check-pinned-actions@dev
 
   # -----------------------------------------------------------------
   # 6a. README header — verify the README starts with the canonical
@@ -667,7 +667,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate README header
-        uses: ./.github/actions/shared/check-readme-header
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/check-readme-header@dev
         with:
           profile: ${{ fromJSON(needs.resolve-config.outputs.gate).readme_header_profile }}
 
