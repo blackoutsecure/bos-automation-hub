@@ -6,7 +6,7 @@ Managed-file synchronization is provided by
 Consumer repositories select its services in the `managed_file_sync` section
 of `.github/bos-universal-config.json`. The global policy enables
 organization-wide `shellcheck`, Security kicker, and Sync kicker defaults;
-repository-specific kickers (`bos_universal_launchpad_kicker`,
+repository-specific kickers (`bos_universal_gatekeeper_kicker`,
 `bos_universal_marketplace_kicker`, `bos_universal_upstream_kicker`,
 `bos_universal_action_test_kicker`) remain available as global service
 definitions and must be selected by repositories that need them. The global
@@ -39,11 +39,13 @@ content. Generic dotfile services (`shellcheck`, `yamllint`, `markdownlint`,
 (`content_lines`) in `bos-managed-file-sync-action`'s own bundled marketplace
 config — there is no hub-local dotfile source directory to maintain.
 
-- [`bos-universal-launchpad-kicker.yml`](workflows/bos-universal-launchpad-kicker.yml)
-  is the managed release/deploy caller. It reads `.github/bos-universal-config.json`
-  and calls the promoted hub runtime on `@main`. Launchpad stays one front door;
-  its backend workflow owns separate monitor, release, Cloudflare, security,
-  and metadata jobs so config and permissions are resolved once.
+- [`bos-universal-gatekeeper-kicker.yml`](workflows/bos-universal-gatekeeper-kicker.yml)
+  is the managed release/deploy caller and the single manual-dispatch front
+  door. It reads `.github/bos-universal-config.json` and calls the promoted hub
+  runtime on `@main`. Its backend workflow owns separate monitor, release,
+  Cloudflare, security, and metadata jobs so config and permissions are
+  resolved once. Installing this service also removes the superseded
+  `bos-universal-launchpad-kicker.yml`.
 - [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
   is the managed PR and merge-queue caller for shared lint, dependency review,
   code scanning, and repository policy. Pin `security (dev) / Security summary`
@@ -143,7 +145,7 @@ targeting is resolved ahead of time and encoded as static per-branch jobs:
   a run targets, then dispatch to same-named jobs whose `uses:` refs are pinned
   to `@dev` and `@main`; the sync kicker invokes the published action directly
   and does not depend on a hub runtime branch;
-- the launchpad kicker only ever fires on `main` pushes, so it has no `dev`
+- the gatekeeper kicker only ever fires on `main` pushes, so it has no `dev`
   variant and always calls `@main`;
 - `bos-universal-sync.yml` is the hub's callable-only reusable workflow for
   the published sync action; `bos-universal-sync-kicker.yml` owns all events;

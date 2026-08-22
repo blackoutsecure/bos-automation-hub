@@ -1,0 +1,42 @@
+name: Gatekeeper preflight
+author: Blackout Secure
+description: >-
+  Verify the runner actually provides the toolchain a gated operation needs
+  before that operation starts. Takes a declarative dependency spec
+  (commands, minimum versions, Python distributions) from the repository
+  config and fails fast with a table of what is missing, instead of letting a
+  job fail halfway through with credentials already in scope.
+
+inputs:
+  spec:
+    description: >-
+      JSON object describing the requirements. Keys: `required_commands`,
+      `min_versions`, `version_args`, `required_python_packages`,
+      `fail_on_missing`. Empty skips the check entirely.
+    required: false
+    default: ''
+  gate_level:
+    description: Gate level this preflight is running for. Reporting only.
+    required: false
+    default: standard
+
+outputs:
+  satisfied:
+    description: '`true` when every declared requirement was met.'
+    value: ${{ steps.check.outputs.satisfied }}
+  missing:
+    description: Comma-separated list of unmet requirements.
+    value: ${{ steps.check.outputs.missing }}
+
+runs:
+  using: composite
+  steps:
+    - name: Verify runner dependencies
+      id: check
+      shell: bash
+      env:
+        PREFLIGHT_SPEC: ${{ inputs.spec }}
+        GATE_LEVEL: ${{ inputs.gate_level }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/preflight.py"

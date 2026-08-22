@@ -2,7 +2,8 @@
 #
 # `uses:` cannot contain expressions, so no workflow can resolve "latest"
 # at run time without giving up SHA pinning. This job does the resolution
-# out-of-band instead: it reads `.github/action-pins.json`, resolves the
+# out-of-band instead: it reads the `action_pins` section of
+# `.github/bos-universal-config.json`, resolves the
 # newest tag for each listed action (ranking stable releases AND
 # pre-releases together by SemVer, because `GET /releases/latest` silently
 # skips pre-releases), rewrites the pinned SHA plus its trailing `# <tag>`

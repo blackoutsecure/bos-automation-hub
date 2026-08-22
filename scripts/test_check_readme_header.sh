@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # test_check_readme_header.sh — fixture-driven test for the
-# `.github/actions/shared/check-readme-header` composite action.
+# `.github/actions/check-readme-header` composite action.
 #
 # Extracts the embedded shell from the composite, then exercises pass +
 # fail paths for every profile (marketplace, docker, generic) plus the
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-action_yml="${repo_root}/.github/actions/shared/check-readme-header/action.yml"
+action_yml="${repo_root}/.github/actions/check-readme-header/action.yml"
 work="${TMPDIR:-/tmp}/bos-readme-header-test.$$"
 trap 'rm -rf "${work}"' EXIT
 mkdir -p "${work}"

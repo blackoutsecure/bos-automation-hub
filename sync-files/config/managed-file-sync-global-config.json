@@ -56,12 +56,17 @@
           }
         ]
       },
-      "bos_universal_launchpad_kicker": {
+      "bos_universal_gatekeeper_kicker": {
         "mode": "file",
+        "description": "Central gatekeeper kicker. Also removes the superseded bos-universal-launchpad-kicker.yml so a renamed consumer never ends up running both front doors.",
         "files": [
           {
+            "path": ".github/workflows/bos-universal-gatekeeper-kicker.yml",
+            "content_file": "workflows/bos-universal-gatekeeper-kicker.yml"
+          },
+          {
             "path": ".github/workflows/bos-universal-launchpad-kicker.yml",
-            "content_file": "workflows/bos-universal-launchpad-kicker.yml"
+            "mode": "absent"
           }
         ]
       },

@@ -124,12 +124,12 @@ name: '[RUNTIME] Blackout Secure Universal Marketplace'
       #   * `local`   — file must be in this repo (org fallback disabled).
       #   * `inherit` — file expected at `${org_health_repo}`; local copy
       #                 is intentionally absent and NOT consulted.
-      #   * `either`  — local first, fall back to org (default, back-compat).
+      #   * `either`  — local first, fall back to org (default).
       community_health_source:
         description: >-
           Global default source for CH/SC files. `local` | `inherit` |
-          `either`. Default `either` (back-compat). Override per-rule with
-          the `*_source` inputs below.
+          `either`. Default `either`. Override per-rule with the `*_source`
+          inputs below.
         required: false
         type: string
         default: 'either'
@@ -171,7 +171,7 @@ name: '[RUNTIME] Blackout Secure Universal Marketplace'
 
       # ----- DP/CQ/LT/GH/MS/SR rules (new families added in kit v0.2.0+) -
       # Same `fail | warn | skip` semantics as the CH/SC rules above.
-      # Defaults follow the kit's own defaults — back-compat additive.
+      # Defaults follow the kit's own defaults.
       require_dependabot:
         description: 'Policy override for `.github/dependabot.yml` presence (DP001); empty uses config.'
         required: false

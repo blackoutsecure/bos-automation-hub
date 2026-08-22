@@ -24,8 +24,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MANIFEST = ROOT / ".github/action-pins.json"
-RESOLVER = ROOT / ".github/actions/shared/resolve-latest-action-ref/resolve.py"
+CONFIG = ROOT / ".github/bos-universal-config.json"
+RESOLVER = ROOT / ".github/actions/resolve-latest-action-ref/resolve.py"
 
 
 def _load_resolver():
@@ -67,6 +67,17 @@ def iter_files(globs: list[str]) -> list[Path]:
     return list(seen)
 
 
+def load_manifest() -> dict:
+    """Read the `action_pins` section of the hub's universal config."""
+    config = json.loads(CONFIG.read_text(encoding="utf-8"))
+    manifest = config.get("action_pins")
+    if not isinstance(manifest, dict):
+        raise SystemExit(f"missing `action_pins` section in {CONFIG.relative_to(ROOT)}")
+    if not manifest.get("repositories"):
+        raise SystemExit(f"`action_pins.repositories` is empty in {CONFIG.relative_to(ROOT)}")
+    return manifest
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -75,7 +86,7 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="emit a JSON summary")
     args = parser.parse_args()
 
-    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    manifest = load_manifest()
     default_channel = manifest.get("channel", "auto")
     globs = manifest.get("scan_globs") or []
     files = iter_files(globs)

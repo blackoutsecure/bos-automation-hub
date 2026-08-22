@@ -1,4 +1,18 @@
-# Blackout Secure Launchpad — universal kicker (hub-managed).
+# Blackout Secure universal gatekeeper — central kicker (hub-managed).
+#
+# Single front door for manually dispatched automation in this repository.
+# Automatic triggers (schedule/push) keep driving the release pipeline exactly
+# as before; `workflow_dispatch` additionally routes to the security, sync,
+# action-test, metadata, and Marketplace backends after an authorization gate.
+#
+# Workflows reachable from this kicker:
+#   bos-universal-gatekeeper.yml   release / deploy / security / metadata stages
+#   bos-universal-sync.yml         managed-file reconciliation
+#   bos-universal-action-test.yml  action smoke tests
+#   repo-metadata-sync.yml         About-box metadata
+#   bos-universal-marketplace.yml  Marketplace validation
+#   release-promote.yml            dev -> main promotion + tagging
+#
 # Customize via `.github/bos-universal-config.json`, not this file.
 # Schema docs: https://github.com/blackoutsecure/bos-automation-hub
 # Required vars (names overridable via `.github/bos-universal-config.json`):
@@ -6,11 +20,13 @@
 # Required secrets:
 #   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, BALENA_API_TOKEN
 #   UPSTREAM_TOKEN (optional — only for private upstream repos)
-name: '[KICKER] Blackout Secure Launchpad'
+#   GATEKEEPER_AUTHZ_PAT (required for manual dispatch; read:org [+
+#     admin:enterprise when an enterprise-owner check is configured])
+name: '[KICKER] Blackout Secure Universal Gatekeeper'
 run-name: >-
-  Blackout Secure Launchpad / ${{ github.event_name == 'workflow_dispatch' && inputs.operation || 'full' }} / ${{
+  Gatekeeper / ${{ github.event_name == 'workflow_dispatch' && inputs.operation || 'full' }} / ${{
     github.event_name == 'workflow_dispatch'
-      && (inputs.force_run && 'manual force' || 'manual')
+      && format('manual by @{0}{1}', github.actor, inputs.force_run && ' (force)' || '')
       || github.event_name == 'schedule'
       && (github.event.schedule == '41 3 * * 0' && 'scheduled force rebuild' || 'scheduled')
       || 'push'
@@ -36,27 +52,121 @@ run-name: >-
       - 'build/**'
       - 'scripts/**'
       - '.github/bos-universal-config.json'
-      - '.github/workflows/bos-universal-launchpad-kicker.yml'
+      - '.github/workflows/bos-universal-gatekeeper-kicker.yml'
   workflow_dispatch:
     inputs:
       operation:
-        description: 'Run the full pipeline, only the release-blocking security scan, or only the managed-file sync.'
+        description: 'Which managed pipeline to run.'
         type: choice
-        options: [full, security_only, sync_only]
+        options:
+          - full
+          - release_only
+          - security_only
+          - sync_only
+          - action_test
+          - metadata
+          - marketplace_validate
+          - marketplace_release
         default: full
       force_run:
-        description: 'Force: run pipeline even if upstream unchanged'
+        description: 'Force: run pipeline even if upstream unchanged.'
         type: boolean
         default: false
+      dry_run:
+        description: 'Preview only — applies to metadata and marketplace_release.'
+        type: boolean
+        default: false
+      tag_name:
+        description: 'Optional SemVer tag for marketplace_release; empty auto-bumps.'
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: bos-launchpad-kicker-${{ github.repository }}-${{ github.ref }}-${{ inputs.operation || 'full' }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'release' }}
+  group: bos-gatekeeper-kicker-${{ github.repository }}-${{ github.ref }}-${{ inputs.operation || 'full' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' || (inputs.operation != 'release_only' && inputs.operation != 'marketplace_release') }}
 
 jobs:
+  # Manual-dispatch access control. Runs FIRST and with no write permission
+  # so an unauthorized dispatch is rejected before `sync-check` (which holds
+  # `contents: write`) can commit anything. Policy comes from repo/org vars
+  # rather than the parsed config so this gate never depends on a job that
+  # runs after it. Non-dispatch events pass through untouched.
+  authorize:
+    name: Authorize dispatch
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    outputs:
+      gate_level: ${{ steps.gate.outputs.level }}
+    steps:
+      # Opt-in egress auditing. Off by default because `vars.DEFAULT_RUNNER`
+      # may point at self-hosted capacity where this agent is inappropriate.
+      - name: Harden runner
+        if: vars.GATEKEEPER_HARDEN_RUNNER == 'true'
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: ${{ vars.GATEKEEPER_EGRESS_POLICY || 'audit' }}
+
+      # Gate level scales the checks to the blast radius of the operation:
+      # `low` only reads, `standard` writes repo state, `high` publishes
+      # artifacts or moves the stable branch.
+      - name: Resolve gate level
+        id: gate
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" != "workflow_dispatch" ]; then
+            echo "level=automatic" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          case "${OPERATION:-full}" in
+            full|release_only|marketplace_release)         level=high ;;
+            sync_only|metadata)                            level=standard ;;
+            security_only|marketplace_validate|action_test) level=low ;;
+            *)                                             level=high ;;
+          esac
+          echo "level=${level}" >> "${GITHUB_OUTPUT}"
+          echo "::notice title=Gate level::${OPERATION:-full} resolved to gate level '${level}'."
+
+      # Short-lived installation token for the org/team lookups. Preferred
+      # over a PAT: it expires in an hour and is scoped to `members: read`.
+      - name: Mint authorization token
+        id: authz_token
+        if: github.event_name == 'workflow_dispatch' && vars.GATEKEEPER_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.GATEKEEPER_APP_ID }}
+          private-key: ${{ secrets.GATEKEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Check dispatcher authorization
+        uses: blackoutsecure/bos-automation-hub/.github/actions/bos-universal-gatekeeper/authorize@main
+        with:
+          event_name: ${{ github.event_name }}
+          # `triggering_actor`, not `actor`: on a re-run `actor` stays the
+          # original dispatcher while `triggering_actor` is whoever pressed
+          # re-run. Authorizing `actor` would let any user with write access
+          # replay a privileged dispatch under someone else's identity.
+          actor: ${{ github.triggering_actor || github.actor }}
+          organization: ${{ github.repository_owner }}
+          enterprise_slug: ${{ vars.GATEKEEPER_ENTERPRISE_SLUG }}
+          required_teams: ${{ vars.GATEKEEPER_REQUIRED_TEAMS }}
+          allow_org_admin: ${{ vars.GATEKEEPER_ALLOW_ORG_ADMIN != 'false' }}
+          # Enterprise ownership is only demanded for `high` gate operations,
+          # and only when a slug is actually configured — otherwise the check
+          # is unverifiable and would deny every dispatch.
+          require_enterprise_owner: ${{ steps.gate.outputs.level == 'high' && vars.GATEKEEPER_ENTERPRISE_SLUG != '' && vars.GATEKEEPER_REQUIRE_ENTERPRISE_OWNER != 'false' }}
+          fail_closed: true
+          token: ${{ steps.authz_token.outputs.token || secrets.GATEKEEPER_AUTHZ_PAT }}
+          enterprise_token: ${{ secrets.GATEKEEPER_AUTHZ_PAT }}
+
   # Cheap, config-free hub-ref resolution so `sync-check` (which must run
   # BEFORE `parse-config`, since it's a pre-flight) can still pick the
   # matching @dev/@main reusable workflow, same as every dual-branch kicker.
@@ -66,6 +176,7 @@ jobs:
   # default branch happens to be `dev`) ever see `ref_name == 'dev'`.
   resolve-target-ref:
     name: Resolve target hub ref
+    needs: authorize
     runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 2
     outputs:
@@ -77,11 +188,11 @@ jobs:
           repository: blackoutsecure/bos-automation-hub
           ref: ${{ github.ref_name == 'dev' && 'dev' || 'main' }}
           path: hub-runtime
-          sparse-checkout: .github/actions/shared/resolve-hub-ref
+          sparse-checkout: .github/actions/resolve-hub-ref
           sparse-checkout-cone-mode: false
       - name: Resolve target hub ref
         id: target_ref
-        uses: ./hub-runtime/.github/actions/shared/resolve-hub-ref
+        uses: ./hub-runtime/.github/actions/resolve-hub-ref
         with:
           event_name: ${{ github.event_name }}
           ref_name: ${{ github.ref_name }}
@@ -134,8 +245,8 @@ jobs:
       && needs.resolve-target-ref.result == 'success'
       && (needs.sync-check-dev.result == 'success' || needs.sync-check-dev.result == 'skipped')
       && (needs.sync-check-main.result == 'success' || needs.sync-check-main.result == 'skipped')
-      && !contains(needs.sync-check-dev.outputs.changed_files, '.github/workflows/bos-universal-launchpad-kicker.yml')
-      && !contains(needs.sync-check-main.outputs.changed_files, '.github/workflows/bos-universal-launchpad-kicker.yml')
+      && !contains(needs.sync-check-dev.outputs.changed_files, '.github/workflows/bos-universal-gatekeeper-kicker.yml')
+      && !contains(needs.sync-check-main.outputs.changed_files, '.github/workflows/bos-universal-gatekeeper-kicker.yml')
       && !contains(needs.sync-check-dev.outputs.changed_files, '.github/bos-universal-config.json')
       && !contains(needs.sync-check-main.outputs.changed_files, '.github/bos-universal-config.json')
     # Resolve runner from org-shared `vars.DEFAULT_RUNNER` when set,
@@ -148,14 +259,16 @@ jobs:
       target_ref: ${{ steps.config.outputs.target_ref }}
       operation: ${{ steps.dispatch.outputs.operation }}
       force_run: ${{ steps.dispatch.outputs.force }}
+      run_publish: ${{ steps.dispatch.outputs.run_publish }}
+      run_security: ${{ steps.dispatch.outputs.run_security }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Parse launchpad config
+      - name: Parse gatekeeper config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/launchpad@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/bos-universal-gatekeeper@main
         with:
           config_path: .github/bos-universal-config.json
           event_name: ${{ github.event_name }}
@@ -195,19 +308,128 @@ jobs:
           echo "operation=${operation}" >> "${GITHUB_OUTPUT}"
           echo "force=${force}" >> "${GITHUB_OUTPUT}"
 
-  # `operation: sync_only` stops here — `sync-check-{dev,main}` above already
-  # ran the sync; there's nothing left for the release stage to do.
+          # Collapse the operation into the two stage families the release
+          # backend actually gates on, so both the dev and main callers read
+          # one resolved flag instead of repeating the operation ternary.
+          run_publish=false
+          run_security=false
+          case "${operation}" in
+            full)          run_publish=true; run_security=true ;;
+            release_only)  run_publish=true ;;
+            security_only) run_security=true ;;
+          esac
+          echo "run_publish=${run_publish}" >> "${GITHUB_OUTPUT}"
+          echo "run_security=${run_security}" >> "${GITHUB_OUTPUT}"
+
+  # Verify the runner actually has the toolchain this repo declares before any
+  # routed operation starts. Skipped when `gatekeeper.preflight` is absent.
+  preflight:
+    name: Runner preflight
+    needs: [authorize, parse-config]
+    if: fromJson(needs.parse-config.outputs.cfg).gatekeeper.preflight != ''
+    runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Verify declared dependencies
+        uses: blackoutsecure/bos-automation-hub/.github/actions/bos-universal-gatekeeper/preflight@main
+        with:
+          spec: ${{ toJson(fromJson(needs.parse-config.outputs.cfg).gatekeeper.preflight) }}
+          gate_level: ${{ needs.authorize.outputs.gate_level }}
+
+  # ---------------------------------------------------------------------------
+  # Dispatch routing. Each job below owns exactly one manual operation and is
+  # inert on automatic (push/schedule) events, so adding a route here never
+  # changes the unattended release cadence. Every route inherits the
+  # `authorize` gate transitively through `parse-config`.
+  # ---------------------------------------------------------------------------
+
+  # `operation: action_test` — action smoke tests against the repo's own
+  # `action_test` config block.
+  action-test:
+    name: Action test
+    needs: parse-config
+    if: needs.parse-config.outputs.operation == 'action_test'
+    permissions:
+      contents: read
+      models: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-action-test.yml@main
+    secrets: inherit
+
+  # `operation: metadata` — About-box sync only, without running the release
+  # pipeline that normally carries the `repo_metadata` stage.
+  metadata:
+    name: Repository metadata
+    needs: parse-config
+    if: needs.parse-config.outputs.operation == 'metadata'
+    permissions:
+      contents: read
+      models: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/repo-metadata-sync.yml@main
+    with:
+      description:      ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.description || '' }}
+      description_mode: ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.description_mode || 'auto' }}
+      homepage:         ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.homepage || '' }}
+      topics:           ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.topics || '' }}
+      generate_topics:  ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.generate_topics == true }}
+      ai_enabled:       ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.ai_enabled != false }}
+      ai_model:         ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.ai_model || 'auto' }}
+      show_releases:    ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.show_releases != false }}
+      show_deployments: ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.show_deployments == true }}
+      show_packages:    ${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata.show_packages == true }}
+      dry_run:          ${{ inputs.dry_run == true || fromJson(needs.parse-config.outputs.cfg).repo_metadata.dry_run == true }}
+    secrets: inherit
+
+  # `operation: marketplace_validate` — Marketplace manifest and rule checks.
+  # The Marketplace kicker still owns the PR/push-triggered runs; this route
+  # exists so a maintainer can re-validate on demand from one place.
+  marketplace-validate:
+    name: Marketplace validation
+    needs: parse-config
+    if: needs.parse-config.outputs.operation == 'marketplace_validate'
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-marketplace.yml@main
+    with:
+      action_yml_path:      ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.action_yml_path || 'action.yml' }}
+      run_branding_preview: ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.run_branding_preview != false }}
+    secrets: inherit
+
+  # `operation: marketplace_release` — promote the source branch to the stable
+  # branch, tag it, and publish the GitHub Release.
+  marketplace-release:
+    name: Marketplace release
+    needs: parse-config
+    if: needs.parse-config.outputs.operation == 'marketplace_release'
+    permissions:
+      contents: write
+      models: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/release-promote.yml@main
+    with:
+      source_branch:   ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.source_branch || 'dev' }}
+      target_branch:   ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.target_branch || 'main' }}
+      allowlist_paths: ${{ fromJson(needs.parse-config.outputs.cfg).marketplace.allowlist_paths || 'action.yml' }}
+      tag_name:        ${{ inputs.tag_name || '' }}
+      dry_run:         ${{ inputs.dry_run == true }}
+    secrets: inherit
+
+  # `sync_only` stops here — `sync-check-{dev,main}` above already ran the
+  # sync. `action_test`, `metadata`, and the Marketplace operations are
+  # routed by their own jobs further down rather than through this stage.
   release-dev:
     name: Release (dev)
     needs: parse-config
-    if: needs.parse-config.outputs.target_ref == 'dev' && needs.parse-config.outputs.operation != 'sync_only'
+    if: >-
+      needs.parse-config.outputs.target_ref == 'dev'
+      && contains(fromJson('["full","release_only","security_only"]'), needs.parse-config.outputs.operation)
     permissions:
       contents:        write   # monitor tracking-file commit + GitHub Release publish
       actions:         write   # nested monitor (`gh workflow run`)
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
       models:          read    # nested release.yml -> github-release.yml AI changelog
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-launchpad.yml@dev
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-gatekeeper.yml@dev
     with:
       upstream_repo:     ${{ fromJson(needs.parse-config.outputs.cfg).upstream.repo || '' }}
       source:            ${{ fromJson(needs.parse-config.outputs.cfg).upstream.source || 'github_release' }}
@@ -221,12 +443,12 @@ jobs:
       track_file:        ${{ fromJson(needs.parse-config.outputs.cfg).upstream.track_file || '.github/upstream/tracked-release.json' }}
       force_run: ${{ needs.parse-config.outputs.force_run == 'true' }}
 
-      # `security_only` (dispatch input or resolved cron mapping) forces every
-      # publish/deploy stage off, while still letting `security_scan` run below.
-      docker:           ${{ needs.parse-config.outputs.operation != 'security_only' && fromJson(needs.parse-config.outputs.cfg).stages.docker == true }}
-      balena:           ${{ needs.parse-config.outputs.operation != 'security_only' && fromJson(needs.parse-config.outputs.cfg).stages.balena == true }}
-      github_release:   ${{ needs.parse-config.outputs.operation != 'security_only' && fromJson(needs.parse-config.outputs.cfg).stages.github_release == true }}
-      companion_docker: ${{ needs.parse-config.outputs.operation != 'security_only' && fromJson(needs.parse-config.outputs.cfg).stages.companion_docker == true }}
+      # `run_publish` is resolved once in parse-config from the dispatch
+      # operation: false for `security_only`, true for `full`/`release_only`.
+      docker:           ${{ needs.parse-config.outputs.run_publish == 'true' && fromJson(needs.parse-config.outputs.cfg).stages.docker == true }}
+      balena:           ${{ needs.parse-config.outputs.run_publish == 'true' && fromJson(needs.parse-config.outputs.cfg).stages.balena == true }}
+      github_release:   ${{ needs.parse-config.outputs.run_publish == 'true' && fromJson(needs.parse-config.outputs.cfg).stages.github_release == true }}
+      companion_docker: ${{ needs.parse-config.outputs.run_publish == 'true' && fromJson(needs.parse-config.outputs.cfg).stages.companion_docker == true }}
 
       image_name:                ${{ fromJson(needs.parse-config.outputs.cfg).docker.image_name || '' }}
       dockerhub_namespace:       ${{ vars[fromJson(needs.parse-config.outputs.cfg).docker.namespace_var || 'DOCKERHUB_NAMESPACE'] }}
@@ -388,14 +610,16 @@ jobs:
   release-main:
     name: Release (main)
     needs: parse-config
-    if: needs.parse-config.outputs.target_ref == 'main' && needs.parse-config.outputs.operation != 'sync_only'
+    if: >-
+      needs.parse-config.outputs.target_ref == 'main'
+      && contains(fromJson('["full","release_only","security_only"]'), needs.parse-config.outputs.operation)
     permissions:
       contents:        write   # monitor tracking-file commit + GitHub Release publish
       actions:         write   # nested monitor (`gh workflow run`)
       pull-requests:   write   # nested Docker Scout PR annotations
       security-events: write   # nested Docker Scout SARIF upload
       models:          read    # nested release.yml -> github-release.yml AI changelog
-    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-launchpad.yml@main
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-gatekeeper.yml@main
     with:
       upstream_repo:     ${{ fromJson(needs.parse-config.outputs.cfg).upstream.repo || '' }}
       source:            ${{ fromJson(needs.parse-config.outputs.cfg).upstream.source || 'github_release' }}
@@ -409,12 +633,12 @@ jobs:
       track_file:        ${{ fromJson(needs.parse-config.outputs.cfg).upstream.track_file || '.github/upstream/tracked-release.json' }}
       force_run: ${{ needs.parse-config.outputs.force_run == 'true' }}
 
-      # `security_only` (dispatch input or resolved cron mapping) forces every
-      # publish/deploy stage off, while still letting `security_scan` run below.
-      docker:           ${{ needs.parse-config.outputs.operation != 'security_only' && fromJson(needs.parse-config.outputs.cfg).stages.docker == true }}
-      balena:           ${{ needs.parse-config.outputs.operation != 'security_only' && fromJson(needs.parse-config.outputs.cfg).stages.balena == true }}
-      github_release:   ${{ needs.parse-config.outputs.operation != 'security_only' && fromJson(needs.parse-config.outputs.cfg).stages.github_release == true }}
-      companion_docker: ${{ needs.parse-config.outputs.operation != 'security_only' && fromJson(needs.parse-config.outputs.cfg).stages.companion_docker == true }}
+      # `run_publish` is resolved once in parse-config from the dispatch
+      # operation: false for `security_only`, true for `full`/`release_only`.
+      docker:           ${{ needs.parse-config.outputs.run_publish == 'true' && fromJson(needs.parse-config.outputs.cfg).stages.docker == true }}
+      balena:           ${{ needs.parse-config.outputs.run_publish == 'true' && fromJson(needs.parse-config.outputs.cfg).stages.balena == true }}
+      github_release:   ${{ needs.parse-config.outputs.run_publish == 'true' && fromJson(needs.parse-config.outputs.cfg).stages.github_release == true }}
+      companion_docker: ${{ needs.parse-config.outputs.run_publish == 'true' && fromJson(needs.parse-config.outputs.cfg).stages.companion_docker == true }}
 
       image_name:                ${{ fromJson(needs.parse-config.outputs.cfg).docker.image_name || '' }}
       dockerhub_namespace:       ${{ vars[fromJson(needs.parse-config.outputs.cfg).docker.namespace_var || 'DOCKERHUB_NAMESPACE'] }}

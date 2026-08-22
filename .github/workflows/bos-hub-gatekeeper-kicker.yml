@@ -1,6 +1,6 @@
-name: '[KICKER] Blackout Secure Hub Launchpad'
+name: '[KICKER] Blackout Secure Hub Gatekeeper'
 run-name: >-
-  Hub Launchpad / ${{ inputs.scope || 'recommended' }} / ${{
+  Hub Gatekeeper / ${{ inputs.scope || 'recommended' }} / ${{
     github.event_name == 'schedule' && 'scheduled' ||
     github.event_name == 'workflow_dispatch' && 'manual' ||
     'config or runtime change'
@@ -14,7 +14,7 @@ run-name: >-
     paths:
       - '.github/bos-universal-config.json'
       - '.github/actions/**'
-      - '.github/workflows/bos-universal-launchpad.yml'
+      - '.github/workflows/bos-universal-gatekeeper.yml'
       - '.github/workflows/repo-metadata-sync.yml'
       - 'README.md'
   workflow_dispatch:
@@ -33,22 +33,22 @@ permissions:
   models: read
 
 concurrency:
-  group: bos-hub-launchpad-${{ github.repository }}-${{ github.ref }}
+  group: bos-hub-gatekeeper-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  launchpad:
-    name: Run hub Launchpad
+  gatekeeper:
+    name: Run hub gatekeeper
     if: >-
       github.event_name != 'push'
-      || !contains(github.event.head_commit.message || '', '[hub-launchpad]')
+      || !contains(github.event.head_commit.message || '', '[hub-gatekeeper]')
     permissions:
       contents: write
       actions: write
       pull-requests: write
       security-events: write
       models: read
-    uses: ./.github/workflows/bos-universal-launchpad.yml
+    uses: ./.github/workflows/bos-universal-gatekeeper.yml
     with:
       enable_security_scan: ${{ inputs.scope != 'metadata' }}
       enable_repo_metadata: ${{ inputs.scope != 'security' }}

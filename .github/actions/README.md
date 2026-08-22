@@ -3,13 +3,31 @@
 Reusable composite actions consumed by the workflows in this repo and by
 downstream callers that pin to this hub. Layout:
 
-- `shared/<name>/` — consumed by multiple workflows, referenced as
-  `blackoutsecure/bos-automation-hub/.github/actions/shared/<name>@<ref>`.
+- `.github/actions/<name>/` — reusable action modules used by multiple
+  workflows and pinned directly from this hub.
+- `.github/actions/bos-universal-gatekeeper/` — the gatekeeper front door's
+  own composites, referenced as
+  `blackoutsecure/bos-automation-hub/.github/actions/bos-universal-gatekeeper[/<sub>]@<ref>`.
 - `<name>/` — used by one workflow in this repo only.
 
-The shared `resolve-hub-ref` action centralizes the small amount of branch
-routing required by managed kickers. Kicker files should keep only event
-triggers, resolver inputs, static `@dev`/`@main` jobs, and secret inheritance;
+### `bos-universal-gatekeeper/`
+
+Composites that belong to the gatekeeper kicker specifically, rather than to
+every kicker:
+
+| Path | Purpose |
+| --- | --- |
+| `bos-universal-gatekeeper` | Resolve `.github/bos-universal-config.json` and the dev/main hub ref in one step. |
+| `bos-universal-gatekeeper/authorize` | Manual-dispatch access control (org role, team membership, enterprise owner). Fails closed. |
+
+The reusable `resolve-hub-ref` and `universal-config` actions are direct
+infrastructure actions used by the managed kickers. They stay in their
+canonical action directories so the callers keep simple, explicit `uses:`
+references and a single source of truth.
+
+The `resolve-hub-ref` action centralizes the small amount of branch routing
+required by managed kickers. Kicker files should keep only event triggers,
+resolver inputs, static `@dev`/`@main` jobs, and secret inheritance;
 configuration and execution belong in the reusable backend workflow.
 
 ## Published orchestration actions

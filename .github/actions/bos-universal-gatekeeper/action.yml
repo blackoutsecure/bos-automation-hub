@@ -1,7 +1,7 @@
-name: Launchpad
+name: Universal gatekeeper config
 author: Blackout Secure
 description: >-
-  Combined parse-config step for the Launchpad kicker — loads
+  Combined parse-config step for the universal gatekeeper kicker — loads
   `.github/bos-universal-config.json` (via the shared `universal-config`
   action) and resolves the dev/main hub runtime ref (via the shared
   `resolve-hub-ref` action) in a single call, so the kicker's parse-config
@@ -57,7 +57,7 @@ runs:
   steps:
     - name: Load universal config
       id: config
-      uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+      uses: blackoutsecure/bos-automation-hub/.github/actions/universal-config@main
       with:
         config_path: ${{ inputs.config_path }}
         allow_missing: ${{ inputs.allow_missing }}
@@ -67,12 +67,12 @@ runs:
       with:
         repository: blackoutsecure/bos-automation-hub
         ref: ${{ inputs.ref_name == 'dev' && 'dev' || 'main' }}
-        path: launchpad-hub-runtime
-        sparse-checkout: .github/actions/shared/resolve-hub-ref
+        path: gatekeeper-hub-runtime
+        sparse-checkout: .github/actions/resolve-hub-ref
         sparse-checkout-cone-mode: false
     - name: Resolve target hub ref
       id: target_ref
-      uses: ./launchpad-hub-runtime/.github/actions/shared/resolve-hub-ref
+      uses: ./gatekeeper-hub-runtime/.github/actions/resolve-hub-ref
       with:
         event_name: ${{ inputs.event_name }}
         base_ref: ${{ inputs.base_ref }}

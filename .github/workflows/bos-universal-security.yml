@@ -234,11 +234,11 @@ jobs:
           repository: blackoutsecure/bos-automation-hub
           ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
           path: hub-runtime
-          sparse-checkout: .github/actions/shared/universal-config
+          sparse-checkout: .github/actions/universal-config
           sparse-checkout-cone-mode: false
       - name: Load universal config
         id: config
-        uses: ./hub-runtime/.github/actions/shared/universal-config
+        uses: ./hub-runtime/.github/actions/universal-config
         with:
           allow_missing: 'false'
       - name: Resolve security settings
@@ -338,11 +338,8 @@ jobs:
 
           def configured_mode(name):
             mode_key = f"{name}_lint_mode"
-            legacy_key = f"enable_{name}_lint"
             if mode_key in configured:
               value = configured[mode_key]
-            elif legacy_key in configured:
-              value = configured[legacy_key]
             elif not use_config:
               value = os.environ.get(f"INPUT_ENABLE_{name.upper()}_LINT", "")
               value = value if value else "auto"
@@ -576,7 +573,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             sync-files/config/code-scanning-kit-global-config.json
-            .github/actions/shared/ai-remediation-pr
+            .github/actions/ai-remediation-pr
           sparse-checkout-cone-mode: false
       - name: Run bos-code-scanning-kit
         id: code_scan
@@ -599,7 +596,7 @@ jobs:
       - name: Reconcile code-scanning recommendations
         id: remediation
         if: always() && steps.code_scan.outputs.recommendations_path != ''
-        uses: ./hub-config/.github/actions/shared/ai-remediation-pr
+        uses: ./hub-config/.github/actions/ai-remediation-pr
         with:
           recommendations: ${{ steps.code_scan.outputs.recommendations_path }}
           mode: notify
@@ -667,7 +664,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Validate README header
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/check-readme-header@dev
+        uses: blackoutsecure/bos-automation-hub/.github/actions/check-readme-header@dev
         with:
           profile: ${{ fromJSON(needs.resolve-config.outputs.gate).readme_header_profile }}
 
@@ -740,7 +737,7 @@ jobs:
           repository: blackoutsecure/bos-automation-hub
           ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
           path: hub-runtime
-          sparse-checkout: .github/actions/shared/job-report
+          sparse-checkout: .github/actions/job-report
           sparse-checkout-cone-mode: false
       - name: Build gate findings
         id: findings
@@ -893,7 +890,7 @@ jobs:
                   handle.write(f"{name}<<__BOS_EOF__\n{value}\n__BOS_EOF__\n")
           PY
       - name: Publish security gate report
-        uses: ./hub-runtime/.github/actions/shared/job-report
+        uses: ./hub-runtime/.github/actions/job-report
         with:
           title: ${{ steps.findings.outputs.title_prefix }} Security Gate Report
           subject: >-

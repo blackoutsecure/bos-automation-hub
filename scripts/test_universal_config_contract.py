@@ -70,7 +70,7 @@ def run_universal_config(config: object) -> subprocess.CompletedProcess[str]:
 
 def run_universal_config_raw(raw_text: str) -> subprocess.CompletedProcess[str]:
     action = (
-        ROOT / ".github/actions/shared/universal-config/action.yml"
+        ROOT / ".github/actions/universal-config/action.yml"
     ).read_text()
     script = action.split("        python3 - <<'PY'\n", 1)[1].split(
         "\n        PY", 1
@@ -300,18 +300,18 @@ def main() -> None:
     assert general["action_test"] == {"python_versions": ["3.12"]}
     assert general["upstream"]["repo"] == "owner/flat-wins"
 
-    workflow = (ROOT / ".github/workflows/bos-universal-launchpad.yml").read_text()
+    workflow = (ROOT / ".github/workflows/bos-universal-gatekeeper.yml").read_text()
     action_test_workflow = (
         ROOT / ".github/workflows/bos-universal-action-test.yml"
     ).read_text()
     assert "source: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config.source || '' }}" in action_test_workflow
     assert "package_name: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config.package_name || '' }}" in action_test_workflow
     kicker = (
-        ROOT / "sync-files/workflows/bos-universal-launchpad-kicker.yml"
+        ROOT / "sync-files/workflows/bos-universal-gatekeeper-kicker.yml"
     ).read_text()
 
     declared = workflow_input_names(workflow)
-    forwarded = caller_input_names(kicker, "bos-universal-launchpad.yml")
+    forwarded = caller_input_names(kicker, "bos-universal-gatekeeper.yml")
     assert declared == forwarded, {
         "missing": sorted(declared - forwarded),
         "unknown": sorted(forwarded - declared),
@@ -369,7 +369,7 @@ def main() -> None:
     assert "'**/bos-scan-*.json'" in security_kicker
     assert "enable_baseline:" not in gate_workflow
     assert "needs.resolve-config.outputs.gate" in gate_workflow
-    assert "uses: ./hub-runtime/.github/actions/shared/universal-config" in gate_workflow
+    assert "uses: ./hub-runtime/.github/actions/universal-config" in gate_workflow
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in gate_workflow
     assert "github.event_name == 'pull_request' && github.base_ref" in gate_workflow
     assert "code_scan_fail_on:" in gate_workflow
@@ -386,7 +386,7 @@ def main() -> None:
 
     readme = (ROOT / "README.md").read_text()
     readme_header_action = (
-        ROOT / ".github/actions/shared/check-readme-header/action.yml"
+        ROOT / ".github/actions/check-readme-header/action.yml"
     ).read_text()
     assert "enable_baseline" not in readme
     assert "## Managed file sync" in readme
@@ -394,9 +394,9 @@ def main() -> None:
     assert "### Elevated posture scanning (`SCANNING_PAT`)" in readme
     assert "security_scan.use_advanced_pat" in readme
     assert "bos-launchpad-release.yml" not in readme_header_action
-    assert "bos-universal-launchpad-kicker.yml" in readme_header_action
-    assert "Launchpad intentionally has one managed event kicker" in readme
-    assert "stage implementation belongs in the hub backend" in readme
+    assert "bos-universal-gatekeeper-kicker.yml" in readme_header_action
+    assert "single manual-dispatch front door" in readme
+    assert "### Dispatch authorization" in readme
     assert "# Blackout Secure README Header Audit" in readme_header_action
     assert "outcome=${outcome}" in readme_header_action
     assert "RH001" in readme_header_action and "RH030" in readme_header_action
@@ -491,7 +491,7 @@ def main() -> None:
         kicker_body = kicker_path.read_text()
         assert "parse-config" not in kicker_body
         assert "target-ref" not in kicker_body
-        assert "uses: ./hub-runtime/.github/actions/shared/resolve-hub-ref" in kicker_body
+        assert "uses: ./hub-runtime/.github/actions/resolve-hub-ref" in kicker_body
         assert "concurrency:" in kicker_body
         assert "github.repository" in kicker_body
         assert "cancel-in-progress:" in kicker_body
@@ -503,14 +503,14 @@ def main() -> None:
     assert "'**/bos-scan-*.sarif'" in action_test_kicker
     for kicker_name in (
         "bos-universal-upstream-kicker.yml",
-        "bos-universal-launchpad-kicker.yml",
+        "bos-universal-gatekeeper-kicker.yml",
     ):
         kicker_body = (ROOT / "sync-files/workflows" / kicker_name).read_text()
         assert "concurrency:" in kicker_body
         assert "github.repository" in kicker_body
         assert "cancel-in-progress:" in kicker_body
 
-    resolver = (ROOT / ".github/actions/shared/resolve-hub-ref/action.yml").read_text()
+    resolver = (ROOT / ".github/actions/resolve-hub-ref/action.yml").read_text()
     assert "name: Resolve hub ref" in resolver
     assert 'echo "ref=${ref}"' in resolver
 
@@ -562,7 +562,7 @@ def main() -> None:
     assert ".github/workflows/release.yml@main" not in marketplace_promote
     assert marketplace_promote.count(
         "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/shared/resolve-release-tag@main"
+        ".github/actions/resolve-release-tag@main"
     ) == 1
     promote_hub_refs = re.findall(
         r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)",
@@ -571,7 +571,7 @@ def main() -> None:
     assert promote_hub_refs and set(promote_hub_refs) == {"main"}, promote_hub_refs
     assert marketplace_promote.count(
         "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/shared/preflight-runner-config@main"
+        ".github/actions/preflight-runner-config@main"
     ) == 1
     assert "LATEST=\"$(git tag --list" not in marketplace_promote
     publisher_call = (
@@ -603,7 +603,7 @@ def main() -> None:
         "sync-action-pins.yml",
         "bos-org-kicker-fanout.yml",
         "bos-hub-managed-sync-propagate.yml",
-        "bos-hub-launchpad-kicker.yml",
+        "bos-hub-gatekeeper-kicker.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -617,10 +617,10 @@ def main() -> None:
     assert "release-promote.yml@main" not in release_hub
     assert "uses: ./.github/workflows/github-release.yml" in release_hub
     assert release_hub.count(
-        "uses: ./.github/actions/shared/resolve-release-tag"
+        "uses: ./.github/actions/resolve-release-tag"
     ) == 1
     assert release_hub.count(
-        "uses: ./.github/actions/shared/universal-config"
+        "uses: ./.github/actions/universal-config"
     ) == 1
     assert release_hub.count(
         "uses: ./.github/workflows/repo-metadata-sync.yml"
@@ -639,11 +639,11 @@ def main() -> None:
         ROOT / ".github/workflows/balena-fleet-deploy.yml"
     ).read_text()
     balena_publisher = (
-        ROOT / ".github/actions/shared/balena-publish/action.yml"
+        ROOT / ".github/actions/balena-publish/action.yml"
     ).read_text()
     shared_balena_action = (
         "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/shared/balena-publish@main"
+        ".github/actions/balena-publish@main"
     )
     for balena_workflow in (balena_block, balena_fleet):
         assert balena_workflow.count(shared_balena_action) == 1
@@ -661,7 +661,7 @@ def main() -> None:
     ).read_text()
     compose_build_args = (
         "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/shared/compose-docker-build-args@main"
+        ".github/actions/compose-docker-build-args@main"
     )
     assert docker_workflow.count(compose_build_args) == 2
     assert "echo \"build_args<<__EOF__\"" not in docker_workflow
@@ -680,7 +680,7 @@ def main() -> None:
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
     assert "name: '[RUNTIME] Blackout Secure Managed File Sync'" in sync_backend
-    assert "uses: ./hub-runtime/.github/actions/shared/universal-config" in sync_backend
+    assert "uses: ./hub-runtime/.github/actions/universal-config" in sync_backend
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "github.event_name == 'merge_group'" in sync_backend
 
@@ -688,7 +688,7 @@ def main() -> None:
     # One shared audit-report surface, driven by findings data, so every
     # workflow reports status the same way instead of hand-rolling a
     # summary block per job.
-    job_report = (ROOT / ".github/actions/shared/job-report/action.yml").read_text()
+    job_report = (ROOT / ".github/actions/job-report/action.yml").read_text()
     assert "name: Job report" in job_report
     for token in ("outcome", "verdict", "passes", "warns", "fails", "skips", "total"):
         assert f"{token}:" in job_report
@@ -698,8 +698,8 @@ def main() -> None:
     assert '"⚪ Not Assessed"' in job_report
 
     report_refs = {
-        "uses: ./hub-runtime/.github/actions/shared/job-report",
-        "uses: ./hub-source/.github/actions/shared/job-report",
+        "uses: ./hub-runtime/.github/actions/job-report",
+        "uses: ./hub-source/.github/actions/job-report",
     }
     for reporting_workflow in (gate_workflow, sync_backend):
         assert any(ref in reporting_workflow for ref in report_refs)
@@ -740,7 +740,15 @@ def main() -> None:
     assert 'for key in LABELS if counts[key]' in job_report
 
     hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
-    assert set(hub_config_raw) == {"gate", "launchpad", "organization", "remediation"}
+    assert set(hub_config_raw) == {"action_pins", "gate", "launchpad", "organization", "remediation"}
+    # The pin bumper reads this section instead of a standalone manifest, so
+    # the standalone file must stay gone and the section must stay usable.
+    assert not (ROOT / ".github/action-pins.json").exists()
+    hub_pins = hub_config_raw["action_pins"]
+    assert hub_pins["channel"] in {"auto", "stable"}
+    assert hub_pins["scan_globs"]
+    assert hub_pins["repositories"]
+    assert all("repository" in entry for entry in hub_pins["repositories"])
     assert hub_config_raw["gate"] == {
         "node_lint_mode": "auto",
         "python_lint_mode": "auto",
@@ -924,7 +932,9 @@ def main() -> None:
 
     # Every first-party action pinned in this repo must be tracked by the
     # pin bumper, otherwise its SHA silently goes stale.
-    action_pins = json.loads((ROOT / ".github/action-pins.json").read_text())
+    action_pins = json.loads(
+        (ROOT / ".github/bos-universal-config.json").read_text()
+    )["action_pins"]
     tracked = {entry["repository"] for entry in action_pins["repositories"]}
     for generator in (
         "blackoutsecure/bos-sitemap-generator",
@@ -934,19 +944,19 @@ def main() -> None:
     ):
         assert generator in tracked, generator
 
-    launchpad_workflow = (ROOT / ".github/workflows/bos-universal-launchpad.yml").read_text()
+    gatekeeper_workflow = (ROOT / ".github/workflows/bos-universal-gatekeeper.yml").read_text()
     assert cloudflare_workflow.count("generator_audit_artifact_name") >= 2
-    assert launchpad_workflow.count("cloudflare_generator_audit:") >= 1
-    assert launchpad_workflow.count("generator_audit_fail_on:") >= 3
+    assert gatekeeper_workflow.count("cloudflare_generator_audit:") >= 1
+    assert gatekeeper_workflow.count("generator_audit_fail_on:") >= 3
 
-    launchpad_kicker = (
-        ROOT / "sync-files/workflows/bos-universal-launchpad-kicker.yml"
+    gatekeeper_kicker = (
+        ROOT / "sync-files/workflows/bos-universal-gatekeeper-kicker.yml"
     ).read_text()
-    assert launchpad_kicker.count("cloudflare_generator_audit:") == 2
-    assert launchpad_kicker.count("cloudflare_generator_audit_fail_on:") == 2
+    assert gatekeeper_kicker.count("cloudflare_generator_audit:") == 2
+    assert gatekeeper_kicker.count("cloudflare_generator_audit_fail_on:") == 2
 
     universal_config_action = (
-        ROOT / ".github/actions/shared/universal-config/action.yml"
+        ROOT / ".github/actions/universal-config/action.yml"
     ).read_text()
     assert '"generator_audit": cloudflare_raw.get("generator_audit") is True' in universal_config_action
     assert '"generator_audit_fail_on"' in universal_config_action
@@ -1031,28 +1041,42 @@ def main() -> None:
     assert '"severity": "warn" if mode == "check" else "pass"' in sync_backend
     assert "workflow-file state is unverified" in sync_backend
     assert "Drift detected; rerun in `commit` mode" in sync_backend
-    for runtime_name in (
-        "bos-universal-action-test.yml",
-        "bos-universal-marketplace.yml",
-        "bos-universal-security.yml",
-        "bos-universal-sync.yml",
-    ):
+    # Every reusable (`workflow_call:`) workflow must be callable ONLY by
+    # another workflow. Any additional trigger on a runtime workflow would let
+    # it be started outside the gatekeeper's authorization path, so the
+    # trigger surface is asserted for all of them rather than a hand-listed
+    # subset that new workflows can silently escape.
+    for runtime_name in sorted(reusable):
         runtime_body = (ROOT / ".github/workflows" / runtime_name).read_text()
-        assert "  workflow_call:" in runtime_body
-        assert "  workflow_dispatch:" not in runtime_body
-    launchpad_runtime = (
-        ROOT / ".github/workflows/bos-universal-launchpad.yml"
+        assert "\n  workflow_call:\n" in runtime_body, runtime_name
+        for forbidden in (
+            "workflow_dispatch",
+            "schedule",
+            "push",
+            "pull_request",
+            "pull_request_target",
+            "merge_group",
+            "repository_dispatch",
+            "issues",
+        ):
+            # Anchored to a real top-level trigger key so commented-out
+            # examples inside the header docs don't count as triggers.
+            assert not re.search(
+                rf"^  {forbidden}:\s*$", runtime_body, re.MULTILINE
+            ), (runtime_name, forbidden)
+    gatekeeper_runtime = (
+        ROOT / ".github/workflows/bos-universal-gatekeeper.yml"
     ).read_text()
-    assert "  workflow_call:" in launchpad_runtime
-    assert "  workflow_dispatch:" not in launchpad_runtime
-    hub_launchpad_kicker = (
-        ROOT / ".github/workflows/bos-hub-launchpad-kicker.yml"
+    assert "  workflow_call:" in gatekeeper_runtime
+    assert "  workflow_dispatch:" not in gatekeeper_runtime
+    hub_gatekeeper_kicker = (
+        ROOT / ".github/workflows/bos-hub-gatekeeper-kicker.yml"
     ).read_text()
-    assert "name: '[KICKER] Blackout Secure Hub Launchpad'" in hub_launchpad_kicker
-    assert "  schedule:" in hub_launchpad_kicker
-    assert "  workflow_dispatch:" in hub_launchpad_kicker
-    assert "paths:" in hub_launchpad_kicker
-    assert "bos-hub-launchpad-kicker.yml" not in hub_launchpad_kicker.split(
+    assert "name: '[KICKER] Blackout Secure Hub Gatekeeper'" in hub_gatekeeper_kicker
+    assert "  schedule:" in hub_gatekeeper_kicker
+    assert "  workflow_dispatch:" in hub_gatekeeper_kicker
+    assert "paths:" in hub_gatekeeper_kicker
+    assert "bos-hub-gatekeeper-kicker.yml" not in hub_gatekeeper_kicker.split(
         "      - '", 1
     )[0]
     assert "global_config_json" not in sync_backend
@@ -1073,7 +1097,7 @@ def main() -> None:
     assert_first_party_pin(
         sync_backend, "blackoutsecure/bos-managed-file-sync-action"
     )
-    assert "uses: ./hub-source/.github/actions/shared/commit-and-push" in sync_backend
+    assert "uses: ./hub-source/.github/actions/commit-and-push" in sync_backend
     assert "workflows: write" not in sync_backend
     assert "workflow_sync_pat:" in sync_backend
     assert "token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}" in sync_backend
@@ -1092,16 +1116,16 @@ def main() -> None:
     assert security_kicker.count("secrets: inherit") == 3
     assert "scanning_pat: ${{ secrets.SCANNING_PAT }}" not in security_kicker
 
-    launchpad_workflow = (
-        ROOT / ".github/workflows/bos-universal-launchpad.yml"
+    gatekeeper_workflow = (
+        ROOT / ".github/workflows/bos-universal-gatekeeper.yml"
     ).read_text()
     assert "secrets: inherit" in kicker
     assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" not in kicker
     assert (
         "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT }}"
-        in launchpad_workflow
+        in gatekeeper_workflow
     )
-    assert "RELEASE_PAT:\n        description:" in launchpad_workflow
+    assert "RELEASE_PAT:\n        description:" in gatekeeper_workflow
 
     assert_markdown_links_exist(ROOT / "README.md")
     assert_markdown_links_exist(ROOT / "sync-files/README.md")

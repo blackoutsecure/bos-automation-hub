@@ -1,4 +1,4 @@
-# Blackout Secure Launchpad — automated release / deploy meta-workflow.
+# Blackout Secure universal gatekeeper — automated release / deploy meta-workflow.
 #
 # Single consumer front door for every deploy topology this org runs. Product
 # repositories install only the managed caller and config; they do not copy or
@@ -43,7 +43,7 @@
 #
 #   A. Upstream-tracked container release (cron-driven)
 #      `upstream_repo:` set, `docker|balena|github_release: true`,
-#      `cloudflare_pages: false`. The classic Launchpad loop.
+#      `cloudflare_pages: false`. The classic gatekeeper release loop.
 #
 #   B. Static-site continuous deploy (push-driven)
 #      `upstream_repo:` empty, `docker|balena|github_release: false`,
@@ -74,7 +74,7 @@
 #     monitor ran on. It is **not** reachable in static-site mode (no tag
 #     to resolve) — for tag-driven container releases without upstream
 #     polling, call `release.yml` directly instead.
-name: '[RUNTIME] Blackout Secure Launchpad'
+name: '[RUNTIME] Blackout Secure Universal Gatekeeper'
 
 "on":
   workflow_call:
@@ -874,7 +874,7 @@ name: '[RUNTIME] Blackout Secure Launchpad'
       #   The nested job 'security_scan' is requesting
       #   'actions: read, security-events: write', but is only allowed
       #   'actions: none, security-events: none'.
-      # NOTE: managed `bos-universal-launchpad-kicker.yml` callers grant
+      # NOTE: managed `bos-universal-gatekeeper-kicker.yml` callers grant
       # `actions: write` (superset of `read`) for the nested monitor
       # job's `gh workflow run` calls, and `security-events: write` for
       # Docker Scout SARIF upload — so this requirement happens to be
@@ -1242,7 +1242,7 @@ concurrency:
   # Single in-flight upstream-tracked release per ref. We never cancel —
   # a partial release can leave the registry / fleet in a half-published
   # state that subsequent re-runs reconcile.
-  group: bos-launchpad-${{ github.workflow }}-${{ github.ref }}
+  group: bos-gatekeeper-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -1261,7 +1261,7 @@ jobs:
           persist-credentials: false
       - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/universal-config@main
 
   # ---------------------------------------------------------------------------
   # Stage 0 — Consolidated security scan (opt-in, gating by default).

@@ -433,7 +433,7 @@ jobs:
 
       - name: Commit and push tracking file
         if: steps.discover.outputs.changed == 'true'
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/commit-and-push@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/commit-and-push@main
         with:
           files: ${{ inputs.track_file }}
           message: ${{ steps.msg.outputs.value }}

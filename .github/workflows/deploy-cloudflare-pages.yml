@@ -183,7 +183,7 @@ name: Cloudflare Pages Deploy
           requests pull the freshly published assets. Has no effect when
           the deploy step is skipped. The zone is identified in this
           order: (1) `vars.CLOUDFLARE_ZONE_ID` if set, (2)
-          `secrets.CLOUDFLARE_ZONE_ID` for back-compat, (3) auto-resolved
+          `secrets.CLOUDFLARE_ZONE_ID` if configured, (3) auto-resolved
           from the `site_url` input via the Cloudflare API (requires the
           API token to carry `Zone:Read`). When none are available the
           purge is skipped with a notice annotation. Set to `false` to
@@ -471,22 +471,21 @@ name: Cloudflare Pages Deploy
         required: false
       CLOUDFLARE_ACCOUNT_ID:
         description: >-
-          **Back-compat input. Prefer `vars.CLOUDFLARE_ACCOUNT_ID`** —
-          account IDs are public Cloudflare identifiers, not secrets,
-          and storing them as secrets makes the runner mask the value
-          (which prevents `needs.<job>.outputs.account_id` from being
-          readable in downstream jobs). When neither this secret nor
-          the var is set, the workflow auto-resolves the account via
-          `GET /accounts` against `CLOUDFLARE_API_TOKEN`. An account-
-          scoped Pages:Edit token returns exactly one account, so the
-          lookup is unambiguous. Provide it explicitly only when the
-          token can access multiple accounts, or to skip the lookup
-          round trip on every run.
+          Optional account ID override. Prefer `vars.CLOUDFLARE_ACCOUNT_ID`
+          because account IDs are public Cloudflare identifiers, not
+          secrets, and storing them as secrets masks the value from
+          downstream jobs reading `needs.<job>.outputs.account_id`.
+          When neither this value nor the var is set, the workflow
+          auto-resolves the account via `GET /accounts` against
+          `CLOUDFLARE_API_TOKEN`. An account-scoped Pages:Edit token
+          returns exactly one account, so the lookup is unambiguous.
+          Provide it explicitly only when the token can access multiple
+          accounts, or to skip the lookup round trip on every run.
         required: false
       CLOUDFLARE_ZONE_ID:
         description: >-
-          **Back-compat input. Prefer `vars.CLOUDFLARE_ZONE_ID`** —
-          zone IDs are public Cloudflare identifiers. Optional — the
+          Optional zone ID override. Prefer `vars.CLOUDFLARE_ZONE_ID`
+          because zone IDs are public Cloudflare identifiers. The
           cache-purge step auto-resolves the zone from the `site_url`
           input via the Cloudflare API when neither the var nor the
           secret is set, so most callers can leave it empty and just
@@ -512,14 +511,11 @@ name: Cloudflare Pages Deploy
         value: ${{ jobs.deploy.outputs.environment }}
       account_id:
         description: >-
-          Resolved Cloudflare account ID. Sourced from
-          `vars.CLOUDFLARE_ACCOUNT_ID` when set, otherwise
-          `secrets.CLOUDFLARE_ACCOUNT_ID` (back-compat), otherwise
-          auto-resolved via `GET /accounts`. When sourced from a
-          secret (back-compat path) the runner auto-masks it and this
-          output arrives **empty** in downstream jobs reading
-          `needs.<job>.outputs.account_id` — migrate to
-          `vars.CLOUDFLARE_ACCOUNT_ID` to fix.
+          Resolved Cloudflare account ID. Prefer `vars.CLOUDFLARE_ACCOUNT_ID`
+          when set; otherwise use the secret override if provided, or
+          auto-resolve via `GET /accounts`. When sourced from a secret,
+          the runner auto-masks it and this output can arrive empty in
+          downstream jobs reading `needs.<job>.outputs.account_id`.
         value: ${{ jobs.deploy.outputs.account_id }}
       purged:
         description: '`true` when the post-deploy zone cache purge ran successfully; `false` when skipped or failed.'
@@ -549,7 +545,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/preflight-runner-config@main
         with:
           # Forward all three runner vars so the log shows the full
           # org-var state, not just the ones this workflow enforces.
@@ -584,10 +580,9 @@ jobs:
       WRANGLER_VERSION: ${{ inputs.wrangler_version }}
       # Cloudflare account/zone IDs: prefer `vars.*` (public identifiers,
       # no runner masking, can flow through `GITHUB_OUTPUT` to downstream
-      # jobs); fall back to `secrets.*` for back-compat with callers who
-      # provisioned them as secrets before the vars-first convention.
+      # jobs); use `secrets.*` only when explicitly configured.
       # Secrets get auto-masked by the runner — validation still works,
-      # but `needs.<job>.outputs.account_id` will arrive empty.
+      # but `needs.<job>.outputs.account_id` may arrive empty.
       ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
       ZONE_ID:    ${{ vars.CLOUDFLARE_ZONE_ID    || secrets.CLOUDFLARE_ZONE_ID }}
     outputs:
@@ -618,7 +613,7 @@ jobs:
           node-version: '22'   # current LTS; wrangler 4 supports 18/20/22
 
       # Account ID resolution: prefer the inherited `env.ACCOUNT_ID`
-      # (set from `vars.*` or back-compat `secrets.*` at the job level).
+      # (set from `vars.*` or a configured secret at the job level).
       # When neither is set, look the account up via `GET /accounts`.
       - name: Auto-resolve Cloudflare account ID
         id: account_autoresolve
@@ -679,7 +674,7 @@ jobs:
 
       - name: Resolve & validate Cloudflare account ID
         id: account
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-resolve-id@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-resolve-id@main
         with:
           value: ${{ env.ACCOUNT_ID || steps.account_autoresolve.outputs.value }}
           kind: account
@@ -925,7 +920,7 @@ jobs:
       - name: Verify Cloudflare Pages project exists
         id: project
         if: steps.gate.outputs.deploy == 'true'
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-project-exists@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-project-exists@main
         with:
           account_id: ${{ steps.account.outputs.value }}
           project_name: ${{ inputs.cloudflare_project_name }}
@@ -951,7 +946,7 @@ jobs:
 
       - name: Stage deploy directory
         if: inputs.deploy_artifact_name == ''
-        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/stage-deploy-dir@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/stage-deploy-dir@main
         with:
           public_dir: ${{ inputs.public_dir }}
           deploy_dir: ${{ inputs.deploy_dir }}

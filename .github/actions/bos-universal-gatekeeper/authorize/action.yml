@@ -1,0 +1,134 @@
+name: Gatekeeper authorization
+author: Blackout Secure
+description: >-
+  Manual-dispatch access control for the universal gatekeeper. Resolves the
+  dispatching actor's organization role, authorized-team memberships, and
+  (optionally) enterprise-owner status, then fails closed with an explicit
+  "Access Denied" annotation when the actor does not satisfy the policy.
+  Non-dispatch events are passed through untouched.
+
+inputs:
+  event_name:
+    description: github.event_name from the caller. Anything other than `workflow_dispatch` is allowed through.
+    required: true
+  actor:
+    description: github.actor -- the login that triggered the dispatch.
+    required: true
+  organization:
+    description: Organization login that owns the calling repository.
+    required: true
+  enterprise_slug:
+    description: >-
+      Enterprise slug used for the enterprise-owner lookup. Leave empty to
+      skip the enterprise check entirely.
+    required: false
+    default: ''
+  required_teams:
+    description: >-
+      Comma-separated org team slugs whose active members may dispatch.
+      Empty disables the team check.
+    required: false
+    default: ''
+  allow_org_admin:
+    description: Treat organization owners as authorized.
+    required: false
+    default: 'true'
+  require_enterprise_owner:
+    description: >-
+      When `true`, ONLY enterprise owners may dispatch -- org role and team
+      membership are ignored as grant paths.
+    required: false
+    default: 'false'
+  fail_closed:
+    description: >-
+      Terminate the run when the actor is unauthorized or the check is
+      inconclusive. `false` only annotates, which is intended for rollout.
+    required: false
+    default: 'true'
+  token:
+    description: >-
+      Credential for the organization role and team lookups. Prefer a GitHub
+      App installation token (short-lived, `members: read`) minted by
+      `actions/create-github-app-token`. A PAT with `read:org` also works.
+      The default GITHUB_TOKEN cannot resolve either signal.
+    required: true
+  enterprise_token:
+    description: >-
+      Separate credential used ONLY for the enterprise-owner GraphQL lookup,
+      which no GitHub App installation token can satisfy — it needs a PAT
+      belonging to an enterprise owner with `admin:enterprise`. Leave empty
+      to skip the enterprise check and rely on org role plus team
+      membership. Falls back to `token` when unset.
+    required: false
+    default: ''
+
+outputs:
+  authorized:
+    description: '`true` when the actor satisfied the dispatch policy.'
+    value: ${{ steps.resolve.outputs.authorized }}
+  reason:
+    description: Human-readable explanation of the decision.
+    value: ${{ steps.resolve.outputs.reason }}
+  org_role:
+    description: 'Resolved organization role: admin, member, outside, or unknown.'
+    value: ${{ steps.resolve.outputs.org_role }}
+  enterprise_owner:
+    description: 'Enterprise-owner status: true, false, or unknown.'
+    value: ${{ steps.resolve.outputs.enterprise_owner }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve dispatch authorization
+      id: resolve
+      if: inputs.event_name == 'workflow_dispatch'
+      shell: bash
+      env:
+        AUTHZ_TOKEN: ${{ inputs.token }}
+        AUTHZ_ENTERPRISE_TOKEN: ${{ inputs.enterprise_token }}
+        ACTOR: ${{ inputs.actor }}
+        ORG: ${{ inputs.organization }}
+        ENTERPRISE_SLUG: ${{ inputs.enterprise_slug }}
+        REQUIRED_TEAMS: ${{ inputs.required_teams }}
+        ALLOW_ORG_ADMIN: ${{ inputs.allow_org_admin }}
+        REQUIRE_ENTERPRISE_OWNER: ${{ inputs.require_enterprise_owner }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/authorize.py"
+
+    - name: Enforce dispatch policy
+      if: inputs.event_name == 'workflow_dispatch'
+      shell: bash
+      env:
+        AUTHORIZED: ${{ steps.resolve.outputs.authorized }}
+        REASON: ${{ steps.resolve.outputs.reason }}
+        ORG_ROLE: ${{ steps.resolve.outputs.org_role }}
+        ENTERPRISE_OWNER: ${{ steps.resolve.outputs.enterprise_owner }}
+        ACTOR: ${{ inputs.actor }}
+        FAIL_CLOSED: ${{ inputs.fail_closed }}
+      run: |
+        set -euo pipefail
+        {
+          echo "### Gatekeeper authorization"
+          echo
+          echo "| Signal | Value |"
+          echo "| --- | --- |"
+          echo "| Actor | \`@${ACTOR}\` |"
+          echo "| Organization role | \`${ORG_ROLE}\` |"
+          echo "| Enterprise owner | \`${ENTERPRISE_OWNER}\` |"
+          echo "| Decision | \`${AUTHORIZED}\` |"
+          echo
+          echo "${REASON}"
+        } >> "${GITHUB_STEP_SUMMARY}"
+
+        if [ "${AUTHORIZED}" = "true" ]; then
+          echo "::notice title=Access Granted::@${ACTOR} authorized. ${REASON}"
+          exit 0
+        fi
+
+        if [ "${FAIL_CLOSED}" = "true" ]; then
+          echo "::error title=Access Denied::@${ACTOR} is not authorized to dispatch this workflow. ${REASON}"
+          exit 1
+        fi
+
+        echo "::warning title=Access Denied (not enforced)::@${ACTOR} is not authorized. ${REASON}"
