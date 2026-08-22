@@ -57,6 +57,7 @@
       { "repository": "blackoutsecure/bos-code-scanning-kit" },
       { "repository": "blackoutsecure/bos-managed-file-sync-action" },
       { "repository": "blackoutsecure/bos-marketplace-kit" },
+      { "repository": "blackoutsecure/bos-workflow-gatekeeper" },
       { "repository": "blackoutsecure/bos-repo-about-sync-action" },
       { "repository": "blackoutsecure/bos-upstream-watcher" },
       { "repository": "blackoutsecure/bos-sitemap-generator" },

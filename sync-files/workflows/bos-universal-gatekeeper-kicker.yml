@@ -147,15 +147,12 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Check dispatcher authorization
-        uses: blackoutsecure/bos-automation-hub/.github/actions/bos-universal-gatekeeper/authorize@main
+        uses: blackoutsecure/bos-workflow-gatekeeper@5327565163462f9547a5a988915e88c3b287eeb9 # v1.0.1
         with:
-          event_name: ${{ github.event_name }}
-          # `triggering_actor`, not `actor`: on a re-run `actor` stays the
-          # original dispatcher while `triggering_actor` is whoever pressed
-          # re-run. Authorizing `actor` would let any user with write access
-          # replay a privileged dispatch under someone else's identity.
           actor: ${{ github.triggering_actor || github.actor }}
           organization: ${{ github.repository_owner }}
+          repository: ${{ github.repository }}
+          event_name: ${{ github.event_name }}
           enterprise_slug: ${{ vars.GATEKEEPER_ENTERPRISE_SLUG }}
           required_teams: ${{ vars.GATEKEEPER_REQUIRED_TEAMS }}
           allow_org_admin: ${{ vars.GATEKEEPER_ALLOW_ORG_ADMIN != 'false' }}
@@ -166,6 +163,7 @@ jobs:
           fail_closed: true
           token: ${{ steps.authz_token.outputs.token || secrets.GATEKEEPER_AUTHZ_PAT }}
           enterprise_token: ${{ secrets.GATEKEEPER_AUTHZ_PAT }}
+          summary: true
 
   # Cheap, config-free hub-ref resolution so `sync-check` (which must run
   # BEFORE `parse-config`, since it's a pre-flight) can still pick the

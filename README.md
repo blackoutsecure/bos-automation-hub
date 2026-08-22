@@ -76,11 +76,11 @@ proxy, and because their required checks are pinned in branch protection.
 ### Dispatch authorization
 
 Every `workflow_dispatch` run passes through the `authorize` job before any
-job holding write permission executes. The
-[`bos-universal-gatekeeper/authorize`](.github/actions/bos-universal-gatekeeper/authorize)
-composite resolves the actor's organization role, authorized-team membership,
-and (when configured) enterprise-owner status, then fails closed with an
-`Access Denied` annotation when the actor does not satisfy the policy.
+job holding write permission executes. The job uses the published
+[`bos-workflow-gatekeeper`](https://github.com/blackoutsecure/bos-workflow-gatekeeper)
+Marketplace action to resolve the actor's organization role, authorized-team
+membership, and (when configured) enterprise-owner status, then fails closed
+with an `Access Denied` annotation when the actor does not satisfy the policy.
 
 The check authorizes `github.triggering_actor`, not `github.actor`. On a re-run
 those differ: `actor` stays the original dispatcher while `triggering_actor` is
