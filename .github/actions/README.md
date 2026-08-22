@@ -5,9 +5,8 @@ downstream callers that pin to this hub. Layout:
 
 - `.github/actions/<name>/` — reusable action modules used by multiple
   workflows and pinned directly from this hub.
-- `.github/actions/bos-universal-gatekeeper/` — the gatekeeper front door's
-  own composites, referenced as
-  `blackoutsecure/bos-automation-hub/.github/actions/bos-universal-gatekeeper[/<sub>]@<ref>`.
+- `.github/actions/bos-universal-gatekeeper/` — gatekeeper configuration and
+   preflight helpers used by the central workflow.
 - `<name>/` — used by one workflow in this repo only.
 
 ### `bos-universal-gatekeeper/`
@@ -18,7 +17,10 @@ every kicker:
 | Path | Purpose |
 | --- | --- |
 | `bos-universal-gatekeeper` | Resolve `.github/bos-universal-config.json` and the dev/main hub ref in one step. |
-| `bos-universal-gatekeeper/authorize` | Manual-dispatch access control (org role, team membership, enterprise owner). Fails closed. |
+
+Manual-dispatch authorization is provided by the published
+[`bos-workflow-gatekeeper`](https://github.com/blackoutsecure/bos-workflow-gatekeeper)
+Marketplace action and is pinned in the managed gatekeeper workflow.
 
 The reusable `resolve-hub-ref` and `universal-config` actions are direct
 infrastructure actions used by the managed kickers. They stay in their
