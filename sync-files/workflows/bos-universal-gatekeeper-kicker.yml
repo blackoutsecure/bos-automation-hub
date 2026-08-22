@@ -331,10 +331,11 @@ jobs:
       contents: read
     steps:
       - name: Verify declared dependencies
-        uses: blackoutsecure/bos-automation-hub/.github/actions/bos-universal-gatekeeper/preflight@main
+        uses: blackoutsecure/bos-workflow-gatekeeper@eae1fdd8ab731e72bf890fdb7c1504415d12d88c # v1.0.2
         with:
-          spec: ${{ toJson(fromJson(needs.parse-config.outputs.cfg).gatekeeper.preflight) }}
-          gate_level: ${{ needs.authorize.outputs.gate_level }}
+          preflight_only: true
+          preflight_spec: ${{ toJson(fromJson(needs.parse-config.outputs.cfg).gatekeeper.preflight) }}
+          preflight_gate_level: ${{ needs.authorize.outputs.gate_level }}
 
   # ---------------------------------------------------------------------------
   # Dispatch routing. Each job below owns exactly one manual operation and is

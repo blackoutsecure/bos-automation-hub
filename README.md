@@ -130,10 +130,12 @@ would reject every release.
 
 ### Runner preflight
 
-[`bos-universal-gatekeeper/preflight`](.github/actions/bos-universal-gatekeeper/preflight)
-verifies the runner actually provides the toolchain an operation needs before
-that operation starts, instead of failing halfway through with credentials
-already in scope. It is skipped entirely when `gatekeeper.preflight` is absent:
+The published
+[`bos-workflow-gatekeeper`](https://github.com/blackoutsecure/bos-workflow-gatekeeper)
+action verifies the runner actually provides the toolchain an operation needs
+before that operation starts, instead of failing halfway through with
+credentials already in scope. It runs in `preflight_only` mode when
+`gatekeeper.preflight` is configured:
 
 ```json
 "gatekeeper": {

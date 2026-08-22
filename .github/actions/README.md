@@ -5,8 +5,8 @@ downstream callers that pin to this hub. Layout:
 
 - `.github/actions/<name>/` — reusable action modules used by multiple
   workflows and pinned directly from this hub.
-- `.github/actions/bos-universal-gatekeeper/` — gatekeeper configuration and
-   preflight helpers used by the central workflow.
+- `.github/actions/bos-universal-gatekeeper/` — gatekeeper configuration used
+   by the central workflow.
 - `<name>/` — used by one workflow in this repo only.
 
 ### `bos-universal-gatekeeper/`
@@ -18,9 +18,9 @@ every kicker:
 | --- | --- |
 | `bos-universal-gatekeeper` | Resolve `.github/bos-universal-config.json` and the dev/main hub ref in one step. |
 
-Manual-dispatch authorization is provided by the published
+Manual-dispatch authorization and optional runner preflight are provided by the published
 [`bos-workflow-gatekeeper`](https://github.com/blackoutsecure/bos-workflow-gatekeeper)
-Marketplace action and is pinned in the managed gatekeeper workflow.
+Marketplace action and pinned in the managed gatekeeper workflow.
 
 The reusable `resolve-hub-ref` and `universal-config` actions are direct
 infrastructure actions used by the managed kickers. They stay in their
