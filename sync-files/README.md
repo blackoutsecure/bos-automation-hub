@@ -12,6 +12,11 @@ repository-specific kickers (`bos_universal_gatekeeper_kicker`,
 definitions and must be selected by repositories that need them. The global
 policy also sets `take_over_managed_files: true` so organization-owned blocks
 can replace competing managed blocks.
+Small changes to inherited Marketplace-managed files use the ordered
+`managed_file_sync.file_patches` setting rather than redefining the complete
+service. The global policy uses this to replace the Marketplace `.vscode/*`
+exception with `.vscode/` while retaining the rest of the shared `.gitignore`
+baseline.
 This repository's own sync wrappers use `.github/bos-universal-config.json` as
 the repo layer and check out the shared global policy at
 `sync-files/config/managed-file-sync-global-config.json`.

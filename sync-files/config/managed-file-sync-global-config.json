@@ -10,6 +10,19 @@
       "bos_universal_security_kicker",
       "bos_universal_sync_kicker"
     ],
+    "file_patches": [
+      {
+        "service": "common",
+        "path": ".gitignore",
+        "remove": [
+          ".vscode/*",
+          "!.vscode/extensions.json"
+        ],
+        "append": [
+          ".vscode/"
+        ]
+      }
+    ],
     "service_definitions": {
       "bos_universal_security_kicker": {
         "mode": "file",
