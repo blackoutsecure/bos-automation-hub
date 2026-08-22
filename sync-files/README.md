@@ -50,7 +50,7 @@ config — there is no hub-local dotfile source directory to maintain.
   runtime on `@main`. Its backend workflow owns separate monitor, release,
   Cloudflare, security, and metadata jobs so config and permissions are
   resolved once. Installing this service also removes the superseded
-  `bos-universal-launchpad-kicker.yml`.
+  the legacy launchpad kicker when present.
 - [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
   is the managed PR and merge-queue caller for shared lint, dependency review,
   code scanning, and repository policy. Pin `security (dev) / Security summary`

@@ -224,7 +224,7 @@ back to their deterministic local summary.
 [`deploy-cloudflare-pages.yml`](.github/workflows/deploy-cloudflare-pages.yml)
 sparse-checks-out those policy files into `hub-generator-config/` and passes
 each generator its `global_config_path`. Enable the audit through
-`cloudflare.generator_audit` in `bos-launchpad-config.json`:
+`cloudflare.generator_audit` in `.github/bos-universal-config.json`:
 
 ```json
 {
