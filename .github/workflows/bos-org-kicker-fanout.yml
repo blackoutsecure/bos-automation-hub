@@ -4,6 +4,27 @@
 # organization that already has that kicker installed. Requires an
 # Actions: write / Metadata: read credential covering the org, because the
 # job-scoped GITHUB_TOKEN cannot dispatch workflows in other repositories.
+#
+# Before dispatching, `audit_targets` (default `warn`) checks each target's
+# kicker file for an unguarded `workflow_dispatch:` trigger — one with no
+# detected `bos-workflow-gatekeeper` authorization step of its own. That
+# combination means anyone with dispatch access to the target repo can
+# trigger the kicker directly, bypassing this fan-out's own trust boundary
+# entirely. `warn` logs the finding and still dispatches, `block` skips that
+# repository, `off` skips the check (and its extra API call).
+#
+# `kicker` is a static `type: choice` enum, not freeform text: GitHub itself
+# rejects a dispatch whose value isn't in `options`, so that list is already
+# the hard ceiling on what can ever be selected (a config file can't widen
+# it — GitHub renders the dropdown from the YAML, not from any external
+# source). What a config CAN do is narrow that ceiling at runtime: this
+# workflow additionally reads `organization.kicker_fanout.enabled_kickers`
+# from this hub's own `.github/bos-universal-config.json` and refuses to run
+# a kicker that isn't listed there. That gives operators a single, auditable
+# place to shrink the effective set (e.g. disable `launchpad` fan-out
+# org-wide during an incident) without editing this workflow file. Empty or
+# missing config means "no additional restriction" — every enum value stays
+# allowed, matching the behavior before this check existed.
 name: Blackout Secure Org Kicker Fan-Out
 
 run-name: >-
@@ -53,6 +74,17 @@ run-name: >-
         required: false
         type: boolean
         default: true
+      audit_targets:
+        description: >-
+          Before dispatching, check whether each target repository's kicker
+          file exposes an unguarded `workflow_dispatch:` trigger (no detected
+          `bos-workflow-gatekeeper` authorization step). `warn` logs a warning
+          and still dispatches; `block` skips that repository; `off` skips the
+          check entirely.
+        required: false
+        type: choice
+        options: [warn, block, off]
+        default: warn
 
 permissions:
   contents: read
@@ -74,8 +106,32 @@ jobs:
           set -euo pipefail
           if [ "${HAS_TOKEN}" != "true" ]; then
             echo "::error::Cross-repository dispatch needs an org-scoped credential." \
-                 "Add an \`ORG_KICK_PAT\` (or \`DISPATCH_TOKEN\`) secret with" \
+                 "Add an ORG_KICK_PAT (or DISPATCH_TOKEN) secret with" \
                  "Actions: write and Metadata: read on the target repositories."
+            exit 1
+          fi
+
+      - name: Checkout org config
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/bos-universal-config.json
+          sparse-checkout-cone-mode: false
+
+      - name: Enforce config-driven kicker allowlist
+        env:
+          KICKER: ${{ inputs.kicker }}
+        run: |
+          set -euo pipefail
+          config=.github/bos-universal-config.json
+          [ -f "${config}" ] || exit 0
+          enabled=$(jq -r '.organization.kicker_fanout.enabled_kickers // [] | .[]' "${config}" 2>/dev/null || true)
+          if [ -z "${enabled}" ]; then
+            exit 0
+          fi
+          if ! grep -qxF "${KICKER}" <<< "${enabled}"; then
+            echo "::error::kicker '${KICKER}' is not in organization.kicker_fanout.enabled_kickers" \
+                 "(.github/bos-universal-config.json). Add it there to allow this fan-out."
             exit 1
           fi
 
@@ -89,6 +145,7 @@ jobs:
           INCLUDE_FORKS: ${{ inputs.include_forks }}
           INCLUDE_ARCHIVED: ${{ inputs.include_archived }}
           DRY_RUN: ${{ inputs.dry_run }}
+          AUDIT_TARGETS: ${{ inputs.audit_targets }}
         run: |
           set -euo pipefail
           WORKFLOW_FILE="bos-universal-${KICKER}-kicker.yml"
@@ -105,7 +162,7 @@ jobs:
           mapfile -t CANDIDATES < <(
             gh api --paginate "orgs/${ORG}/repos?per_page=100" \
               --jq '.[] | select(.disabled | not)
-                        | [.full_name, (.fork|tostring), (.archived|tostring)]
+                        | [.full_name, (.fork|tostring), (.archived|tostring), .default_branch]
                         | @tsv'
           )
 
@@ -121,6 +178,28 @@ jobs:
             return 1
           }
 
+          # Best-effort static check: does the target's kicker file expose a
+          # `workflow_dispatch:` trigger with no `bos-workflow-gatekeeper`
+          # authorization step of its own? If so, anyone with dispatch access
+          # to that repository can trigger it directly, bypassing this
+          # fan-out's own trust boundary entirely. A text scan, not a full
+          # YAML parse — cheap and conservative rather than exhaustive.
+          audit_target() {
+            local full_name="$1" ref="$2" content
+            content=$(gh api "repos/${full_name}/contents/.github/workflows/${WORKFLOW_FILE}?ref=${ref}" \
+              --jq '.content' 2>/dev/null | base64 --decode 2>/dev/null || true)
+            if [ -z "${content}" ]; then
+              echo unknown
+              return
+            fi
+            if printf '%s' "${content}" | grep -Eq '^[[:space:]]*workflow_dispatch[[:space:]]*:' \
+               && ! printf '%s' "${content}" | grep -qi 'bos-workflow-gatekeeper'; then
+              echo insecure
+              return
+            fi
+            echo secure
+          }
+
           {
             echo "### Org kicker fan-out: \`${WORKFLOW_FILE}\`"
             echo
@@ -133,7 +212,7 @@ jobs:
           failed=0
 
           for row in "${CANDIDATES[@]}"; do
-            IFS=$'\t' read -r full_name is_fork is_archived <<< "${row}"
+            IFS=$'\t' read -r full_name is_fork is_archived default_branch <<< "${row}"
             matches_filter "${full_name}" || continue
             if [ "${is_fork}" = "true" ] && [ "${INCLUDE_FORKS}" != "true" ]; then
               continue
@@ -158,6 +237,18 @@ jobs:
               echo "| ${full_name} | skipped (AUTO_HUB_SYNC=false) |" >> "${GITHUB_STEP_SUMMARY}"
               skipped=$((skipped + 1))
               continue
+            fi
+
+            if [ "${AUDIT_TARGETS}" != "off" ]; then
+              audit_status=$(audit_target "${full_name}" "${default_branch}")
+              if [ "${audit_status}" = "insecure" ]; then
+                if [ "${AUDIT_TARGETS}" = "block" ]; then
+                  echo "| ${full_name} | :no_entry: blocked (${WORKFLOW_FILE} exposes workflow_dispatch with no gatekeeper step) |" >> "${GITHUB_STEP_SUMMARY}"
+                  skipped=$((skipped + 1))
+                  continue
+                fi
+                echo "::warning::${full_name}'s ${WORKFLOW_FILE} exposes workflow_dispatch with no detected bos-workflow-gatekeeper step."
+              fi
             fi
 
             if [ "${DRY_RUN}" = "true" ]; then

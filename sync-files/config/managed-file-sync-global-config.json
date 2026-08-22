@@ -19,7 +19,16 @@
           "!.vscode/extensions.json"
         ],
         "append": [
-          ".vscode/"
+          ".vscode/",
+          "",
+          "# Private keys / certs — never commit (e.g. GitHub App private keys).",
+          "*.pem",
+          "*.key",
+          "*.crt",
+          "*.p12",
+          "*.pfx",
+          "secrets.*",
+          ".secrets/"
         ]
       }
     ],

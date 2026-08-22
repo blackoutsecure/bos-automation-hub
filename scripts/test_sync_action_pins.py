@@ -99,7 +99,7 @@ def test_rewrite_handles_subpath_actions_and_leaves_others_alone() -> None:
         "        uses: blackoutsecure/bos-marketplace-kit/.github/actions/check@"
         + "d" * 40
         + " # v0.1.24\n"
-        "        uses: blackoutsecure/bos-automation-hub/.github/actions/bos-universal-gatekeeper@main\n"
+        "        uses: blackoutsecure/bos-automation-hub/.github/actions/universal-config@main\n"
         "        uses: actions/checkout@" + "e" * 40 + " # v7.0.1\n"
     )
     updated, old = pins.rewrite_text(body, "blackoutsecure/bos-marketplace-kit", sha, "v0.1.27")
@@ -107,7 +107,7 @@ def test_rewrite_handles_subpath_actions_and_leaves_others_alone() -> None:
     assert old == ["d" * 40]
     assert f".github/actions/check@{sha} # v0.1.27" in updated
     # Hub self-references and third-party pins must be preserved verbatim.
-    assert "bos-automation-hub/.github/actions/bos-universal-gatekeeper@main" in updated
+    assert "bos-automation-hub/.github/actions/universal-config@main" in updated
     assert "actions/checkout@" + "e" * 40 + " # v7.0.1" in updated
 
 

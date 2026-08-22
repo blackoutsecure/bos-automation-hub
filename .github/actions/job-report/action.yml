@@ -65,6 +65,38 @@ inputs:
     description: Optional PDF report path.
     required: false
     default: blackout-secure-report.pdf
+  enable_json:
+    description: Generate a machine-readable JSON report alongside Markdown/HTML.
+    required: false
+    default: 'false'
+  json_path:
+    description: JSON report path.
+    required: false
+    default: blackout-secure-report.json
+  enable_automation_policy:
+    description: Render the "Automation policy" section. Set false for callers with no automation-policy concept.
+    required: false
+    default: 'true'
+  brand_name:
+    description: Report byline and footer brand name.
+    required: false
+    default: Blackout Secure
+  brand_url:
+    description: Report byline and footer brand URL.
+    required: false
+    default: https://blackoutsecure.app
+  license_notice:
+    description: License string shown in the report footer.
+    required: false
+    default: Apache License 2.0
+  enable_artifact_upload:
+    description: Upload the generated HTML/PDF/JSON reports as a workflow artifact.
+    required: false
+    default: 'false'
+  artifact_name:
+    description: Artifact name used when enable_artifact_upload is true.
+    required: false
+    default: blackout-secure-audit-report
 outputs:
   outcome:
     description: success, warn, or failure based on finding severity.
@@ -96,6 +128,9 @@ outputs:
   pdf_status:
     description: generated, unavailable, or disabled.
     value: ${{ steps.report.outputs.pdf_status }}
+  json_path:
+    description: Generated JSON report path, when enable_json is true.
+    value: ${{ steps.report.outputs.json_path }}
 runs:
   using: composite
   steps:
@@ -117,6 +152,12 @@ runs:
         REPORT_ENABLE_HTML: ${{ inputs.enable_html }}
         REPORT_ENABLE_PDF: ${{ inputs.enable_pdf }}
         REPORT_PDF_PATH: ${{ inputs.pdf_path }}
+        REPORT_ENABLE_JSON: ${{ inputs.enable_json }}
+        REPORT_JSON_PATH: ${{ inputs.json_path }}
+        REPORT_ENABLE_AUTOMATION_POLICY: ${{ inputs.enable_automation_policy }}
+        REPORT_BRAND_NAME: ${{ inputs.brand_name }}
+        REPORT_BRAND_URL: ${{ inputs.brand_url }}
+        REPORT_LICENSE_NOTICE: ${{ inputs.license_notice }}
       run: |
         set -euo pipefail
         python3 - <<'PY'
@@ -185,8 +226,14 @@ runs:
         want_annotations = (os.environ.get("REPORT_ENABLE_ANNOTATIONS") or "true").lower() == "true"
         want_html = (os.environ.get("REPORT_ENABLE_HTML") or "true").lower() == "true"
         want_pdf = (os.environ.get("REPORT_ENABLE_PDF") or "false").lower() == "true"
+        want_json = (os.environ.get("REPORT_ENABLE_JSON") or "false").lower() == "true"
+        want_policy_section = (os.environ.get("REPORT_ENABLE_AUTOMATION_POLICY") or "true").lower() == "true"
         html_path = os.environ.get("REPORT_HTML_PATH") or "blackout-secure-report.html"
         pdf_path = os.environ.get("REPORT_PDF_PATH") or "blackout-secure-report.pdf"
+        json_path = os.environ.get("REPORT_JSON_PATH") or "blackout-secure-report.json"
+        brand_name = (os.environ.get("REPORT_BRAND_NAME") or "Blackout Secure").strip()
+        brand_url = (os.environ.get("REPORT_BRAND_URL") or "https://blackoutsecure.app").strip()
+        license_notice = (os.environ.get("REPORT_LICENSE_NOTICE") or "Apache License 2.0").strip()
 
         def set_value(value):
             return value is not None and str(value).strip().lower() not in UNSET
@@ -245,14 +292,15 @@ runs:
 
         context_rows = [row for row in context if isinstance(row, dict) and row.get("include") is not False and set_value(row.get("value"))]
         total_parts = [f"{counts[key]} {LABELS[key].lower()}" for key in LABELS if counts[key]]
-        markdown = [f"# {title}", "", "**Provided by [Blackout Secure](https://blackoutsecure.app)**", "", "## Executive summary", "", f"**Verdict:** {verdict}", "", detail, "", f"**Totals:** {' · '.join(total_parts) or 'no findings'}", "", "| Severity | Count | Meaning |", "| -------- | ----- | ------- |"]
+        markdown = [f"# {title}", "", f"**Provided by [{brand_name}]({brand_url})**", "", "## Executive summary", "", f"**Verdict:** {verdict}", "", detail, "", f"**Totals:** {' · '.join(total_parts) or 'no findings'}", "", "| Severity | Count | Meaning |", "| -------- | ----- | ------- |"]
         markdown.extend(f"| {LABELS[key]} | {counts[key]} | {MEANINGS[key]} |" for key in LABELS if counts[key])
         markdown.append("")
         if context_rows:
             markdown += ["## Configuration used", "", "| Setting | Value | What it means |", "| ------- | ----- | ------------- |"]
             markdown += [f"| {cell(row.get('label'))} | `{cell(row.get('value'))}` | {cell(row.get('meaning'))} |" for row in context_rows]
             markdown.append("")
-        markdown += [
+        if want_policy_section:
+          markdown += [
             "## Automation policy",
             "",
             "| Area | Action | Meaning |",
@@ -284,7 +332,7 @@ runs:
         commit_url = f"{server}/{repo}/commit/{sha}" if sha else ""
         html_rows = "".join(f"<tr><th>{esc(LABELS[key])}</th><td>{counts[key]}</td><td>{esc(MEANINGS[key])}</td></tr>" for key in LABELS if counts[key])
         html_context = "" if not context_rows else "<section><h2>Configuration used</h2><table><thead><tr><th>Setting</th><th>Value</th><th>What it means</th></tr></thead><tbody>" + "".join(f"<tr><th>{esc(row.get('label'))}</th><td><code>{esc(row.get('value'))}</code></td><td>{esc(row.get('meaning'))}</td></tr>" for row in context_rows) + "</tbody></table></section>"
-        html_policy = "<section><h2>Automation policy</h2><table><thead><tr><th>Area</th><th>Action</th><th>Meaning</th></tr></thead><tbody>" + "".join([
+        html_policy = "" if not want_policy_section else "<section><h2>Automation policy</h2><table><thead><tr><th>Area</th><th>Action</th><th>Meaning</th></tr></thead><tbody>" + "".join([
           f"<tr><th>Recommendations</th><td><code>{esc(automation_policy.get('recommendation_action', 'notify'))}</code></td><td>AI recommendations remain advisory unless an explicit PR mode is configured.</td></tr>",
           f"<tr><th>Releases</th><td><code>{esc(automation_policy.get('release_action', 'notify'))}</code></td><td>Release actions require their configured approval workflow.</td></tr>",
           f"<tr><th>Promotion</th><td><code>{esc(automation_policy.get('promotion_action', 'notify'))}</code></td><td>Branch promotion is not automatic from this report.</td></tr>",
@@ -299,7 +347,7 @@ runs:
                 continue
             html_findings.append(f"<h3>{esc(group_title)}</h3>" + (f"<p class='blurb'>{esc(blurb)}</p>" if blurb else "") + "<table><thead><tr><th>Rule</th><th>Severity</th><th>Control</th><th>Evidence</th><th>Recommended remediation</th></tr></thead><tbody>" + "".join(f"<tr class='severity-{item['severity']}'><td><code>{esc(item['id'])}</code></td><td>{esc(LABELS[item['severity']])}</td><td>{esc(item['control'])}</td><td>{esc(item['evidence'])}</td><td>{esc(item['remediation'])}</td></tr>" for item in rows) + "</tbody></table>")
         html_totals = " · ".join(total_parts) or "no findings"
-        html_doc = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{esc(title)} | Blackout Secure</title><style>:root{{--ink:#18212b;--muted:#5c6b78;--line:#d9e1e7;--brand:#e7931d;--pass:#18864b;--warn:#a15c00;--fail:#b42318;--skip:#667085}}*{{box-sizing:border-box}}body{{margin:0;background:#f4f6f8;color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}}.page{{max-width:1180px;margin:auto;padding:32px}}header{{background:#18212b;color:#fff;padding:30px 34px;border-top:6px solid var(--brand)}}h1{{margin:5px 0;font-size:30px}}h2{{border-bottom:1px solid var(--line);padding-bottom:8px}}.eyebrow{{color:#f7b85e;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}}.meta,.blurb,.footer{{color:var(--muted)}}main{{background:#fff;padding:1px 34px 34px}}table{{width:100%;border-collapse:collapse;margin:12px 0 24px}}th,td{{border:1px solid var(--line);padding:9px;text-align:left;vertical-align:top}}thead th{{background:#eef2f5}}code{{background:#eef2f5;padding:2px 5px}}.severity-fail td:nth-child(1),.severity-fail td:nth-child(2){{color:var(--fail);font-weight:700}}.severity-warn td:nth-child(2){{color:var(--warn);font-weight:700}}.severity-pass td:nth-child(2){{color:var(--pass);font-weight:700}}.severity-skip td:nth-child(2){{color:var(--skip);font-weight:700}}.disclaimer{{border-left:4px solid var(--brand);background:#fff8ed;padding:12px 16px;margin-top:28px}}@media print{{body{{background:#fff}}.page{{max-width:none;padding:0}}header,main{{box-shadow:none}}table,section{{break-inside:avoid}}}}@media(max-width:700px){{.page{{padding:12px}}header,main{{padding-left:16px;padding-right:16px}}table{{display:block;overflow-x:auto}}}}</style></head><body><div class='page'><header><div class='eyebrow'>Blackout Secure · Audit Report</div><h1>{esc(title)}</h1><p>Generated {esc(generated)} · {esc(repo)} · Ref {esc(os.environ.get('GITHUB_REF_NAME') or os.environ.get('GITHUB_REF') or 'unknown')}</p><p><a href='{esc(server + '/' + repo)}'>GitHub repository</a> · <a href='{esc(run_url)}'>Actions run</a> · <a href='{esc(commit_url)}'>{esc(sha[:12] or 'commit unavailable')}</a></p></header><main><section><h2>Executive summary</h2><p><strong>{esc(verdict)}</strong></p><p>{esc(detail)}</p><p><strong>Totals:</strong> {esc(html_totals)}</p><table><thead><tr><th>Severity</th><th>Count</th><th>Meaning</th></tr></thead><tbody>{html_rows}</tbody></table></section>{html_context}<section><h2>Recommended actions</h2><ol>{''.join(f'<li>{esc(action)}</li>' for action in actions)}</ol></section><section><h2>Detailed findings</h2>{''.join(html_findings) or '<p>No findings were emitted.</p>'}</section><aside class='disclaimer'><strong>Open-source report notice.</strong> This report is operational guidance, not a security certification, legal opinion, warranty, or substitute for qualified human review. It reflects only the evidence available at generation time.</aside></main><footer><strong>Blackout Secure</strong> · <a href='https://blackoutsecure.app'>blackoutsecure.app</a> · Copyright © 2025–{dt.datetime.now(dt.timezone.utc).year} Blackout Secure · Apache License 2.0<br>{esc(footer)}</footer></div></body></html>"""
+        html_doc = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{esc(title)} | {esc(brand_name)}</title><style>:root{{--ink:#18212b;--muted:#5c6b78;--line:#d9e1e7;--brand:#e7931d;--pass:#18864b;--warn:#a15c00;--fail:#b42318;--skip:#667085}}*{{box-sizing:border-box}}body{{margin:0;background:#f4f6f8;color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}}.page{{max-width:1180px;margin:auto;padding:32px}}header{{background:#18212b;color:#fff;padding:30px 34px;border-top:6px solid var(--brand)}}h1{{margin:5px 0;font-size:30px}}h2{{border-bottom:1px solid var(--line);padding-bottom:8px}}.eyebrow{{color:#f7b85e;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}}.meta,.blurb,.footer{{color:var(--muted)}}main{{background:#fff;padding:1px 34px 34px}}table{{width:100%;border-collapse:collapse;margin:12px 0 24px}}th,td{{border:1px solid var(--line);padding:9px;text-align:left;vertical-align:top}}thead th{{background:#eef2f5}}code{{background:#eef2f5;padding:2px 5px}}.severity-fail td:nth-child(1),.severity-fail td:nth-child(2){{color:var(--fail);font-weight:700}}.severity-warn td:nth-child(2){{color:var(--warn);font-weight:700}}.severity-pass td:nth-child(2){{color:var(--pass);font-weight:700}}.severity-skip td:nth-child(2){{color:var(--skip);font-weight:700}}.disclaimer{{border-left:4px solid var(--brand);background:#fff8ed;padding:12px 16px;margin-top:28px}}@media print{{body{{background:#fff}}.page{{max-width:none;padding:0}}header,main{{box-shadow:none}}table,section{{break-inside:avoid}}}}@media(max-width:700px){{.page{{padding:12px}}header,main{{padding-left:16px;padding-right:16px}}table{{display:block;overflow-x:auto}}}}</style></head><body><div class='page'><header><div class='eyebrow'>{esc(brand_name)} · Audit Report</div><h1>{esc(title)}</h1><p>Generated {esc(generated)} · {esc(repo)} · Ref {esc(os.environ.get('GITHUB_REF_NAME') or os.environ.get('GITHUB_REF') or 'unknown')}</p><p><a href='{esc(server + '/' + repo)}'>GitHub repository</a> · <a href='{esc(run_url)}'>Actions run</a> · <a href='{esc(commit_url)}'>{esc(sha[:12] or 'commit unavailable')}</a></p></header><main><section><h2>Executive summary</h2><p><strong>{esc(verdict)}</strong></p><p>{esc(detail)}</p><p><strong>Totals:</strong> {esc(html_totals)}</p><table><thead><tr><th>Severity</th><th>Count</th><th>Meaning</th></tr></thead><tbody>{html_rows}</tbody></table></section>{html_context}<section><h2>Recommended actions</h2><ol>{''.join(f'<li>{esc(action)}</li>' for action in actions)}</ol></section><section><h2>Detailed findings</h2>{''.join(html_findings) or '<p>No findings were emitted.</p>'}</section><aside class='disclaimer'><strong>Open-source report notice.</strong> This report is operational guidance, not a security certification, legal opinion, warranty, or substitute for qualified human review. It reflects only the evidence available at generation time.</aside></main><footer><strong>{esc(brand_name)}</strong> · <a href='{esc(brand_url)}'>{esc(brand_url.split('://')[-1])}</a> · Copyright © 2025–{dt.datetime.now(dt.timezone.utc).year} {esc(brand_name)} · {esc(license_notice)}<br>{esc(footer)}</footer></div></body></html>"""
 
         html_value = ""
         pdf_value = ""
@@ -324,6 +372,22 @@ runs:
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
         if want_summary and summary_path:
             Path(summary_path).write_text("\n".join(markdown) + "\n", encoding="utf-8")
+        json_value = ""
+        if want_json:
+            Path(json_path).parent.mkdir(parents=True, exist_ok=True) if str(Path(json_path).parent) != "." else None
+            Path(json_path).write_text(json.dumps({
+                "title": title,
+                "subject": os.environ.get("REPORT_SUBJECT") or "",
+                "outcome": outcome,
+                "verdict": verdict,
+                "counts": counts,
+                "findings": normalized,
+                "generated": generated,
+                "repository": repo,
+                "run_url": run_url,
+                "commit_url": commit_url,
+            }, indent=2) + "\n", encoding="utf-8")
+            json_value = json_path
         if want_annotations:
             for item in normalized:
                 if item["severity"] == "fail":
@@ -331,8 +395,21 @@ runs:
                 elif item["severity"] == "warn":
                     print(f"::warning title={title}::{item['id']} {item['control']}: {item['evidence']} — {item['remediation']}")
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-            for key, value in (("outcome", outcome), ("verdict", verdict), ("passes", counts["pass"]), ("warns", counts["warn"]), ("fails", counts["fail"]), ("skips", counts["skip"]), ("total", len(normalized)), ("html_path", html_value), ("pdf_path", pdf_value), ("pdf_status", pdf_status)):
+            for key, value in (("outcome", outcome), ("verdict", verdict), ("passes", counts["pass"]), ("warns", counts["warn"]), ("fails", counts["fail"]), ("skips", counts["skip"]), ("total", len(normalized)), ("html_path", html_value), ("pdf_path", pdf_value), ("pdf_status", pdf_status), ("json_path", json_value)):
                 output.write(f"{key}={value}\n")
         if (fail_on == "fail" and counts["fail"]) or (fail_on == "warn" and (counts["fail"] or counts["warn"])):
             raise SystemExit(1)
         PY
+
+    - name: Upload report artifact
+      if: inputs.enable_artifact_upload == 'true' && (steps.report.outputs.html_path != '' || steps.report.outputs.pdf_path != '' || steps.report.outputs.json_path != '')
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: |
+          ${{ steps.report.outputs.html_path }}
+          ${{ steps.report.outputs.pdf_path }}
+          ${{ steps.report.outputs.json_path }}
+        if-no-files-found: ignore
+        retention-days: 30
+

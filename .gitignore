@@ -1,25 +1,3 @@
-# OS / editor
-*.swo
-*~
-.vscode/
-*.code-workspace
-
-# Logs / temp
-*.log
-*.tmp
-*.bak
-.tmp/
-.cache/
-
-# Secrets — never commit
-*.pem
-*.key
-*.crt
-*.p12
-*.pfx
-secrets.*
-.secrets/
-
 # Local actionlint / tooling output
 actionlint
 actionlint.exe
@@ -30,17 +8,6 @@ venv/
 
 # Node (if scripts are added later)
 npm-debug.log*
-
-# Misc
-
-# macOS resource forks (created on non-HFS volumes / network shares).
-._*
-.AppleDouble
-.LSOverride
-
-# Merge / patch conflict artifacts.
-*.orig
-*.rej
 
 # direnv — environment loaders are per-developer.
 .envrc
@@ -73,6 +40,15 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# Private keys / certs — never commit (e.g. GitHub App private keys).
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets.*
+.secrets/
 # <<< managed-file-sync:common <<<
 
 # >>> managed-file-sync:coverage_artifacts >>>

@@ -692,7 +692,8 @@ def main() -> None:
     assert "name: Job report" in job_report
     for token in ("outcome", "verdict", "passes", "warns", "fails", "skips", "total"):
         assert f"{token}:" in job_report
-    assert "Provided by [Blackout Secure](https://blackoutsecure.app)" in job_report
+    assert "Provided by [{brand_name}]({brand_url})" in job_report
+    assert "brand_name" in job_report and "brand_url" in job_report
     assert "## Recommended Actions" in job_report
     assert "## Detailed Findings" in job_report
     assert '"⚪ Not Assessed"' in job_report
@@ -740,7 +741,9 @@ def main() -> None:
     assert 'for key in LABELS if counts[key]' in job_report
 
     hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
-    assert set(hub_config_raw) == {"action_pins", "gate", "launchpad", "organization", "remediation"}
+    assert set(hub_config_raw) == {
+        "action_pins", "gate", "launchpad", "managed_file_sync", "organization", "remediation",
+    }
     # The pin bumper reads this section instead of a standalone manifest, so
     # the standalone file must stay gone and the section must stay usable.
     assert not (ROOT / ".github/action-pins.json").exists()

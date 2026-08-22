@@ -254,7 +254,7 @@ jobs:
     timeout-minutes: 2
     outputs:
       cfg: ${{ steps.config.outputs.cfg }}
-      target_ref: ${{ steps.config.outputs.target_ref }}
+      target_ref: ${{ needs.resolve-target-ref.outputs.target_ref }}
       operation: ${{ steps.dispatch.outputs.operation }}
       force_run: ${{ steps.dispatch.outputs.force }}
       run_publish: ${{ steps.dispatch.outputs.run_publish }}
@@ -264,13 +264,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Parse gatekeeper config
+      - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/bos-universal-gatekeeper@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/universal-config@main
         with:
           config_path: .github/bos-universal-config.json
-          event_name: ${{ github.event_name }}
-          ref_name: ${{ github.ref_name }}
       # Maps each trigger (and, for `schedule`, each individual cron via
       # `github.event.schedule`) to one `operation`/`force` pair, so the
       # release job below reads one resolved pair instead of repeating the

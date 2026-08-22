@@ -1,4 +1,14 @@
 {
+  "managed_file_sync": {
+    "services": [
+      "common",
+      "lf_line_endings",
+      "editorconfig",
+      "markdownlint",
+      "yamllint",
+      "shellcheck"
+    ]
+  },
   "organization": {
     "runners": {
       "default": "ubuntu-latest",
@@ -13,6 +23,16 @@
     },
     "defaults": {
       "timeout_minutes": 30
+    },
+    "kicker_fanout": {
+      "enabled_kickers": [
+        "sync",
+        "security",
+        "marketplace",
+        "upstream",
+        "launchpad",
+        "action-test"
+      ]
     }
   },
   "launchpad": {

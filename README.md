@@ -584,6 +584,16 @@ run, generation time, Apache License 2.0 metadata, and an open-source notice:
 automated findings are operational guidance, not a security certification,
 legal opinion, warranty, or substitute for qualified human review.
 
+`job-report` is intentionally self-contained (pure Python/bash, no dependency
+on any other action in this repo) and its branding, license notice, and
+"Automation policy" section are configurable — `brand_name`, `brand_url`,
+`license_notice`, and `enable_automation_policy` (defaults reproduce today's
+output exactly, so no existing caller changes). It can also emit a
+machine-readable JSON report (`enable_json`/`json_path`) alongside the
+Markdown/HTML, and optionally upload the generated files as a workflow
+artifact itself (`enable_artifact_upload`/`artifact_name`) instead of every
+caller wiring its own `actions/upload-artifact` step.
+
 Findings are pure data, so a workflow only builds a JSON array and the report
 surface stays identical everywhere:
 

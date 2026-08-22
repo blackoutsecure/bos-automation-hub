@@ -8,12 +8,27 @@
 # (same-repo `workflow_dispatch`, not a duplicated copy of its logic) right
 # after the change that would otherwise wait up to a week to reach them.
 #
+# Dynamic chaining mode (planned, not yet wired): this is a `push`-triggered,
+# no-human-actor handoff — the ideal candidate for `bos-workflow-gatekeeper`'s
+# new `handoff_only` mode (dispatch + `handoff_audit`, no actor/org check)
+# instead of the bespoke `gh workflow run` call below. Not switched over yet:
+# `handoff_only`/`handoff_inputs` only exist in that action's unreleased
+# source as of this comment. Once a `bos-workflow-gatekeeper` release ships
+# them and the pin below is bumped, replace the "Dispatch" step with a step
+# pinned to that new release, `with: { handoff_only: true, dispatch_handoff:
+# true, handoff_workflow: bos-org-kicker-fanout.yml, handoff_repository:
+# github.repository, handoff_ref: github.ref_name, handoff_inputs:
+# '{"kicker": "sync", "dry_run": "false"}', handoff_audit: warn, token:
+# github.token }` (kept as prose, not YAML, so this comment can't be
+# mistaken by tooling for a live, un-SHA-pinned action reference).
+#
 # Deliberately NOT a `workflow_call` of `bos-org-kicker-fanout.yml`: adding
 # `workflow_call:` to that file would make `release-hub.yml`'s auto-detected
 # runtime allowlist (`grep -lE '^  workflow_call:' .github/workflows/*.yml`)
 # promote hub-only maintainer tooling to the public `main` runtime surface,
-# which it's explicitly meant to stay off of. A plain `gh workflow run`
-# dispatch avoids that reclassification entirely.
+# which it's explicitly meant to stay off of. A `workflow_dispatch` handoff
+# (whether via `gh workflow run` or the gatekeeper's handoff mode) avoids
+# that reclassification entirely.
 #
 # Safety notes:
 #   * The fanout run this dispatches fails closed exactly as it would if
@@ -24,7 +39,7 @@
 #     variable to `false` — see the opt-out check in
 #     `bos-org-kicker-fanout.yml`. Opt-out, not opt-in: repos participate
 #     by default once onboarded (kicker file present).
-#   * Dispatches with `dry_run=false` \u2014 this trigger only exists to actually
+#   * Dispatches with `dry_run=false` — this trigger only exists to actually
 #     propagate. Use the manual `bos-org-kicker-fanout.yml` dispatch with
 #     `dry_run: true` to preview targets without this push trigger.
 name: Blackout Secure Hub Managed-File Sync Propagation
@@ -62,3 +77,5 @@ jobs:
             --ref "${{ github.ref_name }}" \
             -f kicker=sync \
             -f dry_run=false
+
+
