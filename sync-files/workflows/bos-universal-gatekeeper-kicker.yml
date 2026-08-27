@@ -147,7 +147,7 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Check dispatcher authorization
-        uses: blackoutsecure/bos-workflow-gatekeeper@5327565163462f9547a5a988915e88c3b287eeb9 # v1.0.1
+        uses: blackoutsecure/bos-workflow-gatekeeper@eae1fdd8ab731e72bf890fdb7c1504415d12d88c # v1.0.2
         with:
           actor: ${{ github.triggering_actor || github.actor }}
           organization: ${{ github.repository_owner }}
