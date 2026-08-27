@@ -95,6 +95,16 @@ def test_select_tag_respects_channel() -> None:
     assert resolver.tag_is_prerelease("v2.0.0+build.1") is False
 
 
+def test_prerelease_preferred_falls_back_to_stable() -> None:
+    pattern = re.compile(resolver.DEFAULT_TAG_PATTERN)
+    releases = [
+        {"tag_name": "v9.0.0", "prerelease": False, "draft": False},
+        {"tag_name": "v2.0.0-rc.1", "prerelease": True, "draft": False},
+    ]
+    assert resolver.select_release(releases, pattern, "prerelease-preferred")["tag_name"] == "v2.0.0-rc.1"
+    assert resolver.select_release([releases[0]], pattern, "pre-latest")["tag_name"] == "v9.0.0"
+
+
 def test_rewrite_replaces_sha_and_version_comment() -> None:
     sha = "a" * 40
     body = (

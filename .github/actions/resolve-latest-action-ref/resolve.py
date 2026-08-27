@@ -120,11 +120,14 @@ def select_release(releases: list, pattern: re.Pattern, channel: str) -> dict | 
             continue
         if channel == "prerelease" and not is_pre:
             continue
-        candidates.append(release)
+        candidates.append((release, is_pre))
     if not candidates:
         return None
-    candidates.sort(key=lambda item: semver_key(item.get("tag_name") or ""))
-    return candidates[-1]
+    if channel in {"prerelease-preferred", "pre-latest"}:
+        preferred = [item for item in candidates if item[1]]
+        candidates = preferred or [item for item in candidates if not item[1]]
+    candidates.sort(key=lambda item: semver_key(item[0].get("tag_name") or ""))
+    return candidates[-1][0]
 
 
 def select_tag(tags: list, pattern: re.Pattern, channel: str) -> dict | None:
@@ -141,6 +144,9 @@ def select_tag(tags: list, pattern: re.Pattern, channel: str) -> dict | None:
         candidates.append(tag)
     if not candidates:
         return None
+    if channel in {"prerelease-preferred", "pre-latest"}:
+        preferred = [tag for tag in candidates if tag_is_prerelease(tag.get("name") or "")]
+        candidates = preferred or [tag for tag in candidates if not tag_is_prerelease(tag.get("name") or "")]
     candidates.sort(key=lambda item: semver_key(item.get("name") or ""))
     return candidates[-1]
 
@@ -161,8 +167,11 @@ def resolve_commit_sha(repo: str, tag: str, token: str) -> str:
 def resolve(repo: str, channel: str, source: str, pattern_text: str, token: str) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+", repo or ""):
         die(f"input 'repository' must be 'owner/name' (got '{repo}')")
-    if channel not in {"auto", "stable", "prerelease"}:
-        die(f"input 'channel' must be auto, stable, or prerelease (got '{channel}')")
+    if channel not in {"auto", "stable", "prerelease", "prerelease-preferred", "pre-latest"}:
+        die(
+            "input 'channel' must be auto, stable, prerelease, "
+            f"prerelease-preferred, or pre-latest (got '{channel}')"
+        )
     if source not in {"auto", "releases", "tags"}:
         die(f"input 'source' must be auto, releases, or tags (got '{source}')")
     try:
@@ -180,7 +189,7 @@ def resolve(repo: str, channel: str, source: str, pattern_text: str, token: str)
             return {
                 "tag": tag,
                 "sha": resolve_commit_sha(repo, tag, token),
-                "is_prerelease": "true" if winner.get("prerelease") else "false",
+                "is_prerelease": "true" if tag_is_prerelease(tag) or winner.get("prerelease") else "false",
                 "published_at": winner.get("published_at") or "",
                 "html_url": winner.get("html_url") or "",
                 "source": "releases",

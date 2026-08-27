@@ -748,7 +748,7 @@ def main() -> None:
     # the standalone file must stay gone and the section must stay usable.
     assert not (ROOT / ".github/action-pins.json").exists()
     hub_pins = hub_config_raw["action_pins"]
-    assert hub_pins["channel"] in {"auto", "stable"}
+    assert hub_pins["channel"] in {"auto", "stable", "prerelease", "prerelease-preferred", "pre-latest"}
     assert hub_pins["scan_globs"]
     assert hub_pins["repositories"]
     assert all("repository" in entry for entry in hub_pins["repositories"])

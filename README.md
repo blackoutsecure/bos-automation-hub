@@ -1002,6 +1002,12 @@ opens a PR. Resolution ranks stable releases **and** pre-releases together by
 SemVer precedence, because `GET /releases/latest` silently excludes
 pre-releases and would otherwise report an older version.
 
+Set `action_pins.channel` to `prerelease-preferred` (or the `pre-latest`
+alias) to prefer the newest prerelease. If no matching prerelease exists, the
+resolver falls back to the newest stable release and still records its commit
+SHA. This is preferred to a literal `@pre-latest`, which GitHub treats as an
+ordinary branch or tag rather than a special selector.
+
 SHA mode is the default. A manifest entry may explicitly set
 `"ref_mode": "latest"` when a floating reference is required; the pin bumper
 leaves that entry unchanged, and the pinned-actions gate permits only the
