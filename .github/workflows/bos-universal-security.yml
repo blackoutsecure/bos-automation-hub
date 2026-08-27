@@ -234,11 +234,11 @@ jobs:
           repository: blackoutsecure/bos-automation-hub
           ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'dev' && 'dev' || 'main') }}
           path: hub-runtime
-          sparse-checkout: .github/actions/shared/universal-config
+          sparse-checkout: .github/actions/universal-config
           sparse-checkout-cone-mode: false
       - name: Load universal config
         id: config
-        uses: ./hub-runtime/.github/actions/shared/universal-config
+        uses: ./hub-runtime/.github/actions/universal-config
         with:
           allow_missing: 'false'
       - name: Resolve security settings
