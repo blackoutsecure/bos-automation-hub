@@ -72,6 +72,28 @@ def test_select_release_skips_drafts_and_unmatched_tags() -> None:
     assert resolver.select_release([], pattern, "auto") is None
 
 
+def test_select_release_uses_semver_prerelease_suffix() -> None:
+    pattern = re.compile(resolver.DEFAULT_TAG_PATTERN)
+    releases = [
+        {"tag_name": "v2.0.0-beta.1", "prerelease": False, "draft": False},
+        {"tag_name": "v1.5.0", "prerelease": False, "draft": False},
+    ]
+    assert resolver.select_release(releases, pattern, "stable")["tag_name"] == "v1.5.0"
+    assert resolver.select_release(releases, pattern, "prerelease")["tag_name"] == "v2.0.0-beta.1"
+
+
+def test_select_tag_respects_channel() -> None:
+    pattern = re.compile(resolver.DEFAULT_TAG_PATTERN)
+    tags = [
+        {"name": "v2.0.0-rc.1"},
+        {"name": "v1.5.0"},
+    ]
+    assert resolver.select_tag(tags, pattern, "stable")["name"] == "v1.5.0"
+    assert resolver.select_tag(tags, pattern, "prerelease")["name"] == "v2.0.0-rc.1"
+    assert resolver.tag_is_prerelease("v2.0.0-rc.1") is True
+    assert resolver.tag_is_prerelease("v2.0.0+build.1") is False
+
+
 def test_rewrite_replaces_sha_and_version_comment() -> None:
     sha = "a" * 40
     body = (

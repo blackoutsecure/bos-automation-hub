@@ -69,6 +69,12 @@ def semver_key(tag: str) -> tuple:
     return (1, core, (0, tuple(identifiers)))
 
 
+def tag_is_prerelease(tag: str) -> bool:
+    """Return whether a SemVer tag contains a pre-release component."""
+    match = _SEMVER_RE.match((tag or "").strip())
+    return bool(match and match.group("pre") is not None)
+
+
 def _request(url: str, token: str) -> object:
     request = urllib.request.Request(url)
     request.add_header("Accept", "application/vnd.github+json")
@@ -108,7 +114,8 @@ def select_release(releases: list, pattern: re.Pattern, channel: str) -> dict | 
         tag = release.get("tag_name") or ""
         if not pattern.match(tag):
             continue
-        is_pre = bool(release.get("prerelease"))
+        tag_is_pre = tag_is_prerelease(tag)
+        is_pre = tag_is_pre or bool(release.get("prerelease"))
         if channel == "stable" and is_pre:
             continue
         if channel == "prerelease" and not is_pre:
@@ -120,8 +127,18 @@ def select_release(releases: list, pattern: re.Pattern, channel: str) -> dict | 
     return candidates[-1]
 
 
-def select_tag(tags: list, pattern: re.Pattern) -> dict | None:
-    candidates = [tag for tag in tags if pattern.match(tag.get("name") or "")]
+def select_tag(tags: list, pattern: re.Pattern, channel: str) -> dict | None:
+    candidates = []
+    for tag in tags:
+        name = tag.get("name") or ""
+        if not pattern.match(name):
+            continue
+        is_pre = tag_is_prerelease(name)
+        if channel == "stable" and is_pre:
+            continue
+        if channel == "prerelease" and not is_pre:
+            continue
+        candidates.append(tag)
     if not candidates:
         return None
     candidates.sort(key=lambda item: semver_key(item.get("name") or ""))
@@ -172,14 +189,14 @@ def resolve(repo: str, channel: str, source: str, pattern_text: str, token: str)
             die(f"{repo} has no non-draft release matching {pattern.pattern!r}")
 
     tags = _paginate(f"/repos/{repo}/tags", token)
-    winner = select_tag(tags, pattern)
+    winner = select_tag(tags, pattern, effective_channel)
     if winner is None:
         die(f"{repo} has no tag matching {pattern.pattern!r}")
     tag = winner["name"]
     return {
         "tag": tag,
         "sha": resolve_commit_sha(repo, tag, token),
-        "is_prerelease": "false",
+        "is_prerelease": "true" if tag_is_prerelease(tag) else "false",
         "published_at": "",
         "html_url": "",
         "source": "tags",
