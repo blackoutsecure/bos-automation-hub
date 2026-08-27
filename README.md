@@ -1002,6 +1002,13 @@ opens a PR. Resolution ranks stable releases **and** pre-releases together by
 SemVer precedence, because `GET /releases/latest` silently excludes
 pre-releases and would otherwise report an older version.
 
+SHA mode is the default. A manifest entry may explicitly set
+`"ref_mode": "latest"` when a floating reference is required; the pin bumper
+leaves that entry unchanged, and the pinned-actions gate permits only the
+literal `owner/repository@latest` when that repository is passed through its
+`latest_repositories` input. This is an intentional exception to immutable
+pinning and should be limited to trusted, reviewed dependencies.
+
 ```bash
 python3 scripts/sync_action_pins.py --check   # report drift, exit 1 when stale
 python3 scripts/sync_action_pins.py --write   # rewrite pins in place

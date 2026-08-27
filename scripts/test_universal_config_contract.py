@@ -752,6 +752,7 @@ def main() -> None:
     assert hub_pins["scan_globs"]
     assert hub_pins["repositories"]
     assert all("repository" in entry for entry in hub_pins["repositories"])
+    assert all(entry.get("ref_mode", "sha") in {"sha", "latest"} for entry in hub_pins["repositories"])
     assert hub_config_raw["gate"] == {
         "node_lint_mode": "auto",
         "python_lint_mode": "auto",

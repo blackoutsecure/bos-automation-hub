@@ -98,6 +98,24 @@ def main() -> int:
 
     for entry in manifest.get("repositories", []):
         repository = entry["repository"]
+        ref_mode = entry.get("ref_mode", "sha")
+        if ref_mode not in {"sha", "latest"}:
+            raise SystemExit(
+                f"invalid action_pins ref_mode for {repository}: {ref_mode!r}"
+            )
+        if ref_mode == "latest":
+            summary.append(
+                {
+                    "repository": repository,
+                    "tag": "latest",
+                    "sha": "",
+                    "is_prerelease": False,
+                    "source": "explicit",
+                    "stale_files": [],
+                    "ref_mode": ref_mode,
+                }
+            )
+            continue
         resolved = resolver.resolve(
             repo=repository,
             channel=entry.get("channel", default_channel),
@@ -127,6 +145,7 @@ def main() -> int:
                 "is_prerelease": resolved["is_prerelease"] == "true",
                 "source": resolved["source"],
                 "stale_files": sorted(stale),
+                "ref_mode": ref_mode,
             }
         )
 

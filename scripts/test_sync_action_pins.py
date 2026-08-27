@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -142,6 +143,20 @@ def test_rewrite_is_idempotent() -> None:
     assert twice == once
 
 
+def test_manifest_accepts_explicit_latest_mode() -> None:
+    original = pins.CONFIG
+    with tempfile.TemporaryDirectory() as temp_dir:
+        try:
+            pins.CONFIG = Path(temp_dir) / "config.json"
+            pins.CONFIG.write_text(
+                '{"action_pins":{"repositories":[{"repository":"owner/repo","ref_mode":"latest"}]}}',
+                encoding="utf-8",
+            )
+            assert pins.load_manifest()["repositories"][0]["ref_mode"] == "latest"
+        finally:
+            pins.CONFIG = original
+
+
 def test_manifest_repositories_are_all_referenced() -> None:
     manifest = pins.load_manifest()
     files = pins.iter_files(manifest["scan_globs"])
@@ -158,6 +173,10 @@ def test_manifest_repositories_are_all_referenced() -> None:
         repository = entry["repository"]
         for match in pins.pin_pattern(repository).finditer(corpus):
             ref, trailer = match.group("ref"), match.group("trailer")
+            entry = next(item for item in manifest["repositories"] if item["repository"] == repository)
+            if entry.get("ref_mode", "sha") == "latest":
+                assert ref == "latest", f"{repository} must use @latest"
+                continue
             assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{repository} pinned to {ref!r}"
             assert re.search(r"#\s*v\d+\.\d+\.\d+", trailer), (
                 f"{repository} pin is missing its '# vX.Y.Z' comment"
