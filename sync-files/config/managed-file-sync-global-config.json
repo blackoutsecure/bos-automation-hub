@@ -10,6 +10,28 @@
       "bos_universal_security_kicker",
       "bos_universal_sync_kicker"
     ],
+    "file_patches": [
+      {
+        "service": "common",
+        "path": ".gitignore",
+        "remove": [
+          ".vscode/*",
+          "!.vscode/extensions.json"
+        ],
+        "append": [
+          ".vscode/",
+          "",
+          "# Private keys / certs — never commit (e.g. GitHub App private keys).",
+          "*.pem",
+          "*.key",
+          "*.crt",
+          "*.p12",
+          "*.pfx",
+          "secrets.*",
+          ".secrets/"
+        ]
+      }
+    ],
     "service_definitions": {
       "bos_universal_security_kicker": {
         "mode": "file",
@@ -56,12 +78,44 @@
           }
         ]
       },
-      "bos_universal_launchpad_kicker": {
+      "bos_universal_gatekeeper_kicker": {
         "mode": "file",
+        "description": "Central gatekeeper kicker. Also removes the superseded bos-universal-launchpad-kicker.yml so a renamed consumer never ends up running both front doors.",
         "files": [
           {
+            "path": ".github/workflows/bos-universal-gatekeeper-kicker.yml",
+            "content_file": "workflows/bos-universal-gatekeeper-kicker.yml"
+          },
+          {
             "path": ".github/workflows/bos-universal-launchpad-kicker.yml",
-            "content_file": "workflows/bos-universal-launchpad-kicker.yml"
+            "mode": "absent"
+          }
+        ]
+      },
+      "python_ecosystem": {
+        "mode": "block",
+        "description": "Python-ecosystem ignore rules for repositories that build or test with Python.",
+        "files": [
+          {
+            "path": ".gitignore",
+            "content_lines": [
+              "**/__pycache__/",
+              "**/.venv/",
+              "**/venv/",
+              "**/env/",
+              "**/.pytest_cache/",
+              "**/.ruff_cache/",
+              "**/.mypy_cache/",
+              "**/.tox/",
+              "**/.nox/",
+              "**/.coverage",
+              "**/coverage.xml",
+              "**/htmlcov/",
+              "*$py.class",
+              "*.egg",
+              "*.egg-info/",
+              ".eggs/"
+            ]
           }
         ]
       },
