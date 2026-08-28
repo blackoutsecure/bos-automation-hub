@@ -26,12 +26,7 @@
     },
     "kicker_fanout": {
       "enabled_kickers": [
-        "sync",
-        "security",
-        "marketplace",
-        "upstream",
-        "launchpad",
-        "action-test"
+        "gatekeeper"
       ]
     }
   },

@@ -7,8 +7,7 @@
       "shellcheck",
       "yamllint",
       "coverage_artifacts",
-      "bos_universal_security_kicker",
-      "bos_universal_sync_kicker"
+      "bos_universal_gatekeeper_kicker"
     ],
     "file_patches": [
       {
@@ -33,62 +32,39 @@
       }
     ],
     "service_definitions": {
-      "bos_universal_security_kicker": {
-        "mode": "file",
-        "files": [
-          {
-            "path": ".github/workflows/bos-universal-security-kicker.yml",
-            "content_file": "workflows/bos-universal-security-kicker.yml"
-          }
-        ]
-      },
-      "bos_universal_sync_kicker": {
-        "mode": "file",
-        "files": [
-          {
-            "path": ".github/workflows/bos-universal-sync-kicker.yml",
-            "content_file": "workflows/bos-universal-sync-kicker.yml"
-          }
-        ]
-      },
-      "bos_universal_action_test_kicker": {
-        "mode": "file",
-        "files": [
-          {
-            "path": ".github/workflows/bos-universal-action-test-kicker.yml",
-            "content_file": "workflows/bos-universal-action-test-kicker.yml"
-          }
-        ]
-      },
-      "bos_universal_marketplace_kicker": {
-        "mode": "file",
-        "files": [
-          {
-            "path": ".github/workflows/bos-universal-marketplace-kicker.yml",
-            "content_file": "workflows/bos-universal-marketplace-kicker.yml"
-          }
-        ]
-      },
-      "bos_universal_upstream_kicker": {
-        "mode": "file",
-        "files": [
-          {
-            "path": ".github/workflows/bos-universal-upstream-kicker.yml",
-            "content_file": "workflows/bos-universal-upstream-kicker.yml"
-          }
-        ]
-      },
       "bos_universal_gatekeeper_kicker": {
         "mode": "file",
-        "description": "Central gatekeeper kicker. Also removes the superseded bos-universal-launchpad-kicker.yml so a renamed consumer never ends up running both front doors.",
         "files": [
           {
             "path": ".github/workflows/bos-universal-gatekeeper-kicker.yml",
             "content_file": "workflows/bos-universal-gatekeeper-kicker.yml"
-          },
+          }
+        ]
+      },
+      "python_ecosystem": {
+        "mode": "block",
+        "description": "Python-ecosystem ignore rules for repositories that build or test with Python.",
+        "files": [
           {
-            "path": ".github/workflows/bos-universal-launchpad-kicker.yml",
-            "mode": "absent"
+            "path": ".gitignore",
+            "content_lines": [
+              "**/__pycache__/",
+              "**/.venv/",
+              "**/venv/",
+              "**/env/",
+              "**/.pytest_cache/",
+              "**/.ruff_cache/",
+              "**/.mypy_cache/",
+              "**/.tox/",
+              "**/.nox/",
+              "**/.coverage",
+              "**/coverage.xml",
+              "**/htmlcov/",
+              "*$py.class",
+              "*.egg",
+              "*.egg-info/",
+              ".eggs/"
+            ]
           }
         ]
       },

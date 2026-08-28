@@ -38,13 +38,8 @@ run-name: >-
         required: true
         type: choice
         options:
-          - sync
-          - security
-          - marketplace
-          - upstream
-          - launchpad
-          - action-test
-        default: sync
+          - gatekeeper
+        default: gatekeeper
       repos:
         description: >-
           Optional comma- or space-separated repository filter. Accepts bare
