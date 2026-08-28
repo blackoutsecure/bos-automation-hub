@@ -341,32 +341,17 @@ def main() -> None:
 
 
     gate_workflow = (ROOT / ".github/workflows/bos-universal-security.yml").read_text()
-    security_kicker = (
-        ROOT / "sync-files/workflows/bos-universal-security-kicker.yml"
-    ).read_text()
     gate_declared = workflow_input_names(gate_workflow)
-    security_job = security_kicker.split(
-        "    uses: blackoutsecure/bos-automation-hub/.github/workflows/"
-        "bos-universal-security.yml@dev\n",
-        1,
-    )[1]
-    assert "      config_authoritative: true\n" in security_job
     assert "  workflow_dispatch:" not in gate_workflow
     assert not (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
     assert "name: '[RUNTIME] Blackout Secure Universal Security'" in gate_workflow
     assert '"python_packages": ["ruff>=0.6", "pytest>=8.0", "PyYAML>=6.0"]' in gate_workflow
-    assert "name: security" in security_kicker
     assert "name: Security summary" in gate_workflow
     assert "kit_version:" not in gate_workflow
     assert "code_scanning_kit_version:" not in gate_workflow
     assert "marketplace-action-ci.yml@main" not in gate_workflow
     assert "bos-universal-marketplace.yml@main" not in gate_workflow
     assert "enable_marketplace_ci:" not in gate_workflow
-    assert "  schedule:\n    - cron: '43 14 * * *'" in security_kicker
-    assert "  push:\n    branches: [main, dev]" in security_kicker
-    assert "paths-ignore:" in security_kicker
-    assert "'**/bos-scan-*.sarif'" in security_kicker
-    assert "'**/bos-scan-*.json'" in security_kicker
     assert "enable_baseline:" not in gate_workflow
     assert "needs.resolve-config.outputs.gate" in gate_workflow
     assert "uses: ./hub-runtime/.github/actions/universal-config" in gate_workflow
@@ -401,27 +386,19 @@ def main() -> None:
     assert "outcome=${outcome}" in readme_header_action
     assert "RH001" in readme_header_action and "RH030" in readme_header_action
 
-    marketplace_kicker = (
-        ROOT / "sync-files/workflows/bos-universal-marketplace-kicker.yml"
-    ).read_text()
     for managed_template in (
         ROOT / "sync-files/workflows"
     ).glob("*.yml"):
         assert "\non:\n" not in managed_template.read_text()
         assert "\n\"on\":\n" in managed_template.read_text()
+    managed_templates = sorted(
+        path.name for path in (ROOT / "sync-files/workflows").glob("*.yml")
+    )
+    assert managed_templates == ["bos-universal-gatekeeper-kicker.yml"]
     assert not (ROOT / ".github/workflows/bos-launchpad-marketplace.yml").exists()
     assert not (
         ROOT / "sync-files/workflows/bos-launchpad-marketplace.yml"
     ).exists()
-    assert marketplace_kicker.count("bos-universal-marketplace.yml@main") == 1
-    assert marketplace_kicker.count("marketplace-repo-guard.yml@main") == 1
-    assert marketplace_kicker.count("release-promote.yml@main") == 1
-    assert marketplace_kicker.count("repo-metadata-sync.yml@dev") == 1
-    assert marketplace_kicker.count("repo-metadata-sync.yml@main") == 1
-    assert "metadata-dev:" in marketplace_kicker
-    assert "metadata-main:" in marketplace_kicker
-    assert "needs.parse_config.outputs.target_ref == 'dev'" in marketplace_kicker
-    assert "needs.parse_config.outputs.target_ref == 'main'" in marketplace_kicker
 
     marketplace_ruleset_path = (
         ROOT / "scripts/marketplace-repo/main-protection-ruleset.json"
@@ -445,28 +422,6 @@ def main() -> None:
     ).read_text()
     assert "does not satisfy `PS020` on its own" in marketplace_ruleset_readme
 
-    assert "options: [validate, name-check, promote, release, metadata]" in marketplace_kicker
-    assert "publish_release:" in marketplace_kicker
-    assert "require_source_release:" in marketplace_kicker
-    assert "source_release_max_age_hours:" in marketplace_kicker
-    assert "default: release" in marketplace_kicker
-    assert "needs.release.outputs.tag_name" in marketplace_kicker
-    assert "checkout_ref: ${{ needs.release.result == 'success' && needs.release.outputs.tag_name ||" in marketplace_kicker
-    assert "needs.release.result == 'success'" in marketplace_kicker
-    assert "&& !inputs.dry_run" in marketplace_kicker
-    assert "&& !inputs.draft" in marketplace_kicker
-    assert "secrets: inherit" in marketplace_kicker
-    assert "secrets: inherit" in marketplace_kicker
-    assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" not in marketplace_kicker
-    assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" not in marketplace_kicker
-    assert "outputs.cfg" in marketplace_kicker
-    assert "`.github/bos-universal-config.json`" in marketplace_kicker
-    assert "config_path: .github/bos-universal-config.json" in marketplace_kicker
-    assert "'.github/workflows/bos-universal-marketplace-kicker.yml'" in marketplace_kicker
-    assert "'**/blackout-secure-audit-report.*'" in marketplace_kicker
-    assert "pull_request_target:" in marketplace_kicker
-    assert "github.event.repository.default_branch" in marketplace_kicker
-    assert not re.search(r"source_branch:\s+dev\b", marketplace_kicker)
     marketplace_workflow = (
         ROOT / ".github/workflows/bos-universal-marketplace.yml"
     ).read_text()
@@ -482,51 +437,14 @@ def main() -> None:
         "blackoutsecure/bos-marketplace-kit/.github/actions/check",
     )
 
-    for kicker_path in (
-        ROOT / "sync-files/workflows/bos-universal-action-test-kicker.yml",
-        ROOT / "sync-files/workflows/bos-universal-marketplace-kicker.yml",
-        ROOT / "sync-files/workflows/bos-universal-security-kicker.yml",
-        ROOT / "sync-files/workflows/bos-universal-sync-kicker.yml",
-    ):
-        kicker_body = kicker_path.read_text()
-        assert "parse-config" not in kicker_body
-        assert "target-ref" not in kicker_body
-        assert "uses: ./hub-runtime/.github/actions/resolve-hub-ref" in kicker_body
-        assert "concurrency:" in kicker_body
-        assert "github.repository" in kicker_body
-        assert "cancel-in-progress:" in kicker_body
-
-    action_test_kicker = (
-        ROOT / "sync-files/workflows/bos-universal-action-test-kicker.yml"
-    ).read_text()
-    assert "'.github/workflows/bos-universal-action-test-kicker.yml'" in action_test_kicker
-    assert "'**/bos-scan-*.sarif'" in action_test_kicker
-    for kicker_name in (
-        "bos-universal-upstream-kicker.yml",
-        "bos-universal-gatekeeper-kicker.yml",
-    ):
-        kicker_body = (ROOT / "sync-files/workflows" / kicker_name).read_text()
-        assert "concurrency:" in kicker_body
-        assert "github.repository" in kicker_body
-        assert "cancel-in-progress:" in kicker_body
+    assert "concurrency:" in kicker
+    assert "github.repository" in kicker
+    assert "cancel-in-progress:" in kicker
 
     resolver = (ROOT / ".github/actions/resolve-hub-ref/action.yml").read_text()
     assert "name: Resolve hub ref" in resolver
     assert 'echo "ref=${ref}"' in resolver
 
-    sync_kicker = (
-        ROOT / "sync-files/workflows/bos-universal-sync-kicker.yml"
-    ).read_text()
-    assert not (ROOT / ".github/workflows/bos-universal-sync-kicker.yml").exists()
-    assert "parse_config:" in sync_kicker
-    assert "resolve-target:" not in sync_kicker
-    assert "bos-universal-sync.yml@dev" in sync_kicker
-    assert "bos-universal-sync.yml@main" in sync_kicker
-    assert "mode: ${{ inputs.mode || '' }}" in sync_kicker
-    assert "global_config_json" not in sync_kicker
-    assert "bos-managed-file-sync-action@" not in sync_kicker
-    assert "content_file" not in sync_kicker
-    assert "service_definitions" not in sync_kicker
 
     repo_metadata_workflow = (
         ROOT / ".github/workflows/repo-metadata-sync.yml"
@@ -557,7 +475,6 @@ def main() -> None:
     assert "name: Artifact Release" in artifact_release
     assert "name: Marketplace Promotion Release" in marketplace_promote
     assert "release.yml@main" in workflow
-    assert "release-promote.yml@main" in marketplace_kicker
     assert "release-promote.yml" not in artifact_release
     assert ".github/workflows/release.yml@main" not in marketplace_promote
     assert marketplace_promote.count(
@@ -666,17 +583,9 @@ def main() -> None:
     assert docker_workflow.count(compose_build_args) == 2
     assert "echo \"build_args<<__EOF__\"" not in docker_workflow
 
-    # Every dual-branch kicker (including `launchpad`, since its `sync-check`
-    # pre-flight and `release` stage now resolve `target_ref` like the rest)
-    # resolves a static @dev or @main ref per run.
-    for managed_caller, expected_refs in (
-        (kicker, {"main", "dev"}),
-        (security_kicker, {"main", "dev"}),
-        (marketplace_kicker, {"main", "dev"}),
-        (sync_kicker, {"main", "dev"}),
-    ):
-        refs = re.findall(r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)", managed_caller)
-        assert refs and set(refs) == expected_refs, refs
+    # The sole managed receiver resolves static @dev and @main refs per run.
+    refs = re.findall(r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)", kicker)
+    assert refs and set(refs) == {"main", "dev"}, refs
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
     assert "name: '[RUNTIME] Blackout Secure Managed File Sync'" in sync_backend
@@ -995,19 +904,21 @@ def main() -> None:
         "shellcheck",
         "yamllint",
         "coverage_artifacts",
-        "bos_universal_security_kicker",
-        "bos_universal_sync_kicker",
+        "bos_universal_gatekeeper_kicker",
     ]
-    assert "bos_universal_upstream_kicker" in sync_policy["service_definitions"]
-    assert sync_policy["service_definitions"]["bos_universal_upstream_kicker"] == {
+    assert sync_policy["service_definitions"]["bos_universal_gatekeeper_kicker"] == {
         "mode": "file",
         "files": [
             {
-                "path": ".github/workflows/bos-universal-upstream-kicker.yml",
-                "content_file": "workflows/bos-universal-upstream-kicker.yml",
+                "path": ".github/workflows/bos-universal-gatekeeper-kicker.yml",
+                "content_file": "workflows/bos-universal-gatekeeper-kicker.yml",
             }
         ],
     }
+    assert {
+        name for name in sync_policy["service_definitions"]
+        if name.startswith("bos_universal_")
+    } == {"bos_universal_gatekeeper_kicker"}
     assert all(
         definition["mode"] == "file"
         for name, definition in sync_policy["service_definitions"].items()
@@ -1107,18 +1018,6 @@ def main() -> None:
     assert "token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}" in sync_backend
     assert "secrets.WORKFLOW_SYNC_PAT != '' && 'true' || 'false'" in sync_backend
     assert "disabled_services" in sync_backend
-    assert "bos_universal_sync_kicker" in sync_backend
-    managed_sync_caller = sync_kicker
-    assert "name: '[KICKER] Blackout Secure Managed File Sync'" in managed_sync_caller
-    assert "name: Resolve target hub ref" in managed_sync_caller
-    assert "sync-dev:" in managed_sync_caller
-    assert "sync-main:" in managed_sync_caller
-    assert "contents: write" in managed_sync_caller
-    assert managed_sync_caller.count("secrets: inherit") == 2
-    assert "workflow_sync_pat: ${{ secrets.WORKFLOW_SYNC_PAT }}" not in managed_sync_caller
-
-    assert security_kicker.count("secrets: inherit") == 3
-    assert "scanning_pat: ${{ secrets.SCANNING_PAT }}" not in security_kicker
 
     gatekeeper_workflow = (
         ROOT / ".github/workflows/bos-universal-gatekeeper.yml"

@@ -4,14 +4,10 @@ This directory contains canonical hub templates published with the repository.
 Managed-file synchronization is provided by
 [`bos-managed-file-sync-action`](https://github.com/blackoutsecure/bos-managed-file-sync-action).
 Consumer repositories select its services in the `managed_file_sync` section
-of `.github/bos-universal-config.json`. The global policy enables
-organization-wide `shellcheck`, Security kicker, and Sync kicker defaults;
-repository-specific kickers (`bos_universal_gatekeeper_kicker`,
-`bos_universal_marketplace_kicker`, `bos_universal_upstream_kicker`,
-`bos_universal_action_test_kicker`) remain available as global service
-definitions and must be selected by repositories that need them. The global
-policy also sets `take_over_managed_files: true` so organization-owned blocks
-can replace competing managed blocks.
+of `.github/bos-universal-config.json`. The global policy enables the single
+organization-wide `bos_universal_gatekeeper_kicker` receiver alongside generic
+maintenance services. It also sets `take_over_managed_files: true` so
+organization-owned blocks can replace competing managed blocks.
 Small changes to inherited Marketplace-managed files use the ordered
 `managed_file_sync.file_patches` setting rather than redefining the complete
 service. The global policy uses this to replace the Marketplace `.vscode/*`
@@ -45,31 +41,10 @@ content. Generic dotfile services (`shellcheck`, `yamllint`, `markdownlint`,
 config — there is no hub-local dotfile source directory to maintain.
 
 - [`bos-universal-gatekeeper-kicker.yml`](workflows/bos-universal-gatekeeper-kicker.yml)
-  is the managed release/deploy caller and the single manual-dispatch front
-  door. It reads `.github/bos-universal-config.json` and calls the promoted hub
-  runtime on `@main`. Its backend workflow owns separate monitor, release,
-  Cloudflare, security, and metadata jobs so config and permissions are
-  resolved once. Installing this service also removes the superseded
-  the legacy launchpad kicker when present.
-- [`bos-universal-security-kicker.yml`](workflows/bos-universal-security-kicker.yml)
-  is the managed PR and merge-queue caller for shared lint, dependency review,
-  code scanning, and repository policy. Pin `security (dev) / Security summary`
-  or `security (main) / Security summary` in branch protection, depending on
-  the branch.
-- [`bos-universal-marketplace-kicker.yml`](workflows/bos-universal-marketplace-kicker.yml)
-  is installed only in Marketplace Action repositories. One event-routed file
-  owns Marketplace validation, trusted stable-branch guarding, name checks,
-  manual promotion/releases, and opt-in post-release or manual repository
-  metadata refreshes.
-- [`bos-universal-sync-kicker.yml`](workflows/bos-universal-sync-kicker.yml)
-  is the independent scheduled/manual managed-file caller. It contains only
-  event routing and ref resolution, then delegates to the promoted hub
-  `bos-universal-sync.yml@dev`/`@main`. Repository maintenance never starts
-  the delivery workflow.
-- [`bos-universal-upstream-kicker.yml`](workflows/bos-universal-upstream-kicker.yml)
-  is the opt-in scheduled/manual upstream watcher caller. It reads the
-  repository's `upstream_watcher` section and delegates tracking, reporting,
-  commits, and downstream dispatch to `monitor-upstream-release.yml`.
+  is the sole managed receiver and manual-dispatch front door. It delegates to
+  the promoted hub runtime, whose selected operation runs the appropriate
+  security, sync, action-test, Marketplace, upstream, metadata, or release
+  behavior.
 
 These workflows are file-owned managed. Consumer repositories must not edit
 them directly. A repository opts into the callers it needs, for example:

@@ -160,7 +160,7 @@ workflow files are not edited in consumer repositories.
 [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml) is
 the reusable universal PR, protected-branch push, and merge-queue security/policy workflow. Its
 managed caller is
-[`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml).
+[`bos-universal-gatekeeper-kicker.yml`](sync-files/workflows/bos-universal-gatekeeper-kicker.yml).
 
 The required check is `security (dev) / Security summary` or
 `security (main) / Security summary`, depending on which branch a run
@@ -181,13 +181,13 @@ The hub itself runs
 directly. Use **Actions → Blackout Secure Universal Security → Run
 workflow** on `dev` for a manual scan; it loads the current `security` section
 from `.github/bos-universal-config.json`, just like the sync backend. The managed
-[`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml)
+[`bos-universal-gatekeeper-kicker.yml`](sync-files/workflows/bos-universal-gatekeeper-kicker.yml)
 is retained for consumer repositories, but the hub does not install a local
 kicker for this workflow.
 
 Marketplace-specific validation is intentionally excluded. Marketplace Action
 repositories add the managed
-[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml),
+[`bos-universal-gatekeeper-kicker.yml`](sync-files/workflows/bos-universal-gatekeeper-kicker.yml),
 which owns Marketplace validation, stable-branch guarding, promotion, and
 opt-in post-release repository metadata synchronization.
 
@@ -269,7 +269,7 @@ thing (managed-file sync), so its display name and run name read "Blackout
 Secure managed file sync" rather than "universal" — the `bos-universal-sync*`
 filenames are unchanged to keep existing `uses:` references stable. It is
 callable only through the managed
-[`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml).
+[`bos-universal-gatekeeper-kicker.yml`](sync-files/workflows/bos-universal-gatekeeper-kicker.yml).
 That kicker owns the schedule, config-change, and manual events. Its
 consumer front door resolves the target hub branch and delegates to
 `bos-universal-sync.yml`, the same pattern used by the launchpad, security, and
@@ -285,7 +285,7 @@ the policy stays a real, editable JSON file instead of an inline blob.
 [`bos-universal-action-test.yml`](.github/workflows/bos-universal-action-test.yml)
 is a reusable pytest matrix plus an optional live-upstream smoke test for
 Actions repositories with a Python implementation. Its managed caller is
-[`bos-universal-action-test-kicker.yml`](sync-files/workflows/bos-universal-action-test-kicker.yml).
+[`bos-universal-gatekeeper-kicker.yml`](sync-files/workflows/bos-universal-gatekeeper-kicker.yml).
 
 It complements `bos-universal-security.yml`'s single-OS/Python `python-lint`
 job (Ruff + pytest, part of the PR security gate) rather than replacing it:
@@ -321,10 +321,8 @@ different trust and permission boundaries:
 | Layer | Trigger and authority | Responsibility |
 | --- | --- | --- |
 | `bos-universal-security.yml` (universal security) | Pull request / merge queue; read-mostly | Lint, tests, dependency review, code scanning, and policy checks before merge. |
-| `bos-universal-marketplace-kicker.yml` | Marketplace PR, trusted-target PR, or manual release/metadata operation | Validate Actions, guard the workflow-free stable branch, promote releases, and refresh the repository About box. |
+| `bos-universal-gatekeeper-kicker.yml` | Push, schedule, or manual dispatch | Select reusable security, sync, action-test, Marketplace, upstream, metadata, or release operations. |
 | `bos-universal-gatekeeper.yml` | Push, schedule, or manual caller; publish permissions | Sync managed files ahead of the run, monitor upstreams, run the release-blocking security scan (or, via `operation: security_only`, just that scan), and coordinate delivery. |
-| `bos-universal-sync-kicker.yml` | Config push, schedule, or manual dispatch; repository contents write | Resolve the target hub branch and invoke the reusable sync workflow. |
-| `bos-universal-upstream-kicker.yml` | Schedule, watcher-config push, or manual dispatch; repository contents/actions write | Resolve the target hub branch and invoke the config-driven upstream monitor. |
 | `release.yml` (artifact release) | Called by Universal or another trusted workflow | Publish Docker, Balena, and GitHub Release artifacts for an already-approved version. |
 | `release-promote.yml` (Marketplace promotion) | Operator-driven Marketplace caller | Promote an allowlisted source tree to the workflow-free stable branch and release it. |
 | `release-hub.yml` (hub runtime release) | Hub-only manual workflow | Promote this hub's reusable runtime from the default branch to `main` and tag it. |
@@ -345,7 +343,7 @@ Release entry points are already owned by the workflow that has enough context
 and authority to start them: Universal Launchpad calls
 [`release.yml`](.github/workflows/release.yml) for artifact publication,
 Marketplace repos use
-[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml)
+[`bos-universal-gatekeeper-kicker.yml`](sync-files/workflows/bos-universal-gatekeeper-kicker.yml)
 for operator-driven promotion, and this hub uses
 [`release-hub.yml`](.github/workflows/release-hub.yml) for its own runtime
 promotion. A generic release kicker would either duplicate those front doors
@@ -363,7 +361,7 @@ version tag).
 
 For a Marketplace Action consumer, the production path is a manual
 `operation: release` dispatch of the managed
-[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml)
+[`bos-universal-gatekeeper-kicker.yml`](sync-files/workflows/bos-universal-gatekeeper-kicker.yml)
 from the source branch. It validates trusted configuration, calls
 [`release-promote.yml`](.github/workflows/release-promote.yml) to promote the
 allowlist to the stable branch, publishes the GitHub Release, and optionally
@@ -803,12 +801,10 @@ granting repository-administration authority.
 
 ## Workflow API
 
-Consumer repositories normally need only the managed
-[`bos-universal-gatekeeper-kicker.yml`](sync-files/workflows/bos-universal-gatekeeper-kicker.yml),
-[`bos-universal-security-kicker.yml`](sync-files/workflows/bos-universal-security-kicker.yml),
-[`bos-universal-marketplace-kicker.yml`](sync-files/workflows/bos-universal-marketplace-kicker.yml),
-and [`bos-universal-sync-kicker.yml`](sync-files/workflows/bos-universal-sync-kicker.yml)
-callers. They read `.github/bos-universal-config.json` and invoke independent hub
+Consumer repositories use the managed
+[`bos-universal-gatekeeper-kicker.yml`](sync-files/workflows/bos-universal-gatekeeper-kicker.yml)
+as their single event receiver. It reads `.github/bos-universal-config.json` and
+invokes the appropriate hub
 entry points:
 
 | Entry point | Purpose |
