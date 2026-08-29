@@ -7,16 +7,15 @@
       "shellcheck",
       "yamllint",
       "coverage_artifacts",
+      "license_service",
+      "security_readme_pointer",
       "bos_universal_gatekeeper_kicker"
     ],
     "file_patches": [
       {
         "service": "common",
         "path": ".gitignore",
-        "remove": [
-          ".vscode/*",
-          "!.vscode/extensions.json"
-        ],
+        "remove": [".vscode/*", "!.vscode/extensions.json"],
         "append": [
           ".vscode/",
           "",
@@ -27,17 +26,63 @@
           "*.p12",
           "*.pfx",
           "secrets.*",
+          "!SECRETS.md",
           ".secrets/"
         ]
       }
     ],
     "service_definitions": {
+      "license_service": {
+        "mode": "file",
+        "description": "Organization-standard repository license. Repositories with a different approved license must disable this service and provide their own LICENSE.",
+        "files": [
+          {
+            "path": "LICENSE",
+            "content_file": "legal/LICENSE"
+          }
+        ]
+      },
+      "license_catalogue_service": {
+        "mode": "file",
+        "description": "OSI/SPDX licence catalogue plus the shared resolver module, consumed by the marketplace-kit LC### rules and the code-scanning-kit LD### rules. Generated in the hub by scripts/build_osi_catalogue.py so both kits classify a licence identically. The module and the data file are a versioned pair and must move together. Consumers that vendor them at different paths override this definition in their own service_definitions.",
+        "files": [
+          {
+            "path": "src/osi-licenses.json",
+            "content_file": "legal/osi-licenses.json"
+          },
+          {
+            "path": "src/osi_catalogue.py",
+            "content_file": "legal/osi_catalogue.py"
+          }
+        ]
+      },
       "bos_universal_gatekeeper_kicker": {
         "mode": "file",
         "files": [
           {
             "path": ".github/workflows/bos-universal-gatekeeper-kicker.yml",
             "content_file": "workflows/bos-universal-gatekeeper-kicker.yml"
+          }
+        ]
+      },
+      "security_readme_pointer": {
+        "mode": "block",
+        "description": "Short README pointer to the hub's 'Secrets pipelining strategy' section, instead of duplicating the full generic secrets guide into every repository. Most repositories only need this pointer, not the full guide.",
+        "files": [
+          {
+            "path": "README.md",
+            "content_lines": [
+              "",
+              "## Security & secrets",
+              "",
+              "This repository is built with Blackout Secure's reusable GitHub Actions",
+              "workflows. If you fork or self-host these workflows and need to provision",
+              "your own credentials (GitHub App vs. PAT guidance, secret tiers, Docker",
+              "Hub/Cloudflare/Balena setup walkthroughs), see the",
+              "[\"Secrets pipelining strategy\"](https://github.com/blackoutsecure/bos-automation-hub#secrets-pipelining-strategy)",
+              "section of `bos-automation-hub`. To report a vulnerability, see",
+              "[SECURITY.md](https://github.com/blackoutsecure/.github/blob/main/SECURITY.md)."
+            ]
           }
         ]
       },
@@ -89,7 +134,7 @@
             "content_file": "community-health/SUPPORT.md"
           },
           {
-            "path": "FUNDING.yml",
+            "path": ".github/FUNDING.yml",
             "content_file": "community-health/FUNDING.yml"
           },
           {

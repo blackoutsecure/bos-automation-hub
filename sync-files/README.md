@@ -52,9 +52,7 @@ them directly. A repository opts into the callers it needs, for example:
 ```json
 {
   "managed_file_sync": {
-    "services": [
-      "shellcheck"
-    ]
+    "services": ["shellcheck"]
   }
 }
 ```
@@ -107,13 +105,67 @@ The organization-default service is selected only by the dedicated
 `blackoutsecure/.github` repository's `.github/bos-universal-config.json`.
 Its targets are the repository root files
 `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, and `SUPPORT.md`;
-`FUNDING.yml`; `.github/PULL_REQUEST_TEMPLATE.md`;
+`.github/FUNDING.yml`; `.github/PULL_REQUEST_TEMPLATE.md`;
 `.github/ISSUE_TEMPLATE/*`; and `profile/README.md`.
+Unlike the other community-health files, `FUNDING.yml` is only read from the
+`.github` folder — a root or `docs/` copy is silently ignored, so the Sponsor
+button would not inherit.
 These files are not copied into product repositories because GitHub already
 uses the organization repository's community-health and template files as
 defaults there. Product repositories should retain only repository-specific
 metadata such as `CODEOWNERS`, dependabot policy, workflows, and universal
 configuration.
+
+## Security & secrets pointer service
+
+The full secrets guide (secret tiers, GitHub App vs. PAT guidance, GitHub App
+setup walkthrough, and per-provider setup walkthroughs for Docker Hub,
+Cloudflare, and Balena) lives in one place: the hub README's
+["Secrets pipelining strategy"](../README.md#secrets-pipelining-strategy)
+section. It is not duplicated into every consumer repository — most
+repositories only ever need the secrets/inputs already documented in their
+own `README.md` / `action.yml`, so shipping the full generic guide everywhere
+would mostly be noise.
+
+Instead, the `security_readme_pointer` service (enabled by default alongside
+`license_service`) appends a short block to each consumer repository's
+`README.md` linking back to that section, for the minority of forks/operators
+who do need to provision their own credentials.
+
+A repository that doesn't want the pointer block must disable the service:
+
+```json
+{
+  "managed_file_sync": {
+    "disabled_services": ["security_readme_pointer"]
+  }
+}
+```
+
+## License service
+
+GitHub's organization `.github` repository cannot provide a default license;
+each repository must carry its own `LICENSE` file for GitHub license detection,
+source archives, clones, and package downloads. The hub therefore standardizes
+repository licensing through the managed-file sync service named
+`license_service`.
+
+The global policy enables `license_service` by default and owns `LICENSE` in
+whole-file mode from [`legal/LICENSE`](legal/LICENSE). Repositories that need a
+different approved license must opt out explicitly and provide their own
+`LICENSE`:
+
+```json
+{
+  "managed_file_sync": {
+    "disabled_services": ["license_service"]
+  }
+}
+```
+
+The service name is intentionally license-agnostic. If the organization-wide
+standard changes later, keep `license_service` selected and update only the
+service definition/template in this hub.
 
 ## Branch policy
 
