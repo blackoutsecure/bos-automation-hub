@@ -5,6 +5,24 @@
 # Actions: write / Metadata: read credential covering the org, because the
 # job-scoped GITHUB_TOKEN cannot dispatch workflows in other repositories.
 #
+# Delivery is by dispatching each target's *own* copy of the kicker, which
+# leaves a bootstrap gap: a repository that has never received the kicker has
+# nothing to dispatch, so it can never be reached and would sit outside org
+# automation indefinitely. `seed_missing` closes that gap by opening a pull
+# request that installs `sync-files/workflows/<kicker>` into the target's
+# default branch — the branch that matters, because GitHub only fires
+# `schedule` triggers and only offers `workflow_dispatch` for workflows
+# present on the default branch. Seeding is a pull request, never a direct
+# push, so branch protection stays authoritative. Once merged, the managed
+# file sync (`file` mode) keeps the copy current and the seed never recurs.
+# Seeding uses its own credential (`WORKFLOW_SYNC_PAT`, the same token the
+# managed sync already uses to write kicker files) rather than widening the
+# dispatch token: `GITHUB_TOKEN` can never write under `.github/workflows/`,
+# and the dispatch token has no reason to hold write access to code. That
+# token needs Contents: write, Workflows: write and Pull requests: write on
+# the targets. Missing or unprivileged, seeding is reported per repository
+# and the fan-out continues.
+#
 # Before dispatching, `audit_targets` (default `warn`) checks each target's
 # kicker file for an unguarded `workflow_dispatch:` trigger — one with no
 # detected `bos-workflow-gatekeeper` authorization step of its own. That
@@ -34,7 +52,7 @@ run-name: >-
   workflow_dispatch:
     inputs:
       kicker:
-        description: 'Which universal kicker to run in every repository.'
+        description: "Which universal kicker to run in every repository."
         required: true
         type: choice
         options:
@@ -46,26 +64,26 @@ run-name: >-
           names or `owner/name`, and `*` globs. Empty targets the whole org.
         required: false
         type: string
-        default: ''
+        default: ""
       dispatch_inputs:
         description: >-
           Optional JSON object of inputs forwarded to the kicker, e.g.
           {"mode":"check"}. Empty uses each kicker's own defaults.
         required: false
         type: string
-        default: ''
+        default: ""
       include_forks:
-        description: 'Include forked repositories.'
+        description: "Include forked repositories."
         required: false
         type: boolean
         default: false
       include_archived:
-        description: 'Include archived repositories.'
+        description: "Include archived repositories."
         required: false
         type: boolean
         default: false
       dry_run:
-        description: 'Resolve and report targets without dispatching.'
+        description: "Resolve and report targets without dispatching."
         required: false
         type: boolean
         default: true
@@ -80,6 +98,16 @@ run-name: >-
         type: choice
         options: [warn, block, off]
         default: warn
+      seed_missing:
+        description: >-
+          Install the kicker in repositories that do not have it yet, by
+          opening a pull request against their default branch. `pr` seeds and
+          skips dispatch for that repository this run (the next fan-out picks
+          it up once merged); `off` leaves such repositories untouched.
+        required: false
+        type: choice
+        options: [pr, off]
+        default: pr
 
 permissions:
   contents: read
@@ -110,7 +138,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/bos-universal-config.json
+          sparse-checkout: |
+            .github/bos-universal-config.json
+            sync-files/workflows/**
           sparse-checkout-cone-mode: false
 
       - name: Enforce config-driven kicker allowlist
@@ -141,9 +171,37 @@ jobs:
           INCLUDE_ARCHIVED: ${{ inputs.include_archived }}
           DRY_RUN: ${{ inputs.dry_run }}
           AUDIT_TARGETS: ${{ inputs.audit_targets }}
+          SEED_MISSING: ${{ inputs.seed_missing }}
+          SEED_TOKEN: ${{ secrets.WORKFLOW_SYNC_PAT || secrets.ORG_KICK_PAT || secrets.DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
           WORKFLOW_FILE="bos-universal-${KICKER}-kicker.yml"
+          SEED_SOURCE="sync-files/workflows/${WORKFLOW_FILE}"
+          DEST_PATH=".github/workflows/${WORKFLOW_FILE}"
+          SEED_BRANCH="chore/seed-${WORKFLOW_FILE%.yml}"
+
+          # Empty means "do not seed", whether disabled or unavailable.
+          KICKER_B64=""
+          if [ "${SEED_MISSING}" = "pr" ]; then
+            if [ ! -f "${SEED_SOURCE}" ]; then
+              echo "::warning::Seeding requested but ${SEED_SOURCE} is not in this hub;" \
+                   "repositories without ${WORKFLOW_FILE} will be skipped instead."
+            elif [ -z "${SEED_TOKEN}" ]; then
+              echo "::warning::Seeding requested but no WORKFLOW_SYNC_PAT is configured;" \
+                   "writes under .github/workflows/ need a PAT with Workflows write." \
+                   "Repositories without ${WORKFLOW_FILE} will be skipped instead."
+            else
+              KICKER_B64=$(base64 -w0 < "${SEED_SOURCE}")
+            fi
+          fi
+
+          PR_BODY=$(printf '%s\n' \
+            "Installs the organization-managed \`${DEST_PATH}\` from [bos-automation-hub](https://github.com/${ORG}/bos-automation-hub)." \
+            "" \
+            "The org fan-out dispatches each repository's own kicker, so a repository without one cannot be reached by hub automation at all." \
+            "This pull request delivers the file once; afterwards the managed file sync keeps it current and this will not reappear." \
+            "" \
+            "To decline hub automation, set the repository variable \`AUTO_HUB_SYNC\` to \`false\`.")
 
           # Build `-f key=value` flags from the optional JSON input object.
           FLAGS=()
@@ -195,6 +253,64 @@ jobs:
             echo secure
           }
 
+          # Install the kicker in a repository that has none, via a pull
+          # request against its default branch. Emits `<status><TAB><detail>`;
+          # every failure mode is reported rather than fatal, so one
+          # unwritable repository cannot abort the whole fan-out. Runs on
+          # SEED_TOKEN throughout — the dispatch token may be read-only here.
+          seed_target() {
+            local full_name="$1" base_ref="$2"
+            local base_sha blob_sha url
+            local put_args=()
+
+            url=$(GH_TOKEN="${SEED_TOKEN}" gh api "repos/${full_name}/pulls?state=open&head=${ORG}:${SEED_BRANCH}" \
+              --jq '.[0].html_url // empty' 2>/dev/null || true)
+            if [ -n "${url}" ]; then
+              printf 'pending\t%s\n' "${url}"
+              return 0
+            fi
+
+            base_sha=$(GH_TOKEN="${SEED_TOKEN}" gh api "repos/${full_name}/git/ref/heads/${base_ref}" \
+              --jq '.object.sha' 2>/dev/null || true)
+            if [ -z "${base_sha}" ]; then
+              printf 'failed\tcannot read default branch %s\n' "${base_ref}"
+              return 0
+            fi
+
+            # Failure here means the branch already exists from an earlier
+            # partial attempt; the content write below reconciles it.
+            GH_TOKEN="${SEED_TOKEN}" gh api --method POST "repos/${full_name}/git/refs" \
+              -f "ref=refs/heads/${SEED_BRANCH}" -f "sha=${base_sha}" \
+              >/dev/null 2>&1 || true
+
+            blob_sha=$(GH_TOKEN="${SEED_TOKEN}" gh api "repos/${full_name}/contents/${DEST_PATH}?ref=${SEED_BRANCH}" \
+              --jq '.sha // empty' 2>/dev/null || true)
+            if [ -n "${blob_sha}" ]; then
+              put_args+=(-f "sha=${blob_sha}")
+            fi
+
+            if ! GH_TOKEN="${SEED_TOKEN}" gh api --method PUT "repos/${full_name}/contents/${DEST_PATH}" \
+                 -f "message=chore: install ${WORKFLOW_FILE} from the automation hub" \
+                 -f "content=${KICKER_B64}" \
+                 -f "branch=${SEED_BRANCH}" \
+                 "${put_args[@]+"${put_args[@]}"}" >/dev/null 2>&1; then
+              printf 'failed\tcontents write rejected; WORKFLOW_SYNC_PAT needs Contents and Workflows write\n'
+              return 0
+            fi
+
+            url=$(GH_TOKEN="${SEED_TOKEN}" gh api --method POST "repos/${full_name}/pulls" \
+              -f "title=Install ${WORKFLOW_FILE}" \
+              -f "head=${SEED_BRANCH}" \
+              -f "base=${base_ref}" \
+              -f "body=${PR_BODY}" \
+              --jq '.html_url' 2>/dev/null || true)
+            if [ -z "${url}" ]; then
+              printf 'failed\tbranch pushed but pull request could not be opened; needs Pull requests write\n'
+              return 0
+            fi
+            printf 'seeded\t%s\n' "${url}"
+          }
+
           {
             echo "### Org kicker fan-out: \`${WORKFLOW_FILE}\`"
             echo
@@ -203,6 +319,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
           dispatched=0
+          seeded=0
           skipped=0
           failed=0
 
@@ -216,21 +333,48 @@ jobs:
               continue
             fi
 
-            if ! gh api "repos/${full_name}/actions/workflows/${WORKFLOW_FILE}" \
-                 --silent >/dev/null 2>&1; then
-              skipped=$((skipped + 1))
-              continue
-            fi
-
             # Per-repo opt-out: a repository variable named `AUTO_HUB_SYNC`
             # set to `false` skips this repo entirely, regardless of the
             # dry-run/manual distinction below. Missing variable (404) or any
-            # other value means "participate" (opt-out, not opt-in).
+            # other value means "participate" (opt-out, not opt-in). Checked
+            # ahead of the seed below so opting out also declines the seed.
             opt_out_value=$(gh api "repos/${full_name}/actions/variables/AUTO_HUB_SYNC" \
               --jq '.value' 2>/dev/null || true)
             if [ "${opt_out_value}" = "false" ]; then
               echo "| ${full_name} | skipped (AUTO_HUB_SYNC=false) |" >> "${GITHUB_STEP_SUMMARY}"
               skipped=$((skipped + 1))
+              continue
+            fi
+
+            if ! gh api "repos/${full_name}/actions/workflows/${WORKFLOW_FILE}" \
+                 --silent >/dev/null 2>&1; then
+              if [ -z "${KICKER_B64}" ]; then
+                echo "| ${full_name} | skipped (no ${WORKFLOW_FILE}) |" >> "${GITHUB_STEP_SUMMARY}"
+                skipped=$((skipped + 1))
+                continue
+              fi
+              if [ "${DRY_RUN}" = "true" ]; then
+                echo "| ${full_name} | would seed ${WORKFLOW_FILE} into \`${default_branch}\` |" >> "${GITHUB_STEP_SUMMARY}"
+                seeded=$((seeded + 1))
+                continue
+              fi
+              IFS=$'\t' read -r seed_status seed_detail \
+                < <(seed_target "${full_name}" "${default_branch}")
+              case "${seed_status}" in
+                seeded)
+                  echo "| ${full_name} | seeded ([pull request](${seed_detail})) |" >> "${GITHUB_STEP_SUMMARY}"
+                  seeded=$((seeded + 1))
+                  ;;
+                pending)
+                  echo "| ${full_name} | seed [pull request](${seed_detail}) already open |" >> "${GITHUB_STEP_SUMMARY}"
+                  seeded=$((seeded + 1))
+                  ;;
+                *)
+                  echo "::warning::${full_name}: could not seed ${WORKFLOW_FILE} — ${seed_detail}"
+                  echo "| ${full_name} | :warning: seed failed (${seed_detail}) |" >> "${GITHUB_STEP_SUMMARY}"
+                  skipped=$((skipped + 1))
+                  ;;
+              esac
               continue
             fi
 
@@ -264,7 +408,7 @@ jobs:
 
           {
             echo
-            echo "Targets: ${dispatched} | without kicker: ${skipped} | failed: ${failed}"
+            echo "Dispatched: ${dispatched} | seeded: ${seeded} | skipped: ${skipped} | failed: ${failed}"
           } >> "${GITHUB_STEP_SUMMARY}"
 
           if [ "${failed}" -gt 0 ]; then

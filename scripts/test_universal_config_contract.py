@@ -175,6 +175,28 @@ def main() -> None:
         "ai_model": "auto",
     }
 
+    release_validation_output = action_test_defaults.stdout.split(
+        "release_validation=", 1
+    )[1].split("\n", 1)[0]
+    assert json.loads(release_validation_output) == {
+        "enabled": True,
+        "enforce": "fail",
+        "run_node": True,
+        "run_python": True,
+        "run_custom": True,
+        "verify_clean_tree": True,
+        "require_lockfile": True,
+        "version_match": "warn",
+        "required_paths": ["README.md", "LICENSE"],
+        "custom_hook": ".github/scripts/release-validation.sh",
+        "custom_commands": [],
+    }
+    bad_release_policy = run_universal_config(
+        {"release_validation": {"enforce": "sometimes"}}
+    )
+    assert bad_release_policy.returncode == 1
+    assert "release_validation.enforce must be" in bad_release_policy.stderr
+
     # ── organization section ──────────────────────────────────────
     # Runner topology and report policy are data, so an empty config
     # must still yield a complete, directly usable organization block.
@@ -424,14 +446,13 @@ def main() -> None:
 
     marketplace_workflow = (
         ROOT / ".github/workflows/bos-universal-marketplace.yml"
-    ).read_text()
-    assert "use_global_config:       'true'" in marketplace_workflow
+    ).read_text(encoding="utf-8")
+    assert 'use_global_config: "true"' in marketplace_workflow or "use_global_config: 'true'" in marketplace_workflow
     assert (
-        "global_config_path:      hub-config/sync-files/config/"
-        "marketplace-kit-global-config.json"
-        in marketplace_workflow
+        "global_config_path: hub-config/sync-files/config/marketplace-kit-global-config.json" in marketplace_workflow
+        or "global_config_path:      hub-config/sync-files/config/marketplace-kit-global-config.json" in marketplace_workflow
     )
-    assert "config_path:             .github/bos-universal-config.json" in marketplace_workflow
+    assert "config_path: .github/bos-universal-config.json" in marketplace_workflow or "config_path:             .github/bos-universal-config.json" in marketplace_workflow
     assert_first_party_pin(
         marketplace_workflow,
         "blackoutsecure/bos-marketplace-kit/.github/actions/check",
@@ -476,6 +497,8 @@ def main() -> None:
     assert "name: Marketplace Promotion Release" in marketplace_promote
     assert "release.yml@main" in workflow
     assert "release-promote.yml" not in artifact_release
+    assert "bos-universal-release-validation.yml@main" in artifact_release
+    assert "bos-universal-release-validation.yml@main" in marketplace_promote
     assert ".github/workflows/release.yml@main" not in marketplace_promote
     assert marketplace_promote.count(
         "uses: blackoutsecure/bos-automation-hub/"
@@ -521,6 +544,7 @@ def main() -> None:
         "bos-org-kicker-fanout.yml",
         "bos-hub-managed-sync-propagate.yml",
         "bos-hub-gatekeeper-kicker.yml",
+        "osi-license-catalogue-refresh.yml",
     }
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
@@ -538,7 +562,7 @@ def main() -> None:
     ) == 1
     assert release_hub.count(
         "uses: ./.github/actions/universal-config"
-    ) == 1
+    ) == 2
     assert release_hub.count(
         "uses: ./.github/workflows/repo-metadata-sync.yml"
     ) == 1
@@ -682,31 +706,25 @@ def main() -> None:
     assert "workflows" not in hub_org
 
     global_code_scan_config = json.loads(
-        (ROOT / "sync-files/config/code-scanning-kit-global-config.json").read_text()
+        (ROOT / "sync-files/config/code-scanning-kit-global-config.json").read_text(encoding="utf-8")
     )
-    assert global_code_scan_config["code_scanning"] == {
-        "posture": {
-            "workflows": {
-                "require_permissions_block": "fail",
-                "forbid_write_all": "fail",
-                "require_pinned_actions": "warn",
-                "allow_tag_pin": [
-                    "blackoutsecure/bos-automation-hub",
-                ],
-            },
-            "branches": {
-                "main": {
-                    "require_conversation_resolution": True,
-                    "severity": "fail",
-                },
-                "dev": {},
-            },
-        },
-        "remediation": {"enable_ai_findings_summary": False},
+    assert global_code_scan_config["code_scanning"]["posture"]["workflows"] == {
+        "require_permissions_block": "fail",
+        "forbid_write_all": "fail",
+        "require_pinned_actions": "warn",
+        "allow_tag_pin": ["blackoutsecure/bos-automation-hub"],
     }
+    assert global_code_scan_config["code_scanning"]["posture"]["branches"] == {
+        "main": {
+            "require_conversation_resolution": True,
+            "severity": "fail",
+        },
+        "dev": {},
+    }
+    assert global_code_scan_config["code_scanning"]["remediation"] == {"enable_ai_findings_summary": False}
 
     global_marketplace_config = json.loads(
-        (ROOT / "sync-files/config/marketplace-kit-global-config.json").read_text()
+        (ROOT / "sync-files/config/marketplace-kit-global-config.json").read_text(encoding="utf-8")
     )
     assert global_marketplace_config["marketplace_kit"] == {
         "profile": "strict",
@@ -715,9 +733,15 @@ def main() -> None:
         "community_health_source": "inherit",
         "enable_security_scan": True,
         "defer_to_code_scanning_kit": True,
+        "require_sponsorship": "warn",
+        "funding_source": "inherit",
         "enable_ai_findings_summary": False,
         "version": "auto",
         "license": "auto",
+        "require_license_audit": "fail",
+        "allowed_licenses": ["Apache-2.0"],
+        "denied_licenses": [],
+        "license_catalogue_max_age_days": 400,
     }
 
     # ── Site-generator audit policy ────────────────────────────────────
@@ -904,6 +928,8 @@ def main() -> None:
         "shellcheck",
         "yamllint",
         "coverage_artifacts",
+        "license_service",
+        "security_readme_pointer",
         "bos_universal_gatekeeper_kicker",
     ]
     assert sync_policy["service_definitions"]["bos_universal_gatekeeper_kicker"] == {

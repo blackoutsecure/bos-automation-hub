@@ -1,0 +1,173 @@
+# Refresh the OSI licence catalogue consumed by the LC### and LD### rules.
+#
+# `sync-files/legal/osi-licenses.json` is a vendored snapshot on purpose:
+# the marketplace-kit LC### rules and the code-scanning-kit LD### rules
+# must reach the same verdict offline, on a runner, without depending on
+# opensource.org being reachable. Vendored data rots silently, so this
+# job refreshes it out-of-band and lands the result as a reviewable PR.
+#
+# Two upstreams, two trust levels:
+#
+#   * SPDX (`spdx/license-list-data`) is authoritative for facts —
+#     identifier, name, OSI approval, deprecation. Refreshed here.
+#   * `sync-files/legal/osi-overlay.json` is curated judgement — the OSI
+#     category, the replacement to recommend, and why a source-available
+#     licence is not open source. The OSI publishes its category filters
+#     only as HTML, so this half stays human-owned and is never
+#     rewritten by this job.
+#
+# The generator fails the build when the overlay drifts from upstream
+# (an entry the OSI no longer approves, or a `prefer` target that is not
+# itself approved). A red pipeline is the point: a stale recommendation
+# inside a policy dataset is worse than a broken schedule.
+#
+# The merged file is fanned out to both kits by managed file sync via the
+# `license_catalogue_service` service, so this is the single source of
+# truth for the whole org.
+name: Refresh OSI licence catalogue
+
+"on":
+  schedule:
+    # Monthly. SPDX cuts a license-list release roughly quarterly, so
+    # anything more frequent is pure API traffic.
+    - cron: "23 5 1 * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Rebuild and report drift without opening a PR."
+        required: false
+        type: boolean
+        default: false
+      spdx_ref:
+        description: "SPDX license-list-data ref to build from. Empty resolves the newest release tag."
+        required: false
+        type: string
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: osi-license-catalogue
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Rebuild catalogue from SPDX
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+
+      - name: Resolve the SPDX license list release
+        id: upstream
+        uses: blackoutsecure/bos-upstream-watcher@1a336966520af363c9b76cdd34c0f1443b723179 # v1.1.3
+        with:
+          source: github_release
+          upstream_repo: spdx/license-list-data
+          track_file: .github/tracked-osi-license-list.json
+
+      - name: Fetch json/licenses.json at the resolved ref
+        id: fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # `workflow_dispatch` wins, then the resolved release tag, then
+          # `main` so a first run still produces something reviewable.
+          SPDX_REF: ${{ inputs.spdx_ref || steps.upstream.outputs.tag || steps.upstream.outputs.version || 'main' }}
+        run: |
+          set -euo pipefail
+          target="${RUNNER_TEMP}/spdx-licenses.json"
+          echo "::notice::Building the catalogue from spdx/license-list-data@${SPDX_REF}"
+          gh api \
+            -H 'Accept: application/vnd.github.raw' \
+            "/repos/spdx/license-list-data/contents/json/licenses.json?ref=${SPDX_REF}" \
+            > "${target}"
+          # A truncated or HTML error body must not silently become the
+          # org's licence policy dataset.
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d.get('licenses'), list) and d['licenses'], 'no licences in payload'" "${target}"
+          echo "spdx_json=${target}" >> "${GITHUB_OUTPUT}"
+          echo "spdx_ref=${SPDX_REF}" >> "${GITHUB_OUTPUT}"
+
+      - name: Rebuild the catalogue
+        id: build
+        env:
+          SPDX_JSON: ${{ steps.fetch.outputs.spdx_json }}
+        run: |
+          set -euo pipefail
+          python3 scripts/build_osi_catalogue.py --spdx "${SPDX_JSON}"
+          if git diff --quiet -- sync-files/legal/osi-licenses.json; then
+            echo 'changed=false' >> "${GITHUB_OUTPUT}"
+            echo '::notice::OSI licence catalogue is already up to date.'
+          else
+            echo 'changed=true' >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Report drift without publishing
+        if: steps.build.outputs.changed == 'true' && inputs.dry_run
+        run: |
+          set -euo pipefail
+          echo '::notice::Catalogue drift detected. Dry run requested, so no PR was opened.'
+          git --no-pager diff --stat -- sync-files/legal/osi-licenses.json
+
+      - name: Open catalogue-refresh pull request
+        if: steps.build.outputs.changed == 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: automation/osi-license-catalogue
+          SPDX_REF: ${{ steps.fetch.outputs.spdx_ref }}
+        run: |
+          set -euo pipefail
+
+          git config user.name 'blackout-secure-bot'
+          git config user.email 'bot@users.noreply.github.com'
+
+          {
+            echo 'Automated by `.github/workflows/osi-license-catalogue-refresh.yml`.'
+            echo
+            echo "Rebuilt from \`spdx/license-list-data@${SPDX_REF}\`, merged with the"
+            echo 'curated `sync-files/legal/osi-overlay.json`.'
+            echo
+            echo '### Review checklist'
+            echo
+            echo '- Any newly OSI-approved identifier defaults to the `uncategorized`'
+            echo '  category. Give it a real OSI category in the overlay if it belongs'
+            echo '  in one, otherwise `LC003` cannot advise on it.'
+            echo '- A licence that moved to `superseded` or `retired` needs a `prefer`'
+            echo '  target, or the `LC003` remediation has nothing to recommend.'
+            echo '- SPDX and the OSI disagree for a handful of licences. Approval the'
+            echo '  OSI publishes but SPDX omits lives in `osi_approved_not_in_spdx`.'
+            echo
+            echo 'Merging fans this out to every consumer via the'
+            echo '`license_catalogue_service` managed-file-sync service, changing licence'
+            echo 'verdicts across the org. Reproduce locally with:'
+            echo
+            echo '```bash'
+            echo 'python3 scripts/build_osi_catalogue.py --spdx <path-to>/licenses.json --check'
+            echo '```'
+          } > "${RUNNER_TEMP}/pr-body.md"
+
+          git checkout -B "${BRANCH}"
+          git add -- sync-files/legal/osi-licenses.json .github/tracked-osi-license-list.json
+          git commit -m "chore(licensing): refresh OSI licence catalogue from SPDX ${SPDX_REF}"
+
+          remote_sha="$(git ls-remote --heads origin "refs/heads/${BRANCH}" | awk '{print $1}')"
+          if [ -n "${remote_sha}" ]; then
+            git push --force-with-lease="refs/heads/${BRANCH}:${remote_sha}" origin "${BRANCH}"
+          else
+            git push origin "${BRANCH}"
+          fi
+
+          if [ -z "$(gh pr list --head "${BRANCH}" --state open --json number --jq '.[].number')" ]; then
+            gh pr create \
+              --head "${BRANCH}" \
+              --base "${GITHUB_REF_NAME}" \
+              --title "chore(licensing): refresh OSI licence catalogue from SPDX ${SPDX_REF}" \
+              --body-file "${RUNNER_TEMP}/pr-body.md"
+          else
+            echo '::notice::Existing catalogue-refresh PR updated with the newest build.'
+          fi

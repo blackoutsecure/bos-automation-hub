@@ -443,13 +443,24 @@ jobs:
 
           echo "Resolved tag '${TAG}' (source: ${SOURCE})."
 
+  release-validation:
+    name: Release validation
+    needs: resolve
+    permissions:
+      contents: read
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-release-validation.yml@main
+    with:
+      checkout_ref: ${{ github.sha }}
+      expected_tag: ${{ needs.resolve.outputs.tag_name }}
+      release_kind: artifact
+
   # ---------------------------------------------------------------------------
   # Stage 1 — Docker Hub
   # ---------------------------------------------------------------------------
   docker:
     name: Docker Hub
     if: ${{ inputs.docker }}
-    needs: resolve
+    needs: [resolve, release-validation]
     permissions:
       contents: read
       # Forwarded to docker-build-push.yml so Scout can post PR comments
@@ -490,7 +501,7 @@ jobs:
   docker-companion:
     name: Docker Hub (companion)
     if: ${{ inputs.companion_docker }}
-    needs: resolve
+    needs: [resolve, release-validation]
     permissions:
       contents: read
       pull-requests: write
@@ -528,7 +539,7 @@ jobs:
   balena:
     name: Balena block
     if: ${{ inputs.balena }}
-    needs: [resolve, docker]
+    needs: [resolve, release-validation, docker]
     permissions:
       contents: write   # allow `sync_balena_yml` commit-back
     uses: blackoutsecure/bos-automation-hub/.github/workflows/balena-block-publish.yml@main
@@ -579,10 +590,11 @@ jobs:
       && inputs.github_release
       && !cancelled()
       && needs.resolve.result == 'success'
+      && needs.release-validation.result == 'success'
       && (needs.docker.result == 'success' || needs.docker.result == 'skipped')
       && (needs.docker-companion.result == 'success' || needs.docker-companion.result == 'skipped')
       && (needs.balena.result == 'success' || needs.balena.result == 'skipped')
-    needs: [resolve, docker, docker-companion, balena]
+    needs: [resolve, release-validation, docker, docker-companion, balena]
     permissions:
       # `contents: write` to publish the GitHub Release tag/body.
       # `models: read` cascades to the nested `github-release.yml`

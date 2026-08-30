@@ -27,16 +27,18 @@
 #                                input OR `bump` mode (default
 #                                `patch`). Refuse if both are given
 #                                or the tag already exists.
-#   3. promote                 — materialize `main`'s next tree in a
+#   3. validate                — run the central release-readiness contract
+#                                against the exact default-branch candidate.
+#   4. promote                 — materialize `main`'s next tree in a
 #                                worktree (default-branch runtime allowlist),
 #                                commit on top of current `main`,
 #                                atomic-push the new commit + tag,
 #                                optionally move the floating major
 #                                tag (`vX`). No-op when the curated
 #                                tree already matches `main` (tag-only).
-#   4. release                 — chain to `github-release.yml` to
+#   5. release                 — chain to `github-release.yml` to
 #                                publish the GitHub Release.
-#   5. metadata                — refresh the hub repository About box
+#   6. metadata                — refresh the hub repository About box
 #                                from the released tag when enabled in
 #                                `.github/bos-universal-config.json`.
 #
@@ -165,9 +167,46 @@ jobs:
           bump: ${{ inputs.bump }}
           first_tag: v0.0.1
 
+  release-validation:
+    name: Release validation
+    needs: compute-tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve release validation policy
+        id: config
+        uses: ./.github/actions/universal-config
+      - name: Validate release candidate
+        id: validate
+        uses: ./.github/actions/release-validation
+        with:
+          config: ${{ steps.config.outputs.release_validation }}
+          expected_tag: ${{ needs.compute-tag.outputs.tag_name }}
+          release_kind: hub
+      - name: Publish release validation report
+        if: always()
+        uses: ./.github/actions/job-report
+        with:
+          title: Blackout Secure Hub Release Validation Report
+          subject: ${{ github.repository }} @ ${{ github.event.repository.default_branch }}
+          findings: ${{ steps.validate.outputs.findings || '[]' }}
+          fail_on: ${{ fromJSON(steps.config.outputs.release_validation || '{}').enforce || 'fail' }}
+          enable_json: 'true'
+          json_path: release-validation-report.json
+          enable_artifact_upload: 'true'
+          artifact_name: hub-release-validation-${{ github.run_id }}
+          enable_automation_policy: 'false'
+
   promote:
     name: Promote default branch → main (runtime allowlist)
-    needs: [preflight-runner-config, compute-tag]
+    needs: [preflight-runner-config, compute-tag, release-validation]
     runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER, '[') && vars.DEFAULT_RUNNER || format('"{0}"', vars.DEFAULT_RUNNER)) }}
     timeout-minutes: 5
     permissions:

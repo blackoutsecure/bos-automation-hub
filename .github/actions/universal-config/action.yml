@@ -16,9 +16,9 @@ inputs:
     default: 'false'
   global_config_path:
     description: >-
-      Path to an optional org-wide global config JSON file (e.g. checked
-      out from bos-automation-hub's sync-files/config/). Currently only
-      merges the `action_test` section; repo config always wins over it.
+            Path to an optional org-wide global config JSON file (e.g. checked
+            out from bos-automation-hub's sync-files/config/). Supported policy
+            sections are merged with repository config taking precedence.
     required: false
     default: ''
   use_global_config:
@@ -26,7 +26,7 @@ inputs:
     required: false
     default: 'auto'
 
-outputs: {cfg: {description: 'Compact JSON object for downstream fromJson usage.', value: '${{ steps.config.outputs.cfg }}'}, cloudflare: {description: 'Normalized Cloudflare block derived from the config.', value: '${{ steps.config.outputs.cloudflare }}'}, action_test: {description: 'Normalized action_test block derived from the config.', value: '${{ steps.config.outputs.action_test }}'}, organization: {description: 'Normalized organization block (runners, reporting, per-workflow overrides).', value: '${{ steps.config.outputs.organization }}'}, sync: {description: 'Normalized managed_file_sync block.', value: '${{ steps.config.outputs.sync }}'}}
+outputs: {cfg: {description: 'Compact JSON object for downstream fromJson usage.', value: '${{ steps.config.outputs.cfg }}'}, cloudflare: {description: 'Normalized Cloudflare block derived from the config.', value: '${{ steps.config.outputs.cloudflare }}'}, action_test: {description: 'Normalized action_test block derived from the config.', value: '${{ steps.config.outputs.action_test }}'}, release_validation: {description: 'Normalized release_validation policy.', value: '${{ steps.config.outputs.release_validation }}'}, organization: {description: 'Normalized organization block (runners, reporting, per-workflow overrides).', value: '${{ steps.config.outputs.organization }}'}, sync: {description: 'Normalized managed_file_sync block.', value: '${{ steps.config.outputs.sync }}'}}
 
 runs:
   using: composite
@@ -441,6 +441,67 @@ runs:
             "ai_model": str(merged_scalar("ai_model") or "auto"),
         }
 
+        # Release validation is centrally defaulted and repository-extensible.
+        global_release_validation = as_dict(global_cfg.get("release_validation"))
+        repo_release_validation = as_dict(cfg.get("release_validation"))
+        merged_release_validation = dict(global_release_validation)
+        merged_release_validation.update(repo_release_validation)
+
+        def release_string_list(value, field):
+            if value is None:
+                return []
+            if not isinstance(value, list):
+                error(f"::error file={config_path}::release_validation.{field} must be an array of strings.")
+                sys.exit(1)
+            normalized = []
+            for index, item in enumerate(value):
+                if not isinstance(item, str) or not item.strip():
+                    error(
+                        f"::error file={config_path}::release_validation.{field}[{index}] "
+                        "must be a non-empty string."
+                    )
+                    sys.exit(1)
+                normalized.append(item.strip())
+            return normalized
+
+        validation_enforce = str(merged_release_validation.get("enforce") or "fail").lower()
+        if validation_enforce not in {"fail", "warn", "never"}:
+            error(
+                f"::error file={config_path}::release_validation.enforce must be "
+                "`fail`, `warn`, or `never`."
+            )
+            sys.exit(1)
+        version_match = str(merged_release_validation.get("version_match") or "warn").lower()
+        if version_match not in {"fail", "warn", "skip"}:
+            error(
+                f"::error file={config_path}::release_validation.version_match must be "
+                "`fail`, `warn`, or `skip`."
+            )
+            sys.exit(1)
+
+        release_validation = {
+            "enabled": merged_release_validation.get("enabled") is not False,
+            "enforce": validation_enforce,
+            "run_node": merged_release_validation.get("run_node") is not False,
+            "run_python": merged_release_validation.get("run_python") is not False,
+            "run_custom": merged_release_validation.get("run_custom") is not False,
+            "verify_clean_tree": merged_release_validation.get("verify_clean_tree") is not False,
+            "require_lockfile": merged_release_validation.get("require_lockfile") is not False,
+            "version_match": version_match,
+            "required_paths": release_string_list(
+                merged_release_validation.get("required_paths", ["README.md", "LICENSE"]),
+                "required_paths",
+            ),
+            "custom_hook": str(
+                merged_release_validation.get("custom_hook")
+                or ".github/scripts/release-validation.sh"
+            ),
+            "custom_commands": release_string_list(
+                merged_release_validation.get("custom_commands", []),
+                "custom_commands",
+            ),
+        }
+
         # ── organization section ──────────────────────────────────
         # Org-wide runner labels, report policy, and per-workflow
         # overrides. Every hub workflow reads its `runs_on` /
@@ -525,6 +586,7 @@ runs:
         compact_cloudflare = json.dumps(cloudflare, separators=(",", ":"))
         compact_sync = json.dumps(sync, separators=(",", ":"))
         compact_action_test = json.dumps(action_test, separators=(",", ":"))
+        compact_release_validation = json.dumps(release_validation, separators=(",", ":"))
         compact_organization = json.dumps(organization, separators=(",", ":"))
 
         cloudflare_enabled = stages.get("cloudflare_pages") is True or bool(cloudflare_raw.get("project_name"))
@@ -591,5 +653,6 @@ runs:
             handle.write(f"cloudflare={compact_cloudflare}\n")
             handle.write(f"sync={compact_sync}\n")
             handle.write(f"action_test={compact_action_test}\n")
+            handle.write(f"release_validation={compact_release_validation}\n")
             handle.write(f"organization={compact_organization}\n")
         PY

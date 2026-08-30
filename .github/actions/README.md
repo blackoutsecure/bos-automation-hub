@@ -17,6 +17,13 @@ required by managed kickers. Kicker files should keep only event triggers,
 resolver inputs, static `@dev`/`@main` jobs, and secret inheritance;
 configuration and execution belong in the reusable backend workflow.
 
+The `release-validation` action owns the deterministic release-readiness
+engine used by artifact, Marketplace, and hub runtime releases. It emits
+structured findings for `job-report`; it does not publish, push, or repair the
+candidate in place. Repository-specific extensions are supplied through the
+universal `release_validation` config or the conventional
+`.github/scripts/release-validation.sh` hook.
+
 ## Published orchestration actions
 
 Repository About-box sync (description, homepage, topics, and best-effort

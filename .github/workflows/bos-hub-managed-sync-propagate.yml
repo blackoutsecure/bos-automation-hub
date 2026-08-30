@@ -18,7 +18,7 @@
 # pinned to that new release, `with: { handoff_only: true, dispatch_handoff:
 # true, handoff_workflow: bos-org-kicker-fanout.yml, handoff_repository:
 # github.repository, handoff_ref: github.ref_name, handoff_inputs:
-# '{"kicker": "sync", "dry_run": "false"}', handoff_audit: warn, token:
+# '{"kicker": "gatekeeper", "dry_run": "false"}', handoff_audit: warn, token:
 # github.token }` (kept as prose, not YAML, so this comment can't be
 # mistaken by tooling for a live, un-SHA-pinned action reference).
 #
@@ -72,10 +72,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Must match an option in the fan-out's `kicker` choice enum;
+          # GitHub rejects the dispatch outright for any other value.
           gh workflow run bos-org-kicker-fanout.yml \
             --repo "${{ github.repository }}" \
             --ref "${{ github.ref_name }}" \
-            -f kicker=sync \
+            -f kicker=gatekeeper \
             -f dry_run=false
-
-
