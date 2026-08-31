@@ -1007,12 +1007,12 @@ deployment.
 
 #### Secret tiers, least privilege first
 
-| Tier | Use for |
-| --- | --- |
-| **Repository secret** | Single-repo, low-blast-radius values. |
-| **Environment secret** (with required reviewers) | Anything that can push, publish, or deploy — adds a manual-approval gate. |
-| **Organization secret**, scoped to selected repositories | A credential shared by several repos (Docker Hub, Balena) — one rotation point instead of N. |
-| **Enterprise secret** | Only for values every org in the enterprise needs; rarely applicable here. |
+| Tier                                                                 | Use for                                                                                                                                                                                                  |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Repository secret**                                                | Single-repo, low-blast-radius values.                                                                                                                                                                    |
+| **Environment secret** (with required reviewers)                     | Anything that can push, publish, or deploy — adds a manual-approval gate.                                                                                                                                |
+| **Organization secret**, scoped to selected repositories             | A credential shared by several repos (Docker Hub, Balena) — one rotation point instead of N.                                                                                                             |
+| **Enterprise secret**                                                | Only for values every org in the enterprise needs; rarely applicable here.                                                                                                                               |
 | **Codespaces secret** (user or org, scoped to selected repositories) | A value a `.devcontainer` needs at development time. Entirely separate store from Actions secrets, even when the name matches — must be added again if a devcontainer needs it. No repo ships one today. |
 
 Default to the narrowest tier that still avoids duplicate rotation work.
@@ -1062,11 +1062,11 @@ a fleet-scoped key over an account-wide one. Store as `BALENA_API_TOKEN`
 
 #### Rotation summary
 
-| Credential class | Rotation |
-| --- | --- |
-| GitHub App installation tokens | Automatic — minted per run, expire in ~1 hour, nobody rotates them. |
-| Fine-grained PATs | Manual; replace with a purpose-scoped GitHub App wherever the credential only talks to the GitHub API. |
-| Docker Hub / Balena / Cloudflare tokens | Manual, provider-side; set the shortest TTL the provider allows and calendar-reminder before expiry. |
+| Credential class                        | Rotation                                                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| GitHub App installation tokens          | Automatic — minted per run, expire in ~1 hour, nobody rotates them.                                    |
+| Fine-grained PATs                       | Manual; replace with a purpose-scoped GitHub App wherever the credential only talks to the GitHub API. |
+| Docker Hub / Balena / Cloudflare tokens | Manual, provider-side; set the shortest TTL the provider allows and calendar-reminder before expiry.   |
 
 ### Elevated posture scanning (`SCANNING_PAT`)
 
