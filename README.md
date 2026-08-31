@@ -1,5 +1,9 @@
 # Blackout Secure Automation Hub
 
+**Copyright © 2025-2026 Blackout Secure | Apache License 2.0**
+
+[![GitHub release](https://img.shields.io/github/v/release/blackoutsecure/bos-automation-hub)](https://github.com/blackoutsecure/bos-automation-hub/releases)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Made by BlackoutSecure](https://img.shields.io/badge/made%20by-BlackoutSecure-1f1f1f)](https://github.com/blackoutsecure)
 
 Central reusable GitHub Actions workflows, shared composite actions, and
