@@ -9,24 +9,56 @@ inputs:
   allow_missing:
     description: Emit {} when config file is missing instead of failing.
     required: false
-    default: 'false'
+    default: "false"
   require_marketplace_enabled:
     description: Fail unless `marketplace.enabled` is `true` in the parsed config.
     required: false
-    default: 'false'
+    default: "false"
   global_config_path:
     description: >-
-            Path to an optional org-wide global config JSON file (e.g. checked
-            out from bos-automation-hub's sync-files/config/). Supported policy
-            sections are merged with repository config taking precedence.
+      Path to an optional org-wide global config JSON file (e.g. checked
+      out from bos-automation-hub's sync-files/config/). Supported policy
+      sections are merged with repository config taking precedence.
     required: false
-    default: ''
+    default: ""
   use_global_config:
     description: "'auto' loads global_config_path when the file exists, 'true' requires it, 'false' ignores it."
     required: false
-    default: 'auto'
+    default: "auto"
 
-outputs: {cfg: {description: 'Compact JSON object for downstream fromJson usage.', value: '${{ steps.config.outputs.cfg }}'}, cloudflare: {description: 'Normalized Cloudflare block derived from the config.', value: '${{ steps.config.outputs.cloudflare }}'}, action_test: {description: 'Normalized action_test block derived from the config.', value: '${{ steps.config.outputs.action_test }}'}, release_validation: {description: 'Normalized release_validation policy.', value: '${{ steps.config.outputs.release_validation }}'}, organization: {description: 'Normalized organization block (runners, reporting, per-workflow overrides).', value: '${{ steps.config.outputs.organization }}'}, sync: {description: 'Normalized managed_file_sync block.', value: '${{ steps.config.outputs.sync }}'}}
+outputs:
+  {
+    cfg:
+      {
+        description: "Compact JSON object for downstream fromJson usage.",
+        value: "${{ steps.config.outputs.cfg }}",
+      },
+    cloudflare:
+      {
+        description: "Normalized Cloudflare block derived from the config.",
+        value: "${{ steps.config.outputs.cloudflare }}",
+      },
+    action_test:
+      {
+        description: "Normalized action_test block derived from the config.",
+        value: "${{ steps.config.outputs.action_test }}",
+      },
+    release_validation:
+      {
+        description: "Normalized release_validation policy.",
+        value: "${{ steps.config.outputs.release_validation }}",
+      },
+    organization:
+      {
+        description: "Normalized organization block (runners, reporting, per-workflow overrides).",
+        value: "${{ steps.config.outputs.organization }}",
+      },
+    sync:
+      {
+        description: "Normalized managed_file_sync block.",
+        value: "${{ steps.config.outputs.sync }}",
+      },
+  }
 
 runs:
   using: composite
