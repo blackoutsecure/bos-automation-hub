@@ -366,7 +366,7 @@ def main() -> None:
     gate_declared = workflow_input_names(gate_workflow)
     assert "  workflow_dispatch:" not in gate_workflow
     assert not (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
-    assert "name: '[RUNTIME] Blackout Secure Universal Security'" in gate_workflow
+    assert "[RUNTIME] Blackout Secure Universal Security" in gate_workflow
     assert '"python_packages": ["ruff>=0.6", "pytest>=8.0", "PyYAML>=6.0"]' in gate_workflow
     assert "name: Security summary" in gate_workflow
     assert "kit_version:" not in gate_workflow
@@ -390,7 +390,7 @@ def main() -> None:
         in gate_workflow
     )
     assert "steps.security-app.outputs.token || secrets.SCANNING_PAT" in gate_workflow
-    assert "vars.SECURITY_AUDIT_APP_ID" in gate_workflow
+    assert "vars.GATEWALL_APP_ID" in gate_workflow
 
     readme = (ROOT / "README.md").read_text()
     readme_header_action = (
@@ -399,7 +399,7 @@ def main() -> None:
     assert "enable_baseline" not in readme
     assert "## Managed file sync" in readme
     assert "The reusable workflow never self-triggers" in readme
-    assert "### Elevated posture scanning (`SECURITY_AUDIT_APP`)" in readme
+    assert "### Elevated posture scanning (`GATEWALL_APP`)" in readme
     assert "security_scan.use_advanced_pat" in readme
     assert "bos-launchpad-release.yml" not in readme_header_action
     assert "bos-universal-gatekeeper-kicker.yml" in readme_header_action
@@ -482,7 +482,7 @@ def main() -> None:
     assert ".github/actions/repo-metadata@main" not in repo_metadata_workflow
     assert not (ROOT / ".github/actions/repo-metadata").exists()
     assert "steps.repo-admin-app.outputs.token || secrets.REPO_ADMIN_PAT" in repo_metadata_workflow
-    assert "vars.REPO_ADMIN_APP_ID" in repo_metadata_workflow
+    assert "vars.GATEWALL_APP_ID" in repo_metadata_workflow
     assert "group: repo-metadata-${{ github.repository }}" in repo_metadata_workflow
     assert "inputs.checkout_ref || github.sha" in repo_metadata_workflow
     assert workflow.count("uses: ./.github/workflows/repo-metadata-sync.yml") == 1
@@ -572,9 +572,9 @@ def main() -> None:
     assert "needs.release.result == 'success'" in release_hub
     assert "inputs.release_draft != true" in release_hub
     assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" in release_hub
-    assert "REPO_ADMIN_APP_PRIVATE_KEY: ${{ secrets.REPO_ADMIN_APP_PRIVATE_KEY }}" in release_hub
+    assert "GATEWALL_APP_PRIVATE_KEY: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}" in release_hub
     assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" in release_hub
-    assert "vars.RELEASE_APP_ID" in release_hub
+    assert "vars.GATEWALL_APP_ID" in release_hub
     assert "LATEST=\"$(git tag --list" not in release_hub
 
     balena_block = (
@@ -616,7 +616,7 @@ def main() -> None:
     assert refs and set(refs) == {"main", "dev"}, refs
 
     sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
-    assert "name: '[RUNTIME] Blackout Secure Managed File Sync'" in sync_backend
+    assert "[RUNTIME] Blackout Secure Managed File Sync" in sync_backend
     assert "uses: ./hub-runtime/.github/actions/universal-config" in sync_backend
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "github.event_name == 'merge_group'" in sync_backend
@@ -906,14 +906,14 @@ def main() -> None:
         "global_config_path: hub-config/sync-files/config/code-scanning-kit-global-config.json"
         in gate_workflow
     )
-    assert "use_global_config: 'true'" in gate_workflow
+    assert re.search(r'use_global_config:\s+["\']true["\']', gate_workflow)
     assert "config: .github/bos-universal-config.json" in gate_workflow
     assert_first_party_pin(gate_workflow, "blackoutsecure/bos-code-scanning-kit")
     standalone_scan_workflow = (
         ROOT / ".github/workflows/security-scan.yml"
     ).read_text()
     assert "sparse-checkout: sync-files/config/code-scanning-kit-global-config.json" in standalone_scan_workflow
-    assert "use_global_config: 'true'" in standalone_scan_workflow
+    assert re.search(r'use_global_config:\s+["\']true["\']', standalone_scan_workflow)
     assert "config: .github/bos-universal-config.json" in standalone_scan_workflow
     assert_first_party_pin(
         standalone_scan_workflow, "blackoutsecure/bos-code-scanning-kit"
@@ -1038,7 +1038,7 @@ def main() -> None:
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "config_path: .github/bos-universal-config.json" not in sync_backend
     assert "dry_run: ${{ (inputs.mode || 'commit') == 'check' }}" in sync_backend
-    assert "use_global_config: 'auto'" in sync_backend
+    assert re.search(r'use_global_config:\s+["\']auto["\']', sync_backend)
     assert_first_party_pin(
         sync_backend, "blackoutsecure/bos-managed-file-sync-action"
     )
@@ -1046,7 +1046,7 @@ def main() -> None:
     assert "permission-workflows: write" in sync_backend
     assert "workflow_sync_pat:" in sync_backend
     assert "steps.workflow-app.outputs.token || secrets.WORKFLOW_SYNC_PAT" in sync_backend
-    assert "vars.WORKFLOW_SYNC_APP_ID" in sync_backend
+    assert "vars.GATEWALL_APP_ID" in sync_backend
     assert "secrets.WORKFLOW_SYNC_PAT != '' && 'true' || 'false'" in sync_backend
     assert "disabled_services" in sync_backend
 
@@ -1060,8 +1060,7 @@ def main() -> None:
         in gatekeeper_workflow
     )
     assert "RELEASE_PAT:\n        description:" in gatekeeper_workflow
-    assert "SECURITY_AUDIT_APP_PRIVATE_KEY:" in gatekeeper_workflow
-    assert "REPO_ADMIN_APP_PRIVATE_KEY:" in gatekeeper_workflow
+    assert "GATEWALL_APP_PRIVATE_KEY:" in gatekeeper_workflow
 
     assert_markdown_links_exist(ROOT / "README.md")
     assert_markdown_links_exist(ROOT / "sync-files/README.md")

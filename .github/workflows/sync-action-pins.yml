@@ -21,11 +21,11 @@ name: Sync first-party action pins
 "on":
   schedule:
     # Daily, offset off the hour to avoid the top-of-hour scheduling surge.
-    - cron: '17 6 * * *'
+    - cron: "17 6 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Resolve and report drift without opening a PR.'
+        description: "Resolve and report drift without opening a PR."
         required: false
         type: boolean
         default: false
@@ -49,11 +49,11 @@ jobs:
     steps:
       - name: Mint workflow synchronization token
         id: workflow-app
-        if: vars.WORKFLOW_SYNC_APP_ID != ''
+        if: vars.GATEWALL_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.WORKFLOW_SYNC_APP_ID }}
-          private-key: ${{ secrets.WORKFLOW_SYNC_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: write

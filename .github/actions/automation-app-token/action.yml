@@ -7,7 +7,7 @@ description: >-
 inputs:
   app_id:
     description: >-
-      Variable holding the GitHub App ID (e.g. `vars.RELEASE_APP_ID`). Empty
+      Variable holding the GitHub App ID (e.g. `vars.GATEWALL_APP_ID`). Empty
       skips minting and the action reports `has_token: false` so the caller
       can fall back to a PAT or `github.token`.
     required: false

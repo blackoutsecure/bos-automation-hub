@@ -63,17 +63,17 @@ name: Security Scan
         type: boolean
         default: true
       enable_posture:
-        description: 'Forwarded to the kit. Run the posture audit step. Default `true`.'
+        description: "Forwarded to the kit. Run the posture audit step. Default `true`."
         required: false
         type: boolean
         default: true
       enable_scanners:
-        description: 'Forwarded to the kit. Run the bundled scanners (actionlint / gitleaks / shellcheck). Default `true`.'
+        description: "Forwarded to the kit. Run the bundled scanners (actionlint / gitleaks / shellcheck). Default `true`."
         required: false
         type: boolean
         default: true
       enable_upload:
-        description: 'Forwarded to the kit. Upload merged SARIF to GitHub Advanced Security. Default `true`.'
+        description: "Forwarded to the kit. Upload merged SARIF to GitHub Advanced Security. Default `true`."
         required: false
         type: boolean
         default: true
@@ -109,7 +109,7 @@ name: Security Scan
              regardless of how the repo's linguist stats drift over time.
         required: false
         type: string
-        default: ''
+        default: ""
       codeql_queries:
         description: >-
           CodeQL query suite. `security-and-quality` (default) covers both
@@ -120,7 +120,7 @@ name: Security Scan
         type: string
         default: security-and-quality
       codeql_timeout_minutes:
-        description: 'Per-language CodeQL job timeout in minutes.'
+        description: "Per-language CodeQL job timeout in minutes."
         required: false
         type: number
         default: 30
@@ -145,7 +145,7 @@ name: Security Scan
           full rationale.
         required: false
         type: string
-        default: ''
+        default: ""
       codeql_runs_on:
         description: >-
           Optional runner override for the CodeQL matrix job.
@@ -162,7 +162,7 @@ name: Security Scan
           parsed via `fromJSON` at runtime like `runs_on`.
         required: false
         type: string
-        default: ''
+        default: ""
       use_advanced_pat:
         description: >-
           When `true` AND the caller forwards a non-empty `SCANNING_PAT`
@@ -182,7 +182,7 @@ name: Security Scan
           input. Default `20` matches the kit's own default.
         required: false
         type: string
-        default: '20'
+        default: "20"
     secrets:
       SCANNING_PAT:
         description: >-
@@ -190,8 +190,8 @@ name: Security Scan
           advanced posture probes (PS002/PS003). Optional. Ignored
           unless `inputs.use_advanced_pat` is `true`.
         required: false
-      SECURITY_AUDIT_APP_PRIVATE_KEY:
-        description: Private key for the purpose-scoped security audit GitHub App.
+      GATEWALL_APP_PRIVATE_KEY:
+        description: Private key for the reusable Gatewall automation GitHub App.
         required: false
     outputs:
       scan_outcome:
@@ -231,11 +231,11 @@ jobs:
     steps:
       - name: Mint security audit token
         id: security-app
-        if: inputs.use_advanced_pat && vars.SECURITY_AUDIT_APP_ID != ''
+        if: inputs.use_advanced_pat && vars.GATEWALL_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.SECURITY_AUDIT_APP_ID }}
-          private-key: ${{ secrets.SECURITY_AUDIT_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
@@ -350,11 +350,11 @@ jobs:
     steps:
       - name: Mint security audit token
         id: security-app
-        if: inputs.use_advanced_pat && vars.SECURITY_AUDIT_APP_ID != ''
+        if: inputs.use_advanced_pat && vars.GATEWALL_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.SECURITY_AUDIT_APP_ID }}
-          private-key: ${{ secrets.SECURITY_AUDIT_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
@@ -391,7 +391,7 @@ jobs:
           # Distinct from `bos-universal-security.yml`'s own kit call (category
           # `bos-code-scanning-kit-gate`) — see that workflow for why.
           category: bos-code-scanning-kit-launchpad
-          use_global_config: 'true'
+          use_global_config: "true"
           global_config_path: hub-config/sync-files/config/code-scanning-kit-global-config.json
           config: .github/bos-universal-config.json
 

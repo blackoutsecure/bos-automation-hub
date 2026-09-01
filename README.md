@@ -984,14 +984,12 @@ Common secrets are stage-dependent:
 
 - Docker: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`;
 - Balena: `BALENA_API_TOKEN`;
-- private same-organization upstreams: `UPSTREAM_READ_APP_ID` + `UPSTREAM_READ_APP_PRIVATE_KEY`;
+- private same-organization upstreams: `GATEWALL_APP_ID` + `GATEWALL_APP_PRIVATE_KEY`;
 - Cloudflare: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, optionally
   `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_PAGES_ADMIN_TOKEN`;
-- repository administration: `REPO_ADMIN_APP_ID` + `REPO_ADMIN_APP_PRIVATE_KEY`;
-- security audit: `SECURITY_AUDIT_APP_ID` + `SECURITY_AUDIT_APP_PRIVATE_KEY`;
-- workflow-file propagation: `WORKFLOW_SYNC_APP_ID` + `WORKFLOW_SYNC_APP_PRIVATE_KEY`;
-- org-wide kicker fan-out: `DISPATCH_APP_ID` + `DISPATCH_APP_PRIVATE_KEY`;
-- hub promotion: `RELEASE_APP_ID` + `RELEASE_APP_PRIVATE_KEY`.
+- repository administration, security audit, workflow propagation, dispatch,
+  release, and same-organization upstream reads: `GATEWALL_APP_ID` +
+  `GATEWALL_APP_PRIVATE_KEY`.
 
 The corresponding `*_PAT` secrets remain temporary compatibility fallbacks
 for migration. Do not create new PATs for these capabilities. After each App
@@ -1039,9 +1037,12 @@ perform (most notably enterprise-owner reads). GitHub Apps cannot
 authenticate to external providers (Docker Hub, Cloudflare, Balena), so those
 still need the provider's own scoped token.
 
-Prefer several narrowly-scoped Apps over one broad App — a compromised or
-buggy installation token from a "release" App should never be able to read
-org membership, and vice versa.
+Keep authorization separate from automation. The read-only Gatekeeper App
+resolves organization membership before privileged manual jobs run. One
+Gatewall automation App holds the repository capabilities, while every job
+mints an attenuated token containing only the permissions needed for that
+operation. This is the minimum two-App architecture without turning the
+authorization credential itself into an organization-wide writer.
 
 To set one up: create the App with only the permission the capability needs,
 disable its webhook (it only mints tokens), generate a private key, store the
@@ -1058,18 +1059,13 @@ The loopback-only
 automates manifest creation, organization variable/secret configuration, and
 installation verification. Available profiles and minimum permissions are:
 
-| Profile | Credentials | GitHub App permissions |
-| --- | --- | --- |
-| `gatekeeper` | `GATEKEEPER_APP_ID`, `GATEKEEPER_APP_PRIVATE_KEY` | Organization Members: read |
-| `repository-admin` | `REPO_ADMIN_APP_ID`, `REPO_ADMIN_APP_PRIVATE_KEY` | Administration: write |
-| `workflow-sync` | `WORKFLOW_SYNC_APP_ID`, `WORKFLOW_SYNC_APP_PRIVATE_KEY` | Contents, Pull requests, Workflows: write |
-| `release` | `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY` | Contents: write |
-| `security-audit` | `SECURITY_AUDIT_APP_ID`, `SECURITY_AUDIT_APP_PRIVATE_KEY` | Actions, Administration, Contents, secret scanning alerts, Dependabot alerts: read; Security events: write |
-| `dispatch` | `DISPATCH_APP_ID`, `DISPATCH_APP_PRIVATE_KEY` | Actions: write; Contents: read |
-| `upstream-read` | `UPSTREAM_READ_APP_ID`, `UPSTREAM_READ_APP_PRIVATE_KEY` | Contents: read |
+| Profile      | Credentials                                       | GitHub App permissions                                                                                                                         |
+| ------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gatekeeper` | `GATEKEEPER_APP_ID`, `GATEKEEPER_APP_PRIVATE_KEY` | Organization Members: read                                                                                                                     |
+| `gatewall`   | `GATEWALL_APP_ID`, `GATEWALL_APP_PRIVATE_KEY`     | Actions, Administration, Contents, Pull requests, Workflows: write; secret scanning alerts and Dependabot alerts: read; Security events: write |
 
-Keep these Apps separate. In particular, never add repository write permissions
-to the dispatcher-authorization Gatekeeper App.
+Keep Gatewall separate from Gatekeeper. Never add repository write permissions
+to the dispatcher-authorization App.
 
 #### Provider setup walkthroughs
 
@@ -1098,7 +1094,7 @@ a fleet-scoped key over an account-wide one. Store as `BALENA_API_TOKEN`
 | Fine-grained PATs                       | Manual; replace with a purpose-scoped GitHub App wherever the credential only talks to the GitHub API. |
 | Docker Hub / Balena / Cloudflare tokens | Manual, provider-side; set the shortest TTL the provider allows and calendar-reminder before expiry.   |
 
-### Elevated posture scanning (`SECURITY_AUDIT_APP`)
+### Elevated posture scanning (`GATEWALL_APP`)
 
 The code-scanning kit's posture probes (secret-scanning enablement, Dependabot
 alerts enablement, push-protection visibility, branch-protection drift) need
@@ -1106,9 +1102,9 @@ Administration/security read access that the default `GITHUB_TOKEN` does not
 have; without it those probes report indeterminate rather than `pass`/`warn`/
 `fail`.
 
-1. Run the setup helper with `-Profile security-audit`.
+1. Run the setup helper with `-Profile gatewall`.
 2. Review the generated minimum permissions and install it for all managed
-  repositories.
+   repositories.
 3. Re-run the workflow and confirm the previously indeterminate rows now show
    `pass`, `warn`, or `fail`.
 4. Delete the legacy `SCANNING_PAT` after successful verification.
@@ -1130,7 +1126,7 @@ No consumer wiring is required beyond creating the secret:
   is absent (the kit transparently falls back to `GITHUB_TOKEN`), so enabling
   it ahead of provisioning the secret is safe.
 
-### Workflow-file propagation (`WORKFLOW_SYNC_APP`)
+### Workflow-file propagation (`GATEWALL_APP`)
 
 `GITHUB_TOKEN` can never push changes to `.github/workflows/**` — this is a
 hard GitHub platform restriction, not something a workflow's `permissions:`
@@ -1140,12 +1136,12 @@ managed kicker workflow files
 `bos-universal-marketplace-kicker.yml`, `bos-universal-security-kicker.yml`,
 `bos-universal-sync-kicker.yml`) and syncs every other managed file normally.
 
-1. Run the setup helper with `-Profile workflow-sync`.
+1. Run the setup helper with `-Profile gatewall` if Gatewall is not already installed.
 2. Install it for all repositories receiving managed workflow files.
 3. Re-run managed sync and confirm workflow-file propagation succeeds.
 4. Delete the legacy `WORKFLOW_SYNC_PAT`.
 
-### Org-wide kicker fan-out (`DISPATCH_APP`)
+### Org-wide kicker fan-out (`GATEWALL_APP`)
 
 [`bos-org-kicker-fanout.yml`](.github/workflows/bos-org-kicker-fanout.yml) runs a
 universal kicker across every repository in the organization, and
@@ -1154,7 +1150,7 @@ dispatches it automatically whenever `sync-files/**` changes. The job-scoped
 `GITHUB_TOKEN` cannot dispatch workflows in other repositories, so the fan-out
 fails closed with an explicit error until a credential exists.
 
-Run the setup helper with `-Profile dispatch`, install it for all participating
+Run the setup helper with `-Profile gatewall`, install it for all participating
 repositories, and verify a dry-run fan-out. `ORG_KICK_PAT` and `DISPATCH_TOKEN`
 remain temporary compatibility fallbacks only.
 

@@ -13,19 +13,17 @@ From the repository root on Windows:
 .\scripts\start-gatekeeper-app-setup.ps1
 ```
 
-Select the least-privilege profile for the capability being migrated:
+The minimum architecture has two profiles:
 
 ```powershell
-.\scripts\start-gatekeeper-app-setup.ps1 -Profile repository-admin
-.\scripts\start-gatekeeper-app-setup.ps1 -Profile workflow-sync
-.\scripts\start-gatekeeper-app-setup.ps1 -Profile release
-.\scripts\start-gatekeeper-app-setup.ps1 -Profile security-audit
-.\scripts\start-gatekeeper-app-setup.ps1 -Profile dispatch
-.\scripts\start-gatekeeper-app-setup.ps1 -Profile upstream-read
+.\scripts\start-gatekeeper-app-setup.ps1 -Profile gatekeeper
+.\scripts\start-gatekeeper-app-setup.ps1 -Profile gatewall
 ```
 
-The default `gatekeeper` profile maintains the existing read-only dispatcher
-authorization App. Do not add repository write permissions to that App.
+The default `gatekeeper` profile maintains the read-only dispatcher authorization
+App. The `gatewall` profile covers repository automation; each workflow mints a
+short-lived token attenuated to its operation's permission subset. Do not add
+repository write permissions to the Gatekeeper App.
 
 To offer a button that re-runs the failed authorization job after setup is
 verified:
@@ -63,8 +61,8 @@ login`, the commonly required OAuth scopes are `admin:org`, `repo`, and
 9. Pipes the key through standard input to `gh secret set` as the profile's
    organization private-key secret, also with all-repository visibility.
 10. Opens the GitHub App installation page and verifies the installation,
-   permissions, and repository coverage. Repository-capable profiles require
-   all-repository coverage when replacing organization-wide PATs.
+    permissions, and repository coverage. Repository-capable profiles require
+    all-repository coverage when replacing organization-wide PATs.
 11. Optionally queues the failed jobs from a supplied workflow run.
 
 GitHub App installation tokens are minted afresh by each workflow job and
@@ -86,6 +84,6 @@ installation. Those two confirmations cannot and should not be bypassed.
   written to disk. It exists briefly in browser memory and is piped to `gh`
   over standard input.
 - Organization-wide Actions variable and secret visibility is intentional
-   because the managed workflows are shared across repositories. Install each App
-   only as broadly as its profile requires.
+  because the managed workflows are shared across repositories. Install each App
+  only as broadly as its profile requires.
 - Stop the process with Ctrl+C after verification.

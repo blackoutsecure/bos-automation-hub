@@ -59,7 +59,7 @@ name: Hub runtime release · promote default branch → main
           Leave empty to auto-compute via `bump`.
         required: false
         type: string
-        default: ''
+        default: ""
       bump:
         description: >-
           Auto-compute the next tag from the latest `vX.Y.Z`. Ignored
@@ -67,7 +67,7 @@ name: Hub runtime release · promote default branch → main
           with no inputs ships the next patch release.
         required: false
         type: choice
-        default: 'patch'
+        default: "patch"
         options:
           - patch
           - minor
@@ -88,7 +88,7 @@ name: Hub runtime release · promote default branch → main
         type: boolean
         default: false
       release_draft:
-        description: 'Create the GitHub Release as draft.'
+        description: "Create the GitHub Release as draft."
         required: false
         type: boolean
         default: false
@@ -98,14 +98,14 @@ name: Hub runtime release · promote default branch → main
           Forwarded to `github-release.yml`. Empty disables changelog.
         required: false
         type: string
-        default: ''
+        default: ""
       ai_changelog:
         description: >-
           `'true'` to summarize the commit log via GitHub Models.
           Falls back to deterministic grouping on any AI failure.
         required: false
         type: string
-        default: 'false'
+        default: "false"
 
 permissions:
   contents: read
@@ -195,11 +195,11 @@ jobs:
           subject: ${{ github.repository }} @ ${{ github.event.repository.default_branch }}
           findings: ${{ steps.validate.outputs.findings || '[]' }}
           fail_on: ${{ fromJSON(steps.config.outputs.release_validation || '{}').enforce || 'fail' }}
-          enable_json: 'true'
+          enable_json: "true"
           json_path: release-validation-report.json
-          enable_artifact_upload: 'true'
+          enable_artifact_upload: "true"
           artifact_name: hub-release-validation-${{ github.run_id }}
-          enable_automation_policy: 'false'
+          enable_automation_policy: "false"
 
   promote:
     name: Promote default branch → main (runtime allowlist)
@@ -213,15 +213,15 @@ jobs:
     outputs:
       source_sha: ${{ steps.promote.outputs.source_sha }}
       target_sha: ${{ steps.promote.outputs.target_sha }}
-      promoted:   ${{ steps.promote.outputs.promoted }}
+      promoted: ${{ steps.promote.outputs.promoted }}
     steps:
       - name: Mint release token
         id: release-app
-        if: vars.RELEASE_APP_ID != ''
+        if: vars.GATEWALL_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
@@ -233,7 +233,7 @@ jobs:
         run: |
           if [ "${HAS_RELEASE_APP}" = "true" ]; then
             echo "kind=app" >> "${GITHUB_OUTPUT}"
-            echo "Using a short-lived RELEASE_APP token for push + tag."
+            echo "Using a short-lived Gatewall token for push + tag."
           elif [ "${HAS_RELEASE_PAT}" = "true" ]; then
             echo "kind=pat" >> "${GITHUB_OUTPUT}"
             echo "Using secrets.RELEASE_PAT for push + tag."
@@ -251,11 +251,11 @@ jobs:
           persist-credentials: true
       - id: promote
         env:
-          TAG_NAME:         ${{ needs.compute-tag.outputs.tag_name }}
+          TAG_NAME: ${{ needs.compute-tag.outputs.tag_name }}
           UPDATE_MAJOR_TAG: ${{ inputs.update_major_tag }}
-          DRY_RUN:          ${{ inputs.dry_run }}
-          SOURCE_BRANCH:    ${{ github.event.repository.default_branch }}
-          TARGET_BRANCH:    main
+          DRY_RUN: ${{ inputs.dry_run }}
+          SOURCE_BRANCH: ${{ github.event.repository.default_branch }}
+          TARGET_BRANCH: main
         run: |
           set -euo pipefail
 
@@ -461,11 +461,11 @@ jobs:
       contents: write
       models: read
     with:
-      tag_name:       ${{ needs.compute-tag.outputs.tag_name }}
-      draft:          ${{ inputs.release_draft }}
-      previous_tag:   ${{ inputs.previous_tag }}
-      source_branch:  ${{ github.event.repository.default_branch }}
-      ai_changelog:   ${{ inputs.ai_changelog }}
+      tag_name: ${{ needs.compute-tag.outputs.tag_name }}
+      draft: ${{ inputs.release_draft }}
+      previous_tag: ${{ inputs.previous_tag }}
+      source_branch: ${{ github.event.repository.default_branch }}
+      ai_changelog: ${{ inputs.ai_changelog }}
       target_commitish: main
 
   metadata:
@@ -498,6 +498,6 @@ jobs:
       show_packages: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.show_packages == true }}
       dry_run: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.dry_run == true }}
     secrets:
-      REPO_ADMIN_APP_PRIVATE_KEY: ${{ secrets.REPO_ADMIN_APP_PRIVATE_KEY }}
+      GATEWALL_APP_PRIVATE_KEY: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
       REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}
       RELEASE_PAT: ${{ secrets.RELEASE_PAT }}

@@ -546,11 +546,7 @@
                 ".",
               result.healthy,
             );
-            if (
-              result.healthy &&
-              repository &&
-              runId
-            ) {
+            if (result.healthy && repository && runId) {
               $("repository").textContent = repository;
               $("run-id").textContent = runId;
               $("rerun-card").classList.remove("hidden");

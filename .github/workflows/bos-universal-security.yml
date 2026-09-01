@@ -102,7 +102,7 @@
 # block in the caller's own `.github/bos-universal-config.json`, which the
 # kit discovers automatically as its repository-tier config.
 
-name: '[RUNTIME] Blackout Secure Universal Security'
+name: "[RUNTIME] Blackout Secure Universal Security"
 
 on:
   workflow_call:
@@ -118,7 +118,7 @@ on:
       node_version:
         type: string
         required: false
-        default: '20'
+        default: "20"
       enable_python_lint:
         type: boolean
         required: false
@@ -126,7 +126,7 @@ on:
       python_version:
         type: string
         required: false
-        default: '3.11'
+        default: "3.11"
       enable_shell_lint:
         type: boolean
         required: false
@@ -187,7 +187,7 @@ on:
           egress. Bare integer string; no unit.
         type: string
         required: false
-        default: '20'
+        default: "20"
       config_authoritative:
         description: Use .github/bos-universal-config.json instead of direct gate inputs.
         type: boolean
@@ -206,8 +206,8 @@ on:
           PS020-PS025 branch protection). Falls back to GITHUB_TOKEN when
           absent — sufficient for PS001 only.
         required: false
-      SECURITY_AUDIT_APP_PRIVATE_KEY:
-        description: Private key for the purpose-scoped security audit GitHub App.
+      GATEWALL_APP_PRIVATE_KEY:
+        description: Private key for the reusable Gatewall automation GitHub App.
         required: false
 
 permissions: {}
@@ -230,11 +230,11 @@ jobs:
     steps:
       - name: Mint security audit token
         id: security-app
-        if: vars.SECURITY_AUDIT_APP_ID != ''
+        if: vars.GATEWALL_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.SECURITY_AUDIT_APP_ID }}
-          private-key: ${{ secrets.SECURITY_AUDIT_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-actions: read
@@ -259,7 +259,7 @@ jobs:
         id: config
         uses: ./hub-runtime/.github/actions/universal-config
         with:
-          allow_missing: 'false'
+          allow_missing: "false"
       - name: Resolve security settings
         id: resolve
         env:
@@ -601,15 +601,15 @@ jobs:
           github_token: ${{ steps.security-app.outputs.token || secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}
           fail_on: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_fail_on }}
           http_timeout: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_http_timeout }}
-          enable_posture: 'true'
-          enable_scanners: 'true'
-          enable_upload: 'true'
+          enable_posture: "true"
+          enable_scanners: "true"
+          enable_upload: "true"
           # Distinct from `security-scan.yml`'s own kit call (category
           # `bos-code-scanning-kit-launchpad`) so a push that fires both this
           # PR/push gate AND Launchpad's release-time scan for the same commit
           # doesn't race two uploads onto the same Code Scanning category.
           category: bos-code-scanning-kit-gate
-          use_global_config: 'true'
+          use_global_config: "true"
           global_config_path: hub-config/sync-files/config/code-scanning-kit-global-config.json
           config: .github/bos-universal-config.json
       - name: Reconcile code-scanning recommendations

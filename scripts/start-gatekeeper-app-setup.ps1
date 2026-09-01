@@ -12,7 +12,7 @@ param(
     [ValidateRange(1, 65535)]
     [int]$Port = 8765,
 
-    [ValidateSet('gatekeeper', 'repository-admin', 'workflow-sync', 'release', 'security-audit', 'dispatch', 'upstream-read')]
+    [ValidateSet('gatekeeper', 'gatewall')]
     [string]$Profile = 'gatekeeper',
 
     [switch]$NoBrowser

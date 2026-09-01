@@ -2,7 +2,7 @@
 # The sync engine and service catalog live in bos-managed-file-sync-action.
 # Named "managed file sync", not "universal", since it only ever does one
 # thing; filename stays bos-universal-sync.yml to keep uses: refs stable.
-name: '[RUNTIME] Blackout Secure Managed File Sync'
+name: "[RUNTIME] Blackout Secure Managed File Sync"
 
 "on":
   workflow_call:
@@ -11,24 +11,24 @@ name: '[RUNTIME] Blackout Secure Managed File Sync'
         description: Optional service override passed to the published sync action.
         required: false
         type: string
-        default: ''
+        default: ""
       mode:
         description: Optional `commit` or `check` override.
         required: false
         type: string
-        default: ''
+        default: ""
       commit_message:
         description: Optional explicit commit message override.
         required: false
         type: string
-        default: 'chore: sync managed files'
+        default: "chore: sync managed files"
       runs_on:
         description: >-
           Optional runner override. Defaults to
           `organization.workflows.sync.runs_on` from the universal config.
         required: false
         type: string
-        default: ''
+        default: ""
       timeout_minutes:
         description: >-
           Optional per-job timeout override. `0` (default) defers to
@@ -51,12 +51,12 @@ name: '[RUNTIME] Blackout Secure Managed File Sync'
           workflow files are skipped; every other managed file still
           syncs normally with GITHUB_TOKEN.
         required: false
-      WORKFLOW_SYNC_APP_PRIVATE_KEY:
-        description: Private key for the purpose-scoped workflow synchronization GitHub App.
+      GATEWALL_APP_PRIVATE_KEY:
+        description: Private key for the reusable Gatewall automation GitHub App.
         required: false
     outputs:
       changed:
-        description: '`true` when files changed or would change.'
+        description: "`true` when files changed or would change."
         value: ${{ jobs.sync.outputs.changed }}
       changed_files:
         description: Newline-separated changed file list.
@@ -98,7 +98,7 @@ jobs:
         id: config
         uses: ./hub-runtime/.github/actions/universal-config
         with:
-          allow_missing: 'true'
+          allow_missing: "true"
 
   sync:
     needs: resolve-config
@@ -117,11 +117,11 @@ jobs:
     steps:
       - name: Mint workflow synchronization token
         id: workflow-app
-        if: vars.WORKFLOW_SYNC_APP_ID != ''
+        if: vars.GATEWALL_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.WORKFLOW_SYNC_APP_ID }}
-          private-key: ${{ secrets.WORKFLOW_SYNC_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-contents: write
@@ -168,7 +168,7 @@ jobs:
         uses: blackoutsecure/bos-managed-file-sync-action@c176d7c1def5f5b72cd3d45b8c5bd73c157187ef # v1.0.24
         with:
           # The action auto-discovers .github/bos-universal-config.json.
-          use_global_config: 'auto'
+          use_global_config: "auto"
           global_config_path: hub-source/sync-files/config/managed-file-sync-global-config.json
           managed_files_path: hub-source/sync-files
           config_json: >-
@@ -180,7 +180,7 @@ jobs:
           services: ${{ inputs.services }}
           dry_run: ${{ (inputs.mode || 'commit') == 'check' }}
           fail_on_drift: ${{ (inputs.mode || 'commit') == 'check' }}
-          show_diff: 'true'
+          show_diff: "true"
 
       - name: Note workflow sync skip
         if: steps.workflow-pat.outputs.has_token != 'true'
@@ -303,7 +303,7 @@ jobs:
                 "—" if has_sync_token and sync_result == "success" else
                 "Review and fix the sync-engine failure, then rerun in `commit` mode to verify managed workflow files."
                 if has_sync_token else
-                  "Configure the workflow-sync GitHub App profile with `Workflows: write`. "
+                  "Configure the Gatewall GitHub App profile with `Workflows: write`. "
                   "GITHUB_TOKEN can never write to `.github/workflows/**`."
               ),
           })

@@ -15,104 +15,104 @@ name: Repository Metadata Sync
           the triggering workflow's commit.
         required: false
         type: string
-        default: ''
+        default: ""
       readme_path:
-        description: 'README path at `checkout_ref`. Default `README.md`.'
+        description: "README path at `checkout_ref`. Default `README.md`."
         required: false
         type: string
-        default: 'README.md'
+        default: "README.md"
       description:
-        description: 'Explicit repository description. Empty derives it from the README.'
+        description: "Explicit repository description. Empty derives it from the README."
         required: false
         type: string
-        default: ''
+        default: ""
       description_max_length:
-        description: 'Maximum repository-description length (1-350).'
+        description: "Maximum repository-description length (1-350)."
         required: false
         type: number
         default: 350
       description_mode:
-        description: '`auto` uses AI then README; `fallback` skips AI; `existing` leaves the description unchanged.'
+        description: "`auto` uses AI then README; `fallback` skips AI; `existing` leaves the description unchanged."
         required: false
         type: string
         default: auto
       description_fallback:
-        description: 'Deterministic description used by fallback mode.'
+        description: "Deterministic description used by fallback mode."
         required: false
         type: string
-        default: ''
+        default: ""
       homepage:
-        description: 'Explicit homepage URL. Empty preserves it; `__unset__` clears it.'
+        description: "Explicit homepage URL. Empty preserves it; `__unset__` clears it."
         required: false
         type: string
-        default: ''
+        default: ""
       topics:
-        description: 'Explicit space- or comma-separated topics.'
+        description: "Explicit space- or comma-separated topics."
         required: false
         type: string
-        default: ''
+        default: ""
       generate_topics:
-        description: 'Derive topics from the README when explicit topics are empty.'
+        description: "Derive topics from the README when explicit topics are empty."
         required: false
         type: boolean
         default: false
       topics_fallback:
-        description: 'Topics used when generated topics are unavailable.'
+        description: "Topics used when generated topics are unavailable."
         required: false
         type: string
-        default: ''
+        default: ""
       max_topics:
-        description: 'Maximum number of topics; values above 20 are clamped.'
+        description: "Maximum number of topics; values above 20 are clamped."
         required: false
         type: number
         default: 20
       primary_category:
-        description: 'Marketplace primary category slug, auto, or empty to skip.'
+        description: "Marketplace primary category slug, auto, or empty to skip."
         required: false
         type: string
         default: auto
       secondary_category:
-        description: 'Marketplace secondary category slug, auto, or empty to skip.'
+        description: "Marketplace secondary category slug, auto, or empty to skip."
         required: false
         type: string
         default: auto
       marketplace_slug:
-        description: 'Marketplace listing slug used for category comparison.'
+        description: "Marketplace listing slug used for category comparison."
         required: false
         type: string
-        default: ''
+        default: ""
       ai_enabled:
-        description: 'Use GitHub Models for README-derived description and topics.'
+        description: "Use GitHub Models for README-derived description and topics."
         required: false
         type: boolean
         default: true
       ai_model:
-        description: 'GitHub Models model identifier.'
+        description: "GitHub Models model identifier."
         required: false
         type: string
         default: auto
       show_releases:
-        description: 'Request the Releases repository-home widget.'
+        description: "Request the Releases repository-home widget."
         required: false
         type: boolean
         default: true
       show_deployments:
-        description: 'Request the Deployments repository-home widget.'
+        description: "Request the Deployments repository-home widget."
         required: false
         type: boolean
         default: false
       show_packages:
-        description: 'Request the Packages repository-home widget.'
+        description: "Request the Packages repository-home widget."
         required: false
         type: boolean
         default: false
       dry_run:
-        description: 'Resolve and summarize metadata without API writes.'
+        description: "Resolve and summarize metadata without API writes."
         required: false
         type: boolean
         default: false
       report_annotations:
-        description: 'Emit actionable GitHub annotations for report warnings and errors.'
+        description: "Emit actionable GitHub annotations for report warnings and errors."
         required: false
         type: boolean
         default: true
@@ -122,8 +122,8 @@ name: Repository Metadata Sync
           Preferred fine-grained PAT with Administration: write and Metadata:
           read on the caller repository.
         required: false
-      REPO_ADMIN_APP_PRIVATE_KEY:
-        description: Private key for the purpose-scoped repository administration GitHub App.
+      GATEWALL_APP_PRIVATE_KEY:
+        description: Private key for the reusable Gatewall automation GitHub App.
         required: false
       RELEASE_PAT:
         description: >-
@@ -132,49 +132,49 @@ name: Repository Metadata Sync
         required: false
     outputs:
       description:
-        description: 'Resolved description.'
+        description: "Resolved description."
         value: ${{ jobs.sync.outputs.description }}
       description_source:
-        description: 'Description source: explicit, ai, readme, or existing.'
+        description: "Description source: explicit, ai, readme, or existing."
         value: ${{ jobs.sync.outputs.description_source }}
       homepage:
-        description: 'Resolved homepage, or empty when unchanged.'
+        description: "Resolved homepage, or empty when unchanged."
         value: ${{ jobs.sync.outputs.homepage }}
       topics:
-        description: 'Resolved topics, space-separated.'
+        description: "Resolved topics, space-separated."
         value: ${{ jobs.sync.outputs.topics }}
       topics_source:
-        description: 'Topics source: explicit, ai, fallback, or skipped.'
+        description: "Topics source: explicit, ai, fallback, or skipped."
         value: ${{ jobs.sync.outputs.topics_source }}
       ai_used:
-        description: '`true` when GitHub Models supplied metadata.'
+        description: "`true` when GitHub Models supplied metadata."
         value: ${{ jobs.sync.outputs.ai_used }}
       applied:
-        description: '`true` when the composite completed at least one API write.'
+        description: "`true` when the composite completed at least one API write."
         value: ${{ jobs.sync.outputs.applied }}
       primary_category:
-        description: 'Resolved primary Marketplace category slug.'
+        description: "Resolved primary Marketplace category slug."
         value: ${{ jobs.sync.outputs.primary_category }}
       secondary_category:
-        description: 'Resolved secondary Marketplace category slug.'
+        description: "Resolved secondary Marketplace category slug."
         value: ${{ jobs.sync.outputs.secondary_category }}
       primary_category_confidence:
-        description: 'AI confidence for the primary category.'
+        description: "AI confidence for the primary category."
         value: ${{ jobs.sync.outputs.primary_category_confidence }}
       secondary_category_confidence:
-        description: 'AI confidence for the secondary category.'
+        description: "AI confidence for the secondary category."
         value: ${{ jobs.sync.outputs.secondary_category_confidence }}
       skipped:
-        description: '`true` when no write-capable token was available.'
+        description: "`true` when no write-capable token was available."
         value: ${{ jobs.sync.outputs.skipped }}
       changed:
-        description: '`true` when desired metadata differed from the current snapshot.'
+        description: "`true` when desired metadata differed from the current snapshot."
         value: ${{ jobs.sync.outputs.changed }}
       report:
-        description: 'Detailed Markdown field report.'
+        description: "Detailed Markdown field report."
         value: ${{ jobs.sync.outputs.report }}
       report_json:
-        description: 'Structured JSON field report.'
+        description: "Structured JSON field report."
         value: ${{ jobs.sync.outputs.report_json }}
 
 permissions:
@@ -211,11 +211,11 @@ jobs:
     steps:
       - name: Mint repository administration token
         id: repo-admin-app
-        if: vars.REPO_ADMIN_APP_ID != ''
+        if: vars.GATEWALL_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          app-id: ${{ vars.REPO_ADMIN_APP_ID }}
-          private-key: ${{ secrets.REPO_ADMIN_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
           permission-administration: write
@@ -234,7 +234,7 @@ jobs:
           token_source='none'
           if [ "${HAS_APP_TOKEN}" = "true" ]; then
             available='true'
-            token_source='REPO_ADMIN_APP'
+            token_source='GATEWALL_APP'
           elif [ "${HAS_ADMIN_PAT}" = "true" ]; then
             available='true'
             token_source='REPO_ADMIN_PAT'

@@ -34,52 +34,20 @@ APP_PROFILES = {
         "name": "workflow-gatekeeper",
         "permissions": {"members": "read"},
     },
-    "repository-admin": {
-        "variable": "REPO_ADMIN_APP_ID",
-        "secret": "REPO_ADMIN_APP_PRIVATE_KEY",
-        "name": "repository-admin",
-        "permissions": {"administration": "write"},
-    },
-    "workflow-sync": {
-        "variable": "WORKFLOW_SYNC_APP_ID",
-        "secret": "WORKFLOW_SYNC_APP_PRIVATE_KEY",
-        "name": "workflow-sync",
+    "gatewall": {
+        "variable": "GATEWALL_APP_ID",
+        "secret": "GATEWALL_APP_PRIVATE_KEY",
+        "name": "gatewall-automation",
         "permissions": {
+            "actions": "write",
+            "administration": "write",
             "contents": "write",
             "pull_requests": "write",
-            "workflows": "write",
-        },
-    },
-    "release": {
-        "variable": "RELEASE_APP_ID",
-        "secret": "RELEASE_APP_PRIVATE_KEY",
-        "name": "release",
-        "permissions": {"contents": "write"},
-    },
-    "security-audit": {
-        "variable": "SECURITY_AUDIT_APP_ID",
-        "secret": "SECURITY_AUDIT_APP_PRIVATE_KEY",
-        "name": "security-audit",
-        "permissions": {
-            "actions": "read",
-            "administration": "read",
-            "contents": "read",
             "secret_scanning_alerts": "read",
             "security_events": "write",
             "vulnerability_alerts": "read",
+            "workflows": "write",
         },
-    },
-    "dispatch": {
-        "variable": "DISPATCH_APP_ID",
-        "secret": "DISPATCH_APP_PRIVATE_KEY",
-        "name": "workflow-dispatch",
-        "permissions": {"actions": "write", "contents": "read"},
-    },
-    "upstream-read": {
-        "variable": "UPSTREAM_READ_APP_ID",
-        "secret": "UPSTREAM_READ_APP_PRIVATE_KEY",
-        "name": "upstream-read",
-        "permissions": {"contents": "read"},
     },
 }
 
