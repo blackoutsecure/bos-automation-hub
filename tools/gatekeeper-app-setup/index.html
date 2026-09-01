@@ -219,7 +219,13 @@
         <div class="grid">
           <div>
             <label for="app-name">Globally unique App name</label>
-            <input id="app-name" value="" autocomplete="off" />
+            <input
+              id="app-name"
+              value="__DEFAULT_APP_NAME__"
+              maxlength="34"
+              autocomplete="off"
+            />
+            <p class="muted">Maximum 34 characters.</p>
           </div>
           <div>
             <label for="homepage">Homepage</label>
@@ -295,7 +301,6 @@
         const appProfile = "__APP_PROFILE__";
         const appVariable = "__APP_VARIABLE__";
         const appSecret = "__APP_SECRET__";
-        const appName = "__APP_NAME__";
         const appPermissions = __APP_PERMISSIONS__;
         let appSlug = "";
         let configuredAppId = "";
@@ -437,6 +442,14 @@
           const name = $("app-name").value.trim();
           const homepage = $("homepage").value.trim();
           if (!owner || !name || !homepage) return;
+          if (name.length > 34) {
+            status(
+              "configure-status",
+              "GitHub App names cannot exceed 34 characters.",
+              false,
+            );
+            return;
+          }
           const redirectUrl = window.location.origin + window.location.pathname;
           const manifest = {
             name: name,
@@ -579,11 +592,6 @@
             status("configure-status", error.message, false),
           );
         else {
-          const suffix = crypto
-            .getRandomValues(new Uint32Array(1))[0]
-            .toString(36)
-            .slice(0, 6);
-          $("app-name").value = organization() + "-" + appName + "-" + suffix;
           inspect();
         }
       })();

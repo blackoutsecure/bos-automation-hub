@@ -29,6 +29,12 @@ def main() -> None:
         setup.APP_PROFILES
     )
     assert all(profile["permissions"] for profile in setup.APP_PROFILES.values())
+    gatewall_name = setup.build_app_name(
+        "blackoutsecure", "gatewall-automation", "1tlp9n"
+    )
+    assert gatewall_name.endswith("-1tlp9n")
+    assert len(gatewall_name) == setup.APP_NAME_MAX_LENGTH
+    assert len(setup.build_app_name("a" * 39, "workflow-gatekeeper", "abcdef")) <= 34
     assert setup.validate_org("blackoutsecure") == "blackoutsecure"
     for invalid in ("", "-owner", "owner/other", "owner name", "a" * 40):
         try:

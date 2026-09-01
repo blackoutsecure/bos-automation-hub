@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 MAX_BODY_BYTES = 256 * 1024
+APP_NAME_MAX_LENGTH = 34
 ORG_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
 APP_ID_RE = re.compile(r"^[0-9]+$")
 REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -54,6 +55,14 @@ APP_PROFILES = {
 
 class SetupError(RuntimeError):
     """Safe, user-facing setup failure."""
+
+
+def build_app_name(owner: str, profile_name: str, suffix: str) -> str:
+    """Build a distinctive App name within GitHub's 34-character limit."""
+    suffix_part = f"-{suffix}"
+    base_limit = APP_NAME_MAX_LENGTH - len(suffix_part)
+    base = f"{owner}-{profile_name}"[:base_limit].rstrip("-")
+    return f"{base}{suffix_part}"
 
 
 class GhClient:
@@ -344,6 +353,14 @@ class SetupHandler(BaseHTTPRequestHandler):
             html = html.replace("__APP_VARIABLE__", str(self.server.profile["variable"]))
             html = html.replace("__APP_SECRET__", str(self.server.profile["secret"]))
             html = html.replace("__APP_NAME__", str(self.server.profile["name"]))
+            html = html.replace(
+                "__DEFAULT_APP_NAME__",
+                build_app_name(
+                    self.server.organization,
+                    str(self.server.profile["name"]),
+                    secrets.token_hex(3),
+                ),
+            )
             html = html.replace(
                 "__APP_PERMISSIONS__", json.dumps(self.server.profile["permissions"])
             )
