@@ -118,6 +118,32 @@ def main() -> None:
     cfg_output = normalized.stdout.split("cfg<<__BOS_EOF__\n", 1)[1].split(
         "\n__BOS_EOF__", 1
     )[0]
+    normalized_cfg = json.loads(cfg_output)
+    assert normalized_cfg["security_scan"] == {
+        "enable": True,
+        "fail_on": "fail",
+        "blocks_release": True,
+        "enable_kit_composite": True,
+        "enable_posture": True,
+        "enable_scanners": True,
+        "enable_upload": True,
+        "codeql_languages": "",
+        "codeql_queries": "security-and-quality",
+        "codeql_runs_on": "",
+        "use_advanced_pat": True,
+    }
+    security_disabled = run_universal_config(
+        {"security_scan": {"enable": False, "enable_upload": False, "use_advanced_pat": False}}
+    )
+    assert security_disabled.returncode == 0, security_disabled.stderr
+    disabled_cfg = json.loads(
+        security_disabled.stdout.split("cfg<<__BOS_EOF__\n", 1)[1].split(
+            "\n__BOS_EOF__", 1
+        )[0]
+    )
+    assert disabled_cfg["security_scan"]["enable"] is False
+    assert disabled_cfg["security_scan"]["enable_upload"] is False
+    assert disabled_cfg["security_scan"]["use_advanced_pat"] is False
     marketplace = json.loads(cfg_output)["marketplace"]
     assert marketplace["allowlist_paths"] == "action.yml\nREADME.md"
     assert marketplace["blocked_paths"] == ".github/workflows/\ntest/"
@@ -354,6 +380,8 @@ def main() -> None:
     assert kicker.count(
         "enable_security_scan: ${{ needs.parse-config.outputs.run_security == 'true'"
     ) == 2, "managed Universal callers must enable security for full and security-only routes"
+    assert kicker.count("security_scan_enable_kit_composite: ${{ toJSON(") == 2
+    assert kicker.count("security_scan_use_advanced_pat: ${{ toJSON(") == 2
 
     promote = (ROOT / ".github/workflows/release-promote.yml").read_text()
     dependabot_input = promote.split("      include_dependabot_config:\n", 1)[
@@ -988,7 +1016,12 @@ def main() -> None:
             "devops ci-cd workflow-automation"
         ),
     }
-    assert "security_scan" not in hub_config
+    assert hub_config["security_scan"]["enable"] is True
+    assert hub_config["security_scan"]["enable_kit_composite"] is True
+    assert hub_config["security_scan"]["enable_posture"] is True
+    assert hub_config["security_scan"]["enable_scanners"] is True
+    assert hub_config["security_scan"]["enable_upload"] is True
+    assert hub_config["security_scan"]["use_advanced_pat"] is True
     assert not (ROOT / ".github/workflows/sync-managed-config.yml").exists()
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" not in sync_backend

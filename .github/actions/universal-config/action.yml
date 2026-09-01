@@ -186,6 +186,7 @@ runs:
         stages = as_dict(cfg.get("stages"))
         upstream = as_dict(cfg.get("upstream"))
         release = as_dict(cfg.get("release"))
+        security_scan_raw = as_dict(cfg.get("security_scan"))
         cloudflare_raw = as_dict(cfg.get("cloudflare"))
         redirects = as_dict(cloudflare_raw.get("redirects"))
         headers = as_dict(cloudflare_raw.get("headers"))
@@ -230,6 +231,20 @@ runs:
             marketplace["source_branch"] = str(global_marketplace_raw["source_branch"])
 
         cfg["marketplace"] = marketplace
+
+        cfg["security_scan"] = {
+            "enable": security_scan_raw.get("enable") is not False,
+            "fail_on": str(security_scan_raw.get("fail_on") or "fail"),
+            "blocks_release": security_scan_raw.get("blocks_release") is not False,
+            "enable_kit_composite": security_scan_raw.get("enable_kit_composite") is not False,
+            "enable_posture": security_scan_raw.get("enable_posture") is not False,
+            "enable_scanners": security_scan_raw.get("enable_scanners") is not False,
+            "enable_upload": security_scan_raw.get("enable_upload") is not False,
+            "codeql_languages": str(security_scan_raw.get("codeql_languages") or ""),
+            "codeql_queries": str(security_scan_raw.get("codeql_queries") or "security-and-quality"),
+            "codeql_runs_on": str(security_scan_raw.get("codeql_runs_on") or ""),
+            "use_advanced_pat": security_scan_raw.get("use_advanced_pat") is not False,
+        }
 
         if require_marketplace_enabled and marketplace.get("enabled") is not True:
             error(f"::error file={config_path}::marketplace.enabled must be true")
