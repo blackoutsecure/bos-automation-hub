@@ -1379,7 +1379,6 @@ jobs:
       # can supply a PAT with `contents: read` on it. Unset = fall back to
       # `GITHUB_TOKEN` inside the monitor (works for public upstreams only).
       UPSTREAM_TOKEN: ${{ secrets.UPSTREAM_TOKEN }}
-      GATEWALL_APP_PRIVATE_KEY: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
 
   # ---------------------------------------------------------------------------
   # Stage 2 — run the full release pipeline against the new upstream version.

@@ -345,7 +345,7 @@ def main() -> None:
     assert_first_party_pin(monitor_workflow, "blackoutsecure/bos-upstream-watcher")
     assert "config_path: .github/bos-universal-config.json" in monitor_workflow
     assert "global_config_path: hub-config/sync-files/config/upstream-watcher-global-config.json" in monitor_workflow
-    assert "use_global_config: 'auto'" in monitor_workflow
+    assert re.search(r'use_global_config:\s+["\']auto["\']', monitor_workflow)
     assert "upstream_update_type:" in monitor_workflow
     assert "upstream_ai_status:" in monitor_workflow
 
