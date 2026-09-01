@@ -405,6 +405,11 @@ def main() -> None:
     assert "bos-universal-gatekeeper-kicker.yml" in readme_header_action
     assert "single manual-dispatch front door" in readme
     assert "### Dispatch authorization" in readme
+    assert "name: Validate routing outputs" in kicker
+    assert "github.ref_name == 'dev'" in kicker
+    assert "github.ref_name == 'main'" in kicker
+    assert "inputs.operation == 'metadata'" in kicker
+    assert "::notice title=Dispatch route::" in kicker
     assert "# Blackout Secure README Header Audit" in readme_header_action
     assert "outcome=${outcome}" in readme_header_action
     assert "RH001" in readme_header_action and "RH030" in readme_header_action
