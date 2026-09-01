@@ -116,6 +116,13 @@ If neither credential is present the gate denies the dispatch, because the
 default `GITHUB_TOKEN` cannot resolve org role, team membership, or enterprise
 ownership.
 
+For a guided organization-wide setup, run the loopback-only
+[`Gatekeeper App setup helper`](tools/gatekeeper-app-setup/README.md). It uses
+GitHub's App manifest flow, configures `GATEKEEPER_APP_ID` and
+`GATEKEEPER_APP_PRIVATE_KEY` through the authenticated GitHub CLI, verifies
+installation, and can re-run a failed authorization job without writing the
+private key to disk.
+
 ### Gate levels
 
 The gate level is derived from the blast radius of the requested operation and

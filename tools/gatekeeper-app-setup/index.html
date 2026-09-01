@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Blackout Secure Gatekeeper setup</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --brand: #f59e0b;
+        --bg: #0b1220;
+        --panel: #121d30;
+        --ink: #edf4ff;
+        --muted: #a9b6ca;
+        --line: #2a3952;
+        --ok: #35c878;
+        --bad: #ff6b6b;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: radial-gradient(
+          circle at top right,
+          #273653 0,
+          var(--bg) 42%
+        );
+        color: var(--ink);
+        font:
+          15px/1.55 system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        min-height: 100vh;
+      }
+      main {
+        width: min(860px, calc(100% - 32px));
+        margin: auto;
+        padding: 40px 0 72px;
+      }
+      header {
+        border-left: 5px solid var(--brand);
+        padding: 4px 0 4px 20px;
+        margin-bottom: 28px;
+      }
+      h1 {
+        margin: 0 0 5px;
+        font-size: clamp(25px, 5vw, 38px);
+      }
+      h2 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+      p {
+        margin: 7px 0;
+      }
+      .lead,
+      .muted {
+        color: var(--muted);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
+        gap: 16px;
+      }
+      .card {
+        background: color-mix(in srgb, var(--panel) 94%, transparent);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 20px;
+        margin: 16px 0;
+        box-shadow: 0 12px 36px #0004;
+      }
+      .step {
+        display: inline-grid;
+        place-items: center;
+        width: 29px;
+        height: 29px;
+        border-radius: 50%;
+        background: var(--brand);
+        color: #161006;
+        font-weight: 800;
+        margin-right: 8px;
+      }
+      label {
+        display: block;
+        font-weight: 650;
+        margin: 14px 0 5px;
+      }
+      input {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 11px 12px;
+        background: #0c1627;
+        color: var(--ink);
+        font: inherit;
+      }
+      button,
+      .button {
+        display: inline-block;
+        border: 0;
+        border-radius: 8px;
+        padding: 11px 16px;
+        background: var(--brand);
+        color: #1a1204;
+        font: inherit;
+        font-weight: 750;
+        text-decoration: none;
+        cursor: pointer;
+        margin: 14px 8px 0 0;
+      }
+      button.secondary,
+      .button.secondary {
+        background: #2b3a52;
+        color: var(--ink);
+      }
+      button:disabled {
+        opacity: 0.48;
+        cursor: not-allowed;
+      }
+      .status {
+        border-left: 4px solid var(--line);
+        padding: 10px 13px;
+        margin-top: 14px;
+        background: #0c1627;
+        white-space: pre-wrap;
+      }
+      .status.ok {
+        border-color: var(--ok);
+      }
+      .status.bad {
+        border-color: var(--bad);
+      }
+      code {
+        background: #26344b;
+        padding: 2px 5px;
+        border-radius: 4px;
+      }
+      .hidden {
+        display: none;
+      }
+      ul {
+        padding-left: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Universal Gatekeeper setup</h1>
+        <p class="lead">
+          Create the least-privilege GitHub App, configure organization Actions
+          settings, install it, and re-run the failed workflow.
+        </p>
+      </header>
+
+      <div class="card">
+        <h2><span class="step">1</span>Check local prerequisites</h2>
+        <p>
+          This helper uses the locally authenticated <code>gh</code> CLI. It
+          never writes the private key to disk or logs it.
+        </p>
+        <label for="organization">GitHub organization</label>
+        <input
+          id="organization"
+          value="__DEFAULT_ORGANIZATION__"
+          autocomplete="off"
+        />
+        <button id="check" type="button" class="secondary">Check access</button>
+        <div id="check-status" class="status hidden" role="status"></div>
+        <div id="existing-app" class="hidden">
+          <h2>Existing Gatekeeper App</h2>
+          <p id="existing-summary"></p>
+          <a
+            id="app-settings-link"
+            class="button secondary"
+            target="_blank"
+            rel="noopener"
+            >Review App permissions</a
+          >
+          <a
+            id="access-settings-link"
+            class="button secondary"
+            target="_blank"
+            rel="noopener"
+            >Manage repository access</a
+          >
+          <label for="replacement-key">Rotate or repair the private key</label>
+          <input
+            id="replacement-key"
+            type="file"
+            accept=".pem,application/x-pem-file,text/plain"
+          />
+          <button id="repair-key" type="button" class="secondary">
+            Update organization credential
+          </button>
+          <p class="muted">
+            Generate a new private key in the App settings first. The selected
+            PEM is sent only to this loopback service and is never stored on
+            disk by the helper.
+          </p>
+          <div id="repair-status" class="status hidden" role="status"></div>
+        </div>
+      </div>
+
+      <div id="create-card" class="card">
+        <h2><span class="step">2</span>Create a new or replacement App</h2>
+        <p>
+          Use this only when no App is configured or replacement is intentional.
+          GitHub will show a confirmation page. The requested permission is only
+          organization <strong>Members: Read-only</strong>; webhooks and OAuth
+          are disabled.
+        </p>
+        <div class="grid">
+          <div>
+            <label for="app-name">Globally unique App name</label>
+            <input id="app-name" value="" autocomplete="off" />
+          </div>
+          <div>
+            <label for="homepage">Homepage</label>
+            <input
+              id="homepage"
+              value="https://github.com/blackoutsecure/bos-workflow-gatekeeper"
+              autocomplete="off"
+            />
+          </div>
+        </div>
+        <form id="manifest-form">
+          <button type="submit">Continue to GitHub</button>
+        </form>
+        <div id="configure-status" class="status hidden" role="status"></div>
+      </div>
+
+      <div id="install-card" class="card hidden">
+        <h2><span class="step">3</span>Install and verify</h2>
+        <p>
+          The organization variable <code>GATEKEEPER_APP_ID</code> and secret
+          <code>GATEKEEPER_APP_PRIVATE_KEY</code> are now configured with
+          all-repository visibility.
+        </p>
+        <p>
+          GitHub requires an organization owner to approve installation. Install
+          the App, then return here. Because this App has only an organization
+          permission, selected-repository access is sufficient and preferred.
+        </p>
+        <a id="install-link" class="button" target="_blank" rel="noopener"
+          >Install GitHub App</a
+        >
+        <button id="verify" type="button" class="secondary">
+          Verify setup
+        </button>
+        <div id="verify-status" class="status hidden" role="status"></div>
+      </div>
+
+      <div id="rerun-card" class="card hidden">
+        <h2><span class="step">4</span>Resolve the failed run</h2>
+        <p>
+          Setup is verified. Queue only the failed jobs from run
+          <code id="run-id"></code> in <code id="repository"></code>.
+        </p>
+        <button id="rerun" type="button">Re-run failed jobs</button>
+        <div id="rerun-status" class="status hidden" role="status"></div>
+      </div>
+
+      <div class="card muted">
+        <strong>Security boundary</strong>
+        <ul>
+          <li>
+            The service listens only on <code>127.0.0.1</code> and uses a random
+            session token.
+          </li>
+          <li>
+            The one-time manifest code is exchanged directly between this
+            browser and GitHub.
+          </li>
+          <li>
+            The returned private key is sent only to this loopback service over
+            the same local session, then piped to <code>gh secret set</code>.
+          </li>
+          <li>Stop the local service with Ctrl+C after setup.</li>
+        </ul>
+      </div>
+    </main>
+    <script nonce="__SETUP_TOKEN__">
+      (function () {
+        "use strict";
+        const token = "__SETUP_TOKEN__";
+        const repository = "__DEFAULT_REPOSITORY__";
+        const runId = "__DEFAULT_RUN_ID__";
+        let appSlug = "";
+        let configuredAppId = "";
+        const $ = (id) => document.getElementById(id);
+
+        function status(id, message, good) {
+          const element = $(id);
+          element.textContent = message;
+          element.className = "status " + (good ? "ok" : "bad");
+        }
+
+        async function api(path, options) {
+          let response;
+          try {
+            response = await fetch(path, options);
+          } catch (error) {
+            if (error instanceof TypeError) {
+              throw new Error(
+                "The local setup service is not running. Restart the PowerShell launcher, reload this page, and try again.",
+              );
+            }
+            throw error;
+          }
+          const result = await response.json();
+          if (!response.ok || !result.ok)
+            throw new Error(result.error || "Request failed.");
+          return result;
+        }
+
+        function organization() {
+          return $("organization").value.trim();
+        }
+
+        function repairLinks(result) {
+          if (!result.app_slug) return;
+          appSlug = result.app_slug;
+          $("app-settings-link").href =
+            "https://github.com/organizations/" +
+            encodeURIComponent(organization()) +
+            "/settings/apps/" +
+            encodeURIComponent(appSlug);
+          if (result.installation_id) {
+            $("access-settings-link").href =
+              "https://github.com/organizations/" +
+              encodeURIComponent(organization()) +
+              "/settings/installations/" +
+              encodeURIComponent(result.installation_id);
+          } else {
+            $("access-settings-link").href =
+              "https://github.com/apps/" +
+              encodeURIComponent(appSlug) +
+              "/installations/new";
+          }
+        }
+
+        async function inspect() {
+          try {
+            const result = await api("/api/status", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Setup-Token": token,
+              },
+              body: JSON.stringify({ organization: organization() }),
+            });
+            configuredAppId = result.configured_app_id || "";
+            repairLinks(result);
+            if (configuredAppId || result.app_slug) {
+              $("existing-app").classList.remove("hidden");
+              $("existing-summary").textContent =
+                "App " +
+                (result.app_slug || "not installed") +
+                " (ID " +
+                (configuredAppId || "unknown") +
+                "). Members permission: " +
+                (result.members_permission || "unknown") +
+                "; repository access: " +
+                (result.repository_selection || "not installed") +
+                ". Recommendation: " +
+                (result.healthy
+                  ? "keep this App; no reauthentication is needed."
+                  : "review permissions and installation before replacing it.");
+              $("create-card").querySelector("p").textContent =
+                "An App is already configured. Replacement is normally unnecessary; use this only for deliberate recovery after the existing App cannot be repaired.";
+            }
+            status(
+              "check-status",
+              result.healthy
+                ? "Setup is healthy. No repair or reauthentication is required."
+                : "Existing setup detected and repair actions are available below.",
+              result.healthy,
+            );
+            if (result.app_slug) {
+              $("install-card").classList.remove("hidden");
+              $("install-link").href = $("access-settings-link").href;
+              $("install-link").textContent = result.installed
+                ? "Manage repository access"
+                : "Install GitHub App";
+            }
+          } catch (error) {
+            status("check-status", error.message, false);
+          }
+        }
+
+        $("check").addEventListener("click", inspect);
+
+        $("repair-key").addEventListener("click", async function () {
+          try {
+            const file = $("replacement-key").files[0];
+            if (!file) throw new Error("Select the new PEM private key first.");
+            if (!configuredAppId)
+              throw new Error("No configured App ID was detected.");
+            const pem = await file.text();
+            const result = await api("/api/configure", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Setup-Token": token,
+              },
+              body: JSON.stringify({
+                organization: organization(),
+                app_id: configuredAppId,
+                pem: pem,
+              }),
+            });
+            $("replacement-key").value = "";
+            status("repair-status", result.message, true);
+            await inspect();
+          } catch (error) {
+            status("repair-status", error.message, false);
+          }
+        });
+
+        $("manifest-form").addEventListener("submit", function (event) {
+          event.preventDefault();
+          const owner = organization();
+          const name = $("app-name").value.trim();
+          const homepage = $("homepage").value.trim();
+          if (!owner || !name || !homepage) return;
+          const redirectUrl = window.location.origin + window.location.pathname;
+          const manifest = {
+            name: name,
+            url: homepage,
+            redirect_url: redirectUrl,
+            public: false,
+            default_permissions: { members: "read" },
+            default_events: [],
+          };
+          sessionStorage.setItem("gatekeeper_setup_org", owner);
+          const form = document.createElement("form");
+          form.method = "POST";
+          form.action =
+            "https://github.com/organizations/" +
+            encodeURIComponent(owner) +
+            "/settings/apps/new";
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.name = "manifest";
+          input.value = JSON.stringify(manifest);
+          form.appendChild(input);
+          document.body.appendChild(form);
+          form.submit();
+        });
+
+        async function convertManifest(code) {
+          status(
+            "configure-status",
+            "Exchanging GitHub's one-time code and configuring organization Actions settings…",
+            true,
+          );
+          const response = await fetch(
+            "https://api.github.com/app-manifests/" +
+              encodeURIComponent(code) +
+              "/conversions",
+            {
+              method: "POST",
+              headers: { Accept: "application/vnd.github+json" },
+            },
+          );
+          if (!response.ok)
+            throw new Error(
+              "GitHub returned " +
+                response.status +
+                ". The one-time code may have expired or already been used.",
+            );
+          const app = await response.json();
+          appSlug = app.slug;
+          const owner =
+            sessionStorage.getItem("gatekeeper_setup_org") || organization();
+          $("organization").value = owner;
+          await api("/api/configure", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Setup-Token": token,
+            },
+            body: JSON.stringify({
+              organization: owner,
+              app_id: app.id,
+              pem: app.pem,
+            }),
+          });
+          history.replaceState({}, document.title, window.location.pathname);
+          status(
+            "configure-status",
+            "Configured GATEKEEPER_APP_ID and GATEKEEPER_APP_PRIVATE_KEY successfully.",
+            true,
+          );
+          $("install-link").href =
+            "https://github.com/apps/" +
+            encodeURIComponent(appSlug) +
+            "/installations/new";
+          $("install-card").classList.remove("hidden");
+        }
+
+        $("verify").addEventListener("click", async function () {
+          try {
+            const result = await api("/api/status", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Setup-Token": token,
+              },
+              body: JSON.stringify({
+                organization: organization(),
+                app_slug: appSlug,
+              }),
+            });
+            const installed = result.installed === true;
+            status(
+              "verify-status",
+              "Variable: " +
+                result.variable_set +
+                "; secret: " +
+                result.secret_set +
+                "; App installed: " +
+                (result.installed === null
+                  ? "could not verify"
+                  : result.installed) +
+                "; repository access: " +
+                (result.repository_selection || "unknown") +
+                ".",
+              result.variable_set &&
+                result.secret_set &&
+                installed &&
+                result.members_permission === "read",
+            );
+            if (
+              result.variable_set &&
+              result.secret_set &&
+              installed &&
+              result.members_permission === "read" &&
+              repository &&
+              runId
+            ) {
+              $("repository").textContent = repository;
+              $("run-id").textContent = runId;
+              $("rerun-card").classList.remove("hidden");
+            }
+          } catch (error) {
+            status("verify-status", error.message, false);
+          }
+        });
+
+        $("rerun").addEventListener("click", async function () {
+          try {
+            const result = await api("/api/rerun", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Setup-Token": token,
+              },
+              body: "{}",
+            });
+            status("rerun-status", result.message, true);
+            $("rerun").disabled = true;
+          } catch (error) {
+            status("rerun-status", error.message, false);
+          }
+        });
+
+        const code = new URLSearchParams(window.location.search).get("code");
+        if (code)
+          convertManifest(code).catch((error) =>
+            status("configure-status", error.message, false),
+          );
+        else {
+          const suffix = crypto
+            .getRandomValues(new Uint32Array(1))[0]
+            .toString(36)
+            .slice(0, 6);
+          $("app-name").value =
+            organization() + "-workflow-gatekeeper-" + suffix;
+          inspect();
+        }
+      })();
+    </script>
+  </body>
+</html>

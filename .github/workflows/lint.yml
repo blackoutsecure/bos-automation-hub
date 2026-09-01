@@ -22,32 +22,38 @@ on:
   push:
     branches: [main, dev]
     paths:
-      - '**/*.md'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - '**/*.sh'
-      - '.shellcheckrc'
-      - '.github/bos-universal-config.json'
-      - 'scripts/sync_action_pins.py'
-      - 'scripts/test_sync_action_pins.py'
-      - 'scripts/test_universal_config_contract.py'
-      - 'scripts/test_release_validation.py'
-      - '.github/actions/release-validation/**'
-      - 'sync-files/config/release-validation-global-config.json'
+      - "**/*.md"
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "**/*.sh"
+      - ".shellcheckrc"
+      - ".github/bos-universal-config.json"
+      - "scripts/sync_action_pins.py"
+      - "scripts/test_sync_action_pins.py"
+      - "scripts/test_universal_config_contract.py"
+      - "scripts/test_release_validation.py"
+      - "scripts/start-gatekeeper-app-setup.ps1"
+      - "scripts/test_gatekeeper_app_setup.py"
+      - "tools/gatekeeper-app-setup/**"
+      - ".github/actions/release-validation/**"
+      - "sync-files/config/release-validation-global-config.json"
   pull_request:
     paths:
-      - '**/*.md'
-      - '**/*.yml'
-      - '**/*.yaml'
-      - '**/*.sh'
-      - '.shellcheckrc'
-      - '.github/bos-universal-config.json'
-      - 'scripts/sync_action_pins.py'
-      - 'scripts/test_sync_action_pins.py'
-      - 'scripts/test_universal_config_contract.py'
-      - 'scripts/test_release_validation.py'
-      - '.github/actions/release-validation/**'
-      - 'sync-files/config/release-validation-global-config.json'
+      - "**/*.md"
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "**/*.sh"
+      - ".shellcheckrc"
+      - ".github/bos-universal-config.json"
+      - "scripts/sync_action_pins.py"
+      - "scripts/test_sync_action_pins.py"
+      - "scripts/test_universal_config_contract.py"
+      - "scripts/test_release_validation.py"
+      - "scripts/start-gatekeeper-app-setup.ps1"
+      - "scripts/test_gatekeeper_app_setup.py"
+      - "tools/gatekeeper-app-setup/**"
+      - ".github/actions/release-validation/**"
+      - "sync-files/config/release-validation-global-config.json"
   workflow_dispatch:
 
 permissions:
@@ -79,6 +85,9 @@ jobs:
       - name: Validate release-readiness contract
         run: python3 scripts/test_release_validation.py
 
+      - name: Validate Gatekeeper App setup helper
+        run: python3 scripts/test_gatekeeper_app_setup.py
+
   actionlint:
     name: actionlint
     # Pinned to ubuntu-latest intentionally — do NOT route this through
@@ -100,11 +109,11 @@ jobs:
       - name: Run actionlint via kit composite
         uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@c3ca87e5c5c9d72237ce8ff426a759b0f878de91 # v0.1.28
         with:
-          run_markdownlint: 'false'
-          run_yamllint: 'false'
-          run_shellcheck: 'false'
-          run_actionlint: 'true'
-          severity: 'fail'
+          run_markdownlint: "false"
+          run_yamllint: "false"
+          run_shellcheck: "false"
+          run_actionlint: "true"
+          severity: "fail"
 
   extra-lint:
     name: markdown + yaml + shell (advisory)
@@ -119,10 +128,10 @@ jobs:
       - name: Run markdownlint / yamllint / shellcheck via kit composite
         uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@c3ca87e5c5c9d72237ce8ff426a759b0f878de91 # v0.1.28
         with:
-          run_markdownlint: 'true'
-          run_yamllint: 'true'
-          run_shellcheck: 'true'
-          run_actionlint: 'false'
+          run_markdownlint: "true"
+          run_yamllint: "true"
+          run_shellcheck: "true"
+          run_actionlint: "false"
           # ADVISORY mode — findings annotate the job summary but do
           # NOT fail the workflow. Flip to `fail` after:
           #   1. Addressing the initial findings surfaced on first run
@@ -133,4 +142,4 @@ jobs:
           #        .markdownlint.yaml   (markdownlint-cli2)
           #        .yamllint.yml        (yamllint)
           #        .shellcheckrc        (shellcheck)
-          severity: 'warn'
+          severity: "warn"
