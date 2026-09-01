@@ -410,6 +410,8 @@ def main() -> None:
     assert "github.ref_name == 'main'" in kicker
     assert "inputs.operation == 'metadata'" in kicker
     assert "::notice title=Dispatch route::" in kicker
+    assert "::notice title=Dispatch route deferred::" in kicker
+    assert "SYNC_DEV_CHANGED:" in kicker
     assert kicker.count("always() && !cancelled() && needs.parse-config.result == 'success'") >= 4
     assert kicker.count("&& needs.parse-config.result == 'success'") >= 6
     assert "# Blackout Secure README Header Audit" in readme_header_action
