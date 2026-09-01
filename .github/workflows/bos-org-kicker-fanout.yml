@@ -15,13 +15,9 @@
 # present on the default branch. Seeding is a pull request, never a direct
 # push, so branch protection stays authoritative. Once merged, the managed
 # file sync (`file` mode) keeps the copy current and the seed never recurs.
-# Seeding uses its own credential (`WORKFLOW_SYNC_PAT`, the same token the
-# managed sync already uses to write kicker files) rather than widening the
-# dispatch token: `GITHUB_TOKEN` can never write under `.github/workflows/`,
-# and the dispatch token has no reason to hold write access to code. That
-# token needs Contents: write, Workflows: write and Pull requests: write on
-# the targets. Missing or unprivileged, seeding is reported per repository
-# and the fan-out continues.
+# Seeding uses the workflow-sync App rather than widening the dispatch App:
+# GITHUB_TOKEN cannot write `.github/workflows/`, and dispatch has no reason
+# to hold code-write access. Legacy PAT names remain rollout fallbacks only.
 #
 # Before dispatching, `audit_targets` (default `warn`) checks each target's
 # kicker file for an unguarded `workflow_dispatch:` trigger — one with no
@@ -122,15 +118,38 @@ jobs:
     runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER || 'ubuntu-latest', '[') && (vars.DEFAULT_RUNNER || 'ubuntu-latest') || format('"{0}"', vars.DEFAULT_RUNNER || 'ubuntu-latest')) }}
     timeout-minutes: 30
     steps:
+      - name: Mint dispatch token
+        id: dispatch-app
+        if: vars.DISPATCH_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.DISPATCH_APP_ID }}
+          private-key: ${{ secrets.DISPATCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-actions: write
+          permission-contents: read
+
+      - name: Mint workflow synchronization token
+        id: workflow-app
+        if: vars.WORKFLOW_SYNC_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.WORKFLOW_SYNC_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
       - name: Validate credential
         env:
-          HAS_TOKEN: ${{ (secrets.ORG_KICK_PAT || secrets.DISPATCH_TOKEN) != '' && 'true' || 'false' }}
+          HAS_TOKEN: ${{ (steps.dispatch-app.outputs.token || secrets.ORG_KICK_PAT || secrets.DISPATCH_TOKEN) != '' && 'true' || 'false' }}
         run: |
           set -euo pipefail
           if [ "${HAS_TOKEN}" != "true" ]; then
             echo "::error::Cross-repository dispatch needs an org-scoped credential." \
-                 "Add an ORG_KICK_PAT (or DISPATCH_TOKEN) secret with" \
-                 "Actions: write and Metadata: read on the target repositories."
+                 "Configure the dispatch GitHub App profile with Actions: write" \
+                 "on all participating repositories."
             exit 1
           fi
 
@@ -162,7 +181,7 @@ jobs:
 
       - name: Resolve targets and dispatch
         env:
-          GH_TOKEN: ${{ secrets.ORG_KICK_PAT || secrets.DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ steps.dispatch-app.outputs.token || secrets.ORG_KICK_PAT || secrets.DISPATCH_TOKEN }}
           ORG: ${{ github.repository_owner }}
           KICKER: ${{ inputs.kicker }}
           REPO_FILTER: ${{ inputs.repos }}
@@ -172,7 +191,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           AUDIT_TARGETS: ${{ inputs.audit_targets }}
           SEED_MISSING: ${{ inputs.seed_missing }}
-          SEED_TOKEN: ${{ secrets.WORKFLOW_SYNC_PAT || secrets.ORG_KICK_PAT || secrets.DISPATCH_TOKEN }}
+          SEED_TOKEN: ${{ steps.workflow-app.outputs.token || secrets.WORKFLOW_SYNC_PAT || secrets.ORG_KICK_PAT || secrets.DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
           WORKFLOW_FILE="bos-universal-${KICKER}-kicker.yml"
@@ -187,8 +206,8 @@ jobs:
               echo "::warning::Seeding requested but ${SEED_SOURCE} is not in this hub;" \
                    "repositories without ${WORKFLOW_FILE} will be skipped instead."
             elif [ -z "${SEED_TOKEN}" ]; then
-              echo "::warning::Seeding requested but no WORKFLOW_SYNC_PAT is configured;" \
-                   "writes under .github/workflows/ need a PAT with Workflows write." \
+                  echo "::warning::Seeding requested but no workflow-sync App or legacy PAT is configured;" \
+                    "writes under .github/workflows/ need Workflows write." \
                    "Repositories without ${WORKFLOW_FILE} will be skipped instead."
             else
               KICKER_B64=$(base64 -w0 < "${SEED_SOURCE}")

@@ -389,7 +389,8 @@ def main() -> None:
         "http_timeout: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_http_timeout }}"
         in gate_workflow
     )
-    assert "github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}" in gate_workflow
+    assert "steps.security-app.outputs.token || secrets.SCANNING_PAT" in gate_workflow
+    assert "vars.SECURITY_AUDIT_APP_ID" in gate_workflow
 
     readme = (ROOT / "README.md").read_text()
     readme_header_action = (
@@ -398,7 +399,7 @@ def main() -> None:
     assert "enable_baseline" not in readme
     assert "## Managed file sync" in readme
     assert "The reusable workflow never self-triggers" in readme
-    assert "### Elevated posture scanning (`SCANNING_PAT`)" in readme
+    assert "### Elevated posture scanning (`SECURITY_AUDIT_APP`)" in readme
     assert "security_scan.use_advanced_pat" in readme
     assert "bos-launchpad-release.yml" not in readme_header_action
     assert "bos-universal-gatekeeper-kicker.yml" in readme_header_action
@@ -480,7 +481,8 @@ def main() -> None:
     )
     assert ".github/actions/repo-metadata@main" not in repo_metadata_workflow
     assert not (ROOT / ".github/actions/repo-metadata").exists()
-    assert "secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token" in repo_metadata_workflow
+    assert "steps.repo-admin-app.outputs.token || secrets.REPO_ADMIN_PAT" in repo_metadata_workflow
+    assert "vars.REPO_ADMIN_APP_ID" in repo_metadata_workflow
     assert "group: repo-metadata-${{ github.repository }}" in repo_metadata_workflow
     assert "inputs.checkout_ref || github.sha" in repo_metadata_workflow
     assert workflow.count("uses: ./.github/workflows/repo-metadata-sync.yml") == 1
@@ -570,7 +572,9 @@ def main() -> None:
     assert "needs.release.result == 'success'" in release_hub
     assert "inputs.release_draft != true" in release_hub
     assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" in release_hub
+    assert "REPO_ADMIN_APP_PRIVATE_KEY: ${{ secrets.REPO_ADMIN_APP_PRIVATE_KEY }}" in release_hub
     assert "RELEASE_PAT: ${{ secrets.RELEASE_PAT }}" in release_hub
+    assert "vars.RELEASE_APP_ID" in release_hub
     assert "LATEST=\"$(git tag --list" not in release_hub
 
     balena_block = (
@@ -978,7 +982,7 @@ def main() -> None:
     assert "  workflow_call:" in sync_backend
     assert "  schedule:" not in sync_backend
     assert "  workflow_dispatch:" not in sync_backend
-    assert "`workflow_sync_pat` present and workflow services completed successfully" in sync_backend
+    assert "workflow-sync App token or legacy PAT available" in sync_backend
     assert '"severity": "warn" if mode == "check" else "pass"' in sync_backend
     assert "workflow-file state is unverified" in sync_backend
     assert "Drift detected; rerun in `commit` mode" in sync_backend
@@ -1039,9 +1043,10 @@ def main() -> None:
         sync_backend, "blackoutsecure/bos-managed-file-sync-action"
     )
     assert "uses: ./hub-source/.github/actions/commit-and-push" in sync_backend
-    assert "workflows: write" not in sync_backend
+    assert "permission-workflows: write" in sync_backend
     assert "workflow_sync_pat:" in sync_backend
-    assert "token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}" in sync_backend
+    assert "steps.workflow-app.outputs.token || secrets.WORKFLOW_SYNC_PAT" in sync_backend
+    assert "vars.WORKFLOW_SYNC_APP_ID" in sync_backend
     assert "secrets.WORKFLOW_SYNC_PAT != '' && 'true' || 'false'" in sync_backend
     assert "disabled_services" in sync_backend
 
@@ -1055,6 +1060,8 @@ def main() -> None:
         in gatekeeper_workflow
     )
     assert "RELEASE_PAT:\n        description:" in gatekeeper_workflow
+    assert "SECURITY_AUDIT_APP_PRIVATE_KEY:" in gatekeeper_workflow
+    assert "REPO_ADMIN_APP_PRIVATE_KEY:" in gatekeeper_workflow
 
     assert_markdown_links_exist(ROOT / "README.md")
     assert_markdown_links_exist(ROOT / "sync-files/README.md")

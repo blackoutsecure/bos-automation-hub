@@ -22,6 +22,13 @@ def completed(args: list[str], stdout: str = "") -> subprocess.CompletedProcess[
 
 
 def main() -> None:
+    assert len({profile["variable"] for profile in setup.APP_PROFILES.values()}) == len(
+        setup.APP_PROFILES
+    )
+    assert len({profile["secret"] for profile in setup.APP_PROFILES.values()}) == len(
+        setup.APP_PROFILES
+    )
+    assert all(profile["permissions"] for profile in setup.APP_PROFILES.values())
     assert setup.validate_org("blackoutsecure") == "blackoutsecure"
     for invalid in ("", "-owner", "owner/other", "owner name", "a" * 40):
         try:
@@ -110,6 +117,9 @@ def main() -> None:
         "repository_selection": "selected",
         "installation_id": 123,
         "members_permission": "read",
+        "permissions": {"members": "read"},
+        "required_permissions": {"members": "read"},
+        "repository_scope_satisfied": True,
         "healthy": True,
     }
 
@@ -120,7 +130,15 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         html = Path(temp_dir) / "index.html"
         html.write_text("__SETUP_TOKEN__ __DEFAULT_ORGANIZATION__", encoding="utf-8")
-        server = setup.SetupServer((setup.HOST, 0), html, "blackoutsecure", "", "", gh=mock.Mock())
+        server = setup.SetupServer(
+            (setup.HOST, 0),
+            html,
+            "blackoutsecure",
+            "",
+            "",
+            "gatekeeper",
+            gh=mock.Mock(),
+        )
         try:
             assert server.server_address[0] == "127.0.0.1"
             assert server.csrf_token

@@ -27,6 +27,62 @@ APP_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 PEM_BEGIN = "-----BEGIN RSA PRIVATE KEY-----"
 PEM_END = "-----END RSA PRIVATE KEY-----"
 
+APP_PROFILES = {
+    "gatekeeper": {
+        "variable": "GATEKEEPER_APP_ID",
+        "secret": "GATEKEEPER_APP_PRIVATE_KEY",
+        "name": "workflow-gatekeeper",
+        "permissions": {"members": "read"},
+    },
+    "repository-admin": {
+        "variable": "REPO_ADMIN_APP_ID",
+        "secret": "REPO_ADMIN_APP_PRIVATE_KEY",
+        "name": "repository-admin",
+        "permissions": {"administration": "write"},
+    },
+    "workflow-sync": {
+        "variable": "WORKFLOW_SYNC_APP_ID",
+        "secret": "WORKFLOW_SYNC_APP_PRIVATE_KEY",
+        "name": "workflow-sync",
+        "permissions": {
+            "contents": "write",
+            "pull_requests": "write",
+            "workflows": "write",
+        },
+    },
+    "release": {
+        "variable": "RELEASE_APP_ID",
+        "secret": "RELEASE_APP_PRIVATE_KEY",
+        "name": "release",
+        "permissions": {"contents": "write"},
+    },
+    "security-audit": {
+        "variable": "SECURITY_AUDIT_APP_ID",
+        "secret": "SECURITY_AUDIT_APP_PRIVATE_KEY",
+        "name": "security-audit",
+        "permissions": {
+            "actions": "read",
+            "administration": "read",
+            "contents": "read",
+            "secret_scanning_alerts": "read",
+            "security_events": "write",
+            "vulnerability_alerts": "read",
+        },
+    },
+    "dispatch": {
+        "variable": "DISPATCH_APP_ID",
+        "secret": "DISPATCH_APP_PRIVATE_KEY",
+        "name": "workflow-dispatch",
+        "permissions": {"actions": "write", "contents": "read"},
+    },
+    "upstream-read": {
+        "variable": "UPSTREAM_READ_APP_ID",
+        "secret": "UPSTREAM_READ_APP_PRIVATE_KEY",
+        "name": "upstream-read",
+        "permissions": {"contents": "read"},
+    },
+}
+
 
 class SetupError(RuntimeError):
     """Safe, user-facing setup failure."""
@@ -76,12 +132,19 @@ class GhClient:
                 "organization variables and secrets cannot be configured."
             )
 
-    def configure(self, organization: str, app_id: str, private_key: str) -> None:
+    def configure(
+        self,
+        organization: str,
+        app_id: str,
+        private_key: str,
+        variable_name: str = "GATEKEEPER_APP_ID",
+        secret_name: str = "GATEKEEPER_APP_PRIVATE_KEY",
+    ) -> None:
         self.assert_org_admin(organization)
         self._run(
             "variable",
             "set",
-            "GATEKEEPER_APP_ID",
+            variable_name,
             "--org",
             organization,
             "--visibility",
@@ -92,7 +155,7 @@ class GhClient:
         self._run(
             "secret",
             "set",
-            "GATEKEEPER_APP_PRIVATE_KEY",
+            secret_name,
             "--org",
             organization,
             "--visibility",
@@ -100,26 +163,34 @@ class GhClient:
             stdin=private_key,
         )
 
-    def status(self, organization: str, app_slug: str = "") -> dict[str, object]:
+    def status(
+        self,
+        organization: str,
+        app_slug: str = "",
+        variable_name: str = "GATEKEEPER_APP_ID",
+        secret_name: str = "GATEKEEPER_APP_PRIVATE_KEY",
+        required_permissions: dict[str, str] | None = None,
+    ) -> dict[str, object]:
         self.assert_org_admin(organization)
         variables = self._run("variable", "list", "--org", organization, "--json", "name")
         secret_names = self._run("secret", "list", "--org", organization, "--json", "name")
-        variable_set = any(item.get("name") == "GATEKEEPER_APP_ID" for item in json.loads(variables))
+        variable_set = any(item.get("name") == variable_name for item in json.loads(variables))
         configured_app_id: int | None = None
         if variable_set:
             raw_app_id = self._run(
-                "variable", "get", "GATEKEEPER_APP_ID", "--org", organization
+                "variable", "get", variable_name, "--org", organization
             ).strip()
             if APP_ID_RE.fullmatch(raw_app_id):
                 configured_app_id = int(raw_app_id)
         secret_set = any(
-            item.get("name") == "GATEKEEPER_APP_PRIVATE_KEY" for item in json.loads(secret_names)
+            item.get("name") == secret_name for item in json.loads(secret_names)
         )
         installed: bool | None = None
         repository_selection: str | None = None
         installation_id: int | None = None
         detected_app_slug = app_slug
         members_permission: str | None = None
+        installed_permissions: dict[str, str] = {}
         try:
             installations = json.loads(self._run("api", f"orgs/{organization}/installations"))
             installation = next(
@@ -137,17 +208,30 @@ class GhClient:
                 repository_selection = str(installation.get("repository_selection") or "")
                 permissions = installation.get("permissions")
                 if isinstance(permissions, dict):
+                    installed_permissions = {
+                        str(key): str(value) for key, value in permissions.items()
+                    }
                     members_permission = str(permissions.get("members") or "none")
                 raw_installation_id = installation.get("id")
                 if isinstance(raw_installation_id, int):
                     installation_id = raw_installation_id
         except (SetupError, json.JSONDecodeError):
             installed = None
+        expected_permissions = required_permissions or {"members": "read"}
+        permissions_satisfied = all(
+            installed_permissions.get(key) == value
+            for key, value in expected_permissions.items()
+        )
+        needs_repository_access = any(key != "members" for key in expected_permissions)
+        repository_scope_satisfied = (
+            repository_selection == "all" if needs_repository_access else installed is True
+        )
         healthy = (
             variable_set
             and secret_set
             and installed is True
-            and members_permission == "read"
+            and permissions_satisfied
+            and repository_scope_satisfied
         )
         return {
             "variable_set": variable_set,
@@ -158,6 +242,9 @@ class GhClient:
             "repository_selection": repository_selection,
             "installation_id": installation_id,
             "members_permission": members_permission,
+            "permissions": installed_permissions,
+            "required_permissions": expected_permissions,
+            "repository_scope_satisfied": repository_scope_satisfied,
             "healthy": healthy,
         }
 
@@ -211,6 +298,7 @@ class SetupServer(ThreadingHTTPServer):
         organization: str,
         repository: str,
         run_id: str,
+        profile: str,
         gh: GhClient | None = None,
     ) -> None:
         super().__init__(address, SetupHandler)
@@ -218,6 +306,8 @@ class SetupServer(ThreadingHTTPServer):
         self.organization = organization
         self.repository = repository
         self.run_id = run_id
+        self.profile_name = profile
+        self.profile = APP_PROFILES[profile]
         self.csrf_token = secrets.token_urlsafe(32)
         self.gh = gh or GhClient()
 
@@ -282,6 +372,13 @@ class SetupHandler(BaseHTTPRequestHandler):
             html = html.replace("__DEFAULT_ORGANIZATION__", self.server.organization)
             html = html.replace("__DEFAULT_REPOSITORY__", self.server.repository)
             html = html.replace("__DEFAULT_RUN_ID__", self.server.run_id)
+            html = html.replace("__APP_PROFILE__", self.server.profile_name)
+            html = html.replace("__APP_VARIABLE__", str(self.server.profile["variable"]))
+            html = html.replace("__APP_SECRET__", str(self.server.profile["secret"]))
+            html = html.replace("__APP_NAME__", str(self.server.profile["name"]))
+            html = html.replace(
+                "__APP_PERMISSIONS__", json.dumps(self.server.profile["permissions"])
+            )
             body = html.encode("utf-8")
             self._headers(HTTPStatus.OK, "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -298,13 +395,28 @@ class SetupHandler(BaseHTTPRequestHandler):
                 app_slug = validate_app_slug(payload.get("app_slug"))
                 self._json(
                     HTTPStatus.OK,
-                    {"ok": True, **self.server.gh.status(organization, app_slug)},
+                    {
+                        "ok": True,
+                        **self.server.gh.status(
+                            organization,
+                            app_slug,
+                            str(self.server.profile["variable"]),
+                            str(self.server.profile["secret"]),
+                            self.server.profile["permissions"],
+                        ),
+                    },
                 )
                 return
             if self.path == "/api/configure":
                 organization = validate_org(payload.get("organization"))
                 app_id, private_key = validate_credentials(payload.get("app_id"), payload.get("pem"))
-                self.server.gh.configure(organization, app_id, private_key)
+                self.server.gh.configure(
+                    organization,
+                    app_id,
+                    private_key,
+                    str(self.server.profile["variable"]),
+                    str(self.server.profile["secret"]),
+                )
                 self._json(
                     HTTPStatus.OK,
                     {
@@ -329,6 +441,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--organization", default="blackoutsecure")
     parser.add_argument("--repository", default="")
     parser.add_argument("--run-id", default="")
+    parser.add_argument("--profile", choices=sorted(APP_PROFILES), default="gatekeeper")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true")
     return parser.parse_args()
@@ -340,7 +453,7 @@ def main() -> int:
     repository, run_id = validate_repository_and_run_id(args.repository, args.run_id)
     html_path = Path(__file__).with_name("index.html")
     server = SetupServer(
-        (HOST, args.port), html_path, organization, repository, run_id
+        (HOST, args.port), html_path, organization, repository, run_id, args.profile
     )
     print(f"Gatekeeper App setup is available at {server.origin}")
     print("The service is bound to loopback only. Press Ctrl+C when setup is complete.")

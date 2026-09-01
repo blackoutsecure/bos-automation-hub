@@ -206,6 +206,9 @@ on:
           PS020-PS025 branch protection). Falls back to GITHUB_TOKEN when
           absent — sufficient for PS001 only.
         required: false
+      SECURITY_AUDIT_APP_PRIVATE_KEY:
+        description: Private key for the purpose-scoped security audit GitHub App.
+        required: false
 
 permissions: {}
 
@@ -225,6 +228,22 @@ jobs:
       org: ${{ steps.config.outputs.organization }}
       config: ${{ steps.config.outputs.cfg }}
     steps:
+      - name: Mint security audit token
+        id: security-app
+        if: vars.SECURITY_AUDIT_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.SECURITY_AUDIT_APP_ID }}
+          private-key: ${{ secrets.SECURITY_AUDIT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-administration: read
+          permission-contents: read
+          permission-secret-scanning-alerts: read
+          permission-security-events: write
+          permission-vulnerability-alerts: read
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -579,7 +598,7 @@ jobs:
         id: code_scan
         uses: blackoutsecure/bos-code-scanning-kit@1674e4e0de38ba66ce8a201db70cfd57ff47e225 # v1.0.43
         with:
-          github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}
+          github_token: ${{ steps.security-app.outputs.token || secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}
           fail_on: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_fail_on }}
           http_timeout: ${{ fromJSON(needs.resolve-config.outputs.gate).code_scan_http_timeout }}
           enable_posture: 'true'

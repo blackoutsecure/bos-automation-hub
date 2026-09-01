@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Blackout Secure Gatekeeper setup</title>
+    <title>Blackout Secure GitHub App setup</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -149,10 +149,12 @@
   <body>
     <main>
       <header>
-        <h1>Universal Gatekeeper setup</h1>
+        <h1>
+          GitHub App setup: <span id="profile-name">__APP_PROFILE__</span>
+        </h1>
         <p class="lead">
-          Create the least-privilege GitHub App, configure organization Actions
-          settings, install it, and re-run the failed workflow.
+          Create or repair a least-privilege GitHub App, configure organization
+          Actions settings, and verify its installation.
         </p>
       </header>
 
@@ -171,7 +173,7 @@
         <button id="check" type="button" class="secondary">Check access</button>
         <div id="check-status" class="status hidden" role="status"></div>
         <div id="existing-app" class="hidden">
-          <h2>Existing Gatekeeper App</h2>
+          <h2>Existing purpose-scoped App</h2>
           <p id="existing-summary"></p>
           <a
             id="app-settings-link"
@@ -187,7 +189,9 @@
             rel="noopener"
             >Manage repository access</a
           >
-          <label for="replacement-key">Rotate or repair the private key</label>
+          <label for="replacement-key"
+            >Rotate or repair <code>__APP_SECRET__</code></label
+          >
           <input
             id="replacement-key"
             type="file"
@@ -209,9 +213,8 @@
         <h2><span class="step">2</span>Create a new or replacement App</h2>
         <p>
           Use this only when no App is configured or replacement is intentional.
-          GitHub will show a confirmation page. The requested permission is only
-          organization <strong>Members: Read-only</strong>; webhooks and OAuth
-          are disabled.
+          GitHub will show a confirmation page with this profile's minimum
+          permissions. Webhooks and OAuth are disabled.
         </p>
         <div class="grid">
           <div>
@@ -222,7 +225,7 @@
             <label for="homepage">Homepage</label>
             <input
               id="homepage"
-              value="https://github.com/blackoutsecure/bos-workflow-gatekeeper"
+              value="https://github.com/blackoutsecure/bos-automation-hub"
               autocomplete="off"
             />
           </div>
@@ -236,14 +239,14 @@
       <div id="install-card" class="card hidden">
         <h2><span class="step">3</span>Install and verify</h2>
         <p>
-          The organization variable <code>GATEKEEPER_APP_ID</code> and secret
-          <code>GATEKEEPER_APP_PRIVATE_KEY</code> are now configured with
-          all-repository visibility.
+          The organization variable <code>__APP_VARIABLE__</code> and secret
+          <code>__APP_SECRET__</code> are now configured with all-repository
+          visibility.
         </p>
         <p>
           GitHub requires an organization owner to approve installation. Install
-          the App, then return here. Because this App has only an organization
-          permission, selected-repository access is sufficient and preferred.
+          the App, then return here. Repository-capable profiles must cover all
+          repositories because they replace organization-wide credentials.
         </p>
         <a id="install-link" class="button" target="_blank" rel="noopener"
           >Install GitHub App</a
@@ -289,6 +292,11 @@
         const token = "__SETUP_TOKEN__";
         const repository = "__DEFAULT_REPOSITORY__";
         const runId = "__DEFAULT_RUN_ID__";
+        const appProfile = "__APP_PROFILE__";
+        const appVariable = "__APP_VARIABLE__";
+        const appSecret = "__APP_SECRET__";
+        const appName = "__APP_NAME__";
+        const appPermissions = __APP_PERMISSIONS__;
         let appSlug = "";
         let configuredAppId = "";
         const $ = (id) => document.getElementById(id);
@@ -362,8 +370,8 @@
                 (result.app_slug || "not installed") +
                 " (ID " +
                 (configuredAppId || "unknown") +
-                "). Members permission: " +
-                (result.members_permission || "unknown") +
+                "). Permissions: " +
+                JSON.stringify(result.permissions || {}) +
                 "; repository access: " +
                 (result.repository_selection || "not installed") +
                 ". Recommendation: " +
@@ -371,7 +379,9 @@
                   ? "keep this App; no reauthentication is needed."
                   : "review permissions and installation before replacing it.");
               $("create-card").querySelector("p").textContent =
-                "An App is already configured. Replacement is normally unnecessary; use this only for deliberate recovery after the existing App cannot be repaired.";
+                "An App is already configured for " +
+                appProfile +
+                ". Replacement is normally unnecessary; use this only for deliberate recovery after the existing App cannot be repaired.";
             }
             status(
               "check-status",
@@ -433,7 +443,7 @@
             url: homepage,
             redirect_url: redirectUrl,
             public: false,
-            default_permissions: { members: "read" },
+            default_permissions: appPermissions,
             default_events: [],
           };
           sessionStorage.setItem("gatekeeper_setup_org", owner);
@@ -493,7 +503,11 @@
           history.replaceState({}, document.title, window.location.pathname);
           status(
             "configure-status",
-            "Configured GATEKEEPER_APP_ID and GATEKEEPER_APP_PRIVATE_KEY successfully.",
+            "Configured " +
+              appVariable +
+              " and " +
+              appSecret +
+              " successfully.",
             true,
           );
           $("install-link").href =
@@ -530,16 +544,10 @@
                 "; repository access: " +
                 (result.repository_selection || "unknown") +
                 ".",
-              result.variable_set &&
-                result.secret_set &&
-                installed &&
-                result.members_permission === "read",
+              result.healthy,
             );
             if (
-              result.variable_set &&
-              result.secret_set &&
-              installed &&
-              result.members_permission === "read" &&
+              result.healthy &&
               repository &&
               runId
             ) {
@@ -579,8 +587,7 @@
             .getRandomValues(new Uint32Array(1))[0]
             .toString(36)
             .slice(0, 6);
-          $("app-name").value =
-            organization() + "-workflow-gatekeeper-" + suffix;
+          $("app-name").value = organization() + "-" + appName + "-" + suffix;
           inspect();
         }
       })();

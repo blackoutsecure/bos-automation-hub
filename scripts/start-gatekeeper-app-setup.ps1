@@ -12,6 +12,9 @@ param(
     [ValidateRange(1, 65535)]
     [int]$Port = 8765,
 
+    [ValidateSet('gatekeeper', 'repository-admin', 'workflow-sync', 'release', 'security-audit', 'dispatch', 'upstream-read')]
+    [string]$Profile = 'gatekeeper',
+
     [switch]$NoBrowser
 )
 
@@ -42,7 +45,8 @@ $server = Join-Path $PSScriptRoot '..\tools\gatekeeper-app-setup\server.py'
 $arguments = @(
     $server,
     '--organization', $Organization,
-    '--port', [string]$Port
+    '--port', [string]$Port,
+    '--profile', $Profile
 )
 if ($Repository) {
     $arguments += @('--repository', $Repository, '--run-id', $RunId)

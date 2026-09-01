@@ -1,7 +1,7 @@
-# Universal Gatekeeper GitHub App setup
+# Purpose-scoped GitHub App setup
 
-This loopback-only helper provisions the organization-level credentials used by
-managed universal gatekeeper kickers. It combines GitHub's App manifest flow
+This loopback-only helper provisions organization-level GitHub App credentials
+used by the Automation Hub. It combines GitHub's App manifest flow
 with the authenticated GitHub CLI so the private key does not need to be copied
 through repository settings by hand.
 
@@ -12,6 +12,20 @@ From the repository root on Windows:
 ```powershell
 .\scripts\start-gatekeeper-app-setup.ps1
 ```
+
+Select the least-privilege profile for the capability being migrated:
+
+```powershell
+.\scripts\start-gatekeeper-app-setup.ps1 -Profile repository-admin
+.\scripts\start-gatekeeper-app-setup.ps1 -Profile workflow-sync
+.\scripts\start-gatekeeper-app-setup.ps1 -Profile release
+.\scripts\start-gatekeeper-app-setup.ps1 -Profile security-audit
+.\scripts\start-gatekeeper-app-setup.ps1 -Profile dispatch
+.\scripts\start-gatekeeper-app-setup.ps1 -Profile upstream-read
+```
+
+The default `gatekeeper` profile maintains the existing read-only dispatcher
+authorization App. Do not add repository write permissions to that App.
 
 To offer a button that re-runs the failed authorization job after setup is
 verified:
@@ -34,29 +48,26 @@ login`, the commonly required OAuth scopes are `admin:org`, `repo`, and
 
 ## What the helper automates
 
-1. Detects an existing configured App by `GATEKEEPER_APP_ID`, then checks its
-   installation, organization Members permission, and repository scope.
+1. Detects an existing configured App by the selected profile's App ID variable,
+   then checks its installation, permissions, and repository scope.
 2. Recommends repairing the existing App instead of recreating it. The page
    links directly to App permission and installation access settings.
 3. Supports private-key rotation by accepting a newly generated PEM and piping
    it directly to the organization secret without writing it to disk.
 4. When replacement is intentional, builds a collision-resistant private
-   GitHub App manifest requesting only organization
-   **Members: Read-only**.
+   GitHub App manifest requesting only the selected profile's permissions.
 5. Sends that manifest directly to GitHub for owner review and confirmation.
 6. Exchanges GitHub's one-time callback code directly from the browser.
 7. Sends the returned App ID and private key only to the loopback service.
-8. Sets organization variable `GATEKEEPER_APP_ID` with all-repository
-   visibility.
-9. Pipes the key through standard input to `gh secret set` as organization
-   secret `GATEKEEPER_APP_PRIVATE_KEY`, also with all-repository visibility.
-10. Opens the GitHub App installation page and verifies the installation and
-    `members: read` permission. Selected-repository scope is valid and preferred
-    because the App requests no repository permissions; token minting uses its
-    organization installation.
+8. Sets the profile's organization App ID variable with all-repository visibility.
+9. Pipes the key through standard input to `gh secret set` as the profile's
+   organization private-key secret, also with all-repository visibility.
+10. Opens the GitHub App installation page and verifies the installation,
+   permissions, and repository coverage. Repository-capable profiles require
+   all-repository coverage when replacing organization-wide PATs.
 11. Optionally queues the failed jobs from a supplied workflow run.
 
-GitHub App installation tokens are minted afresh by each workflow run and
+GitHub App installation tokens are minted afresh by each workflow job and
 expire automatically. There is no separate reauthentication operation. Repair
 means restoring the installation scope, required permission, App ID variable,
 or private-key secret; replacement is the last resort.
@@ -75,7 +86,6 @@ installation. Those two confirmations cannot and should not be bypassed.
   written to disk. It exists briefly in browser memory and is piped to `gh`
   over standard input.
 - Organization-wide Actions variable and secret visibility is intentional
-  because the managed kicker is shared across repositories. The App installation
-  itself can remain selected-repository because it requests only an organization
-  permission.
+   because the managed workflows are shared across repositories. Install each App
+   only as broadly as its profile requires.
 - Stop the process with Ctrl+C after verification.

@@ -45,12 +45,9 @@
 # Trigger: `workflow_dispatch` ONLY. This workflow file is itself in
 # the runtime allowlist, so it lives ONLY on the development branch.
 #
-# Token model: prefers `secrets.RELEASE_PAT` for the push + tag
-# (admin role / bypass for protected `main`). Falls back to
-# `GITHUB_TOKEN` when no PAT is wired — in which case `main`'s
-# branch protection must allow GitHub Actions to push. Repository
-# metadata writes prefer `REPO_ADMIN_PAT`, then reuse `RELEASE_PAT`;
-# without either token the post-release metadata stage soft-skips.
+# Token model: prefers a short-lived release App token for push + tag,
+# temporarily falls back to RELEASE_PAT, then GITHUB_TOKEN. Repository
+# metadata independently prefers the repository-admin App.
 name: Hub runtime release · promote default branch → main
 
 "on":
@@ -218,11 +215,26 @@ jobs:
       target_sha: ${{ steps.promote.outputs.target_sha }}
       promoted:   ${{ steps.promote.outputs.promoted }}
     steps:
+      - name: Mint release token
+        id: release-app
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
       - id: token
         env:
+          HAS_RELEASE_APP: ${{ steps.release-app.outputs.token != '' && 'true' || 'false' }}
           HAS_RELEASE_PAT: ${{ secrets.RELEASE_PAT != '' && 'true' || 'false' }}
         run: |
-          if [ "${HAS_RELEASE_PAT}" = "true" ]; then
+          if [ "${HAS_RELEASE_APP}" = "true" ]; then
+            echo "kind=app" >> "${GITHUB_OUTPUT}"
+            echo "Using a short-lived RELEASE_APP token for push + tag."
+          elif [ "${HAS_RELEASE_PAT}" = "true" ]; then
             echo "kind=pat" >> "${GITHUB_OUTPUT}"
             echo "Using secrets.RELEASE_PAT for push + tag."
           else
@@ -234,7 +246,7 @@ jobs:
           # Check out the development/default source branch.
           ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
-          token: ${{ steps.token.outputs.kind == 'pat' && secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.release-app.outputs.token || secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           # Persist creds so subsequent `git push` reuses the resolved token.
           persist-credentials: true
       - id: promote
@@ -486,5 +498,6 @@ jobs:
       show_packages: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.show_packages == true }}
       dry_run: ${{ fromJson(needs.compute-tag.outputs.cfg).repo_metadata.dry_run == true }}
     secrets:
+      REPO_ADMIN_APP_PRIVATE_KEY: ${{ secrets.REPO_ADMIN_APP_PRIVATE_KEY }}
       REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}
       RELEASE_PAT: ${{ secrets.RELEASE_PAT }}

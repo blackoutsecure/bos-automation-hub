@@ -984,13 +984,18 @@ Common secrets are stage-dependent:
 
 - Docker: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`;
 - Balena: `BALENA_API_TOKEN`;
-- private upstreams: `UPSTREAM_TOKEN`;
+- private same-organization upstreams: `UPSTREAM_READ_APP_ID` + `UPSTREAM_READ_APP_PRIVATE_KEY`;
 - Cloudflare: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, optionally
   `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_PAGES_ADMIN_TOKEN`;
-- administration/scanning: `REPO_ADMIN_PAT`, `SCANNING_PAT`;
-- workflow-file propagation: `WORKFLOW_SYNC_PAT`;
-- org-wide kicker fan-out: `ORG_KICK_PAT` (hub repository only);
-- hub promotion: `RELEASE_PAT` when protected-branch bypass is required.
+- repository administration: `REPO_ADMIN_APP_ID` + `REPO_ADMIN_APP_PRIVATE_KEY`;
+- security audit: `SECURITY_AUDIT_APP_ID` + `SECURITY_AUDIT_APP_PRIVATE_KEY`;
+- workflow-file propagation: `WORKFLOW_SYNC_APP_ID` + `WORKFLOW_SYNC_APP_PRIVATE_KEY`;
+- org-wide kicker fan-out: `DISPATCH_APP_ID` + `DISPATCH_APP_PRIVATE_KEY`;
+- hub promotion: `RELEASE_APP_ID` + `RELEASE_APP_PRIVATE_KEY`.
+
+The corresponding `*_PAT` secrets remain temporary compatibility fallbacks
+for migration. Do not create new PATs for these capabilities. After each App
+profile is installed and its workflow succeeds, delete the replaced PAT secret.
 
 ### Secrets pipelining strategy
 
@@ -1048,6 +1053,24 @@ then mint a token in the workflow with
 [`automation-app-token`](.github/actions/automation-app-token/action.yml))
 in place of a PAT.
 
+The loopback-only
+[`purpose-scoped App setup helper`](tools/gatekeeper-app-setup/README.md)
+automates manifest creation, organization variable/secret configuration, and
+installation verification. Available profiles and minimum permissions are:
+
+| Profile | Credentials | GitHub App permissions |
+| --- | --- | --- |
+| `gatekeeper` | `GATEKEEPER_APP_ID`, `GATEKEEPER_APP_PRIVATE_KEY` | Organization Members: read |
+| `repository-admin` | `REPO_ADMIN_APP_ID`, `REPO_ADMIN_APP_PRIVATE_KEY` | Administration: write |
+| `workflow-sync` | `WORKFLOW_SYNC_APP_ID`, `WORKFLOW_SYNC_APP_PRIVATE_KEY` | Contents, Pull requests, Workflows: write |
+| `release` | `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY` | Contents: write |
+| `security-audit` | `SECURITY_AUDIT_APP_ID`, `SECURITY_AUDIT_APP_PRIVATE_KEY` | Actions, Administration, Contents, secret scanning alerts, Dependabot alerts: read; Security events: write |
+| `dispatch` | `DISPATCH_APP_ID`, `DISPATCH_APP_PRIVATE_KEY` | Actions: write; Contents: read |
+| `upstream-read` | `UPSTREAM_READ_APP_ID`, `UPSTREAM_READ_APP_PRIVATE_KEY` | Contents: read |
+
+Keep these Apps separate. In particular, never add repository write permissions
+to the dispatcher-authorization Gatekeeper App.
+
 #### Provider setup walkthroughs
 
 **Docker Hub** — Account Settings → Security → New Access Token, scoped
@@ -1075,7 +1098,7 @@ a fleet-scoped key over an account-wide one. Store as `BALENA_API_TOKEN`
 | Fine-grained PATs                       | Manual; replace with a purpose-scoped GitHub App wherever the credential only talks to the GitHub API. |
 | Docker Hub / Balena / Cloudflare tokens | Manual, provider-side; set the shortest TTL the provider allows and calendar-reminder before expiry.   |
 
-### Elevated posture scanning (`SCANNING_PAT`)
+### Elevated posture scanning (`SECURITY_AUDIT_APP`)
 
 The code-scanning kit's posture probes (secret-scanning enablement, Dependabot
 alerts enablement, push-protection visibility, branch-protection drift) need
@@ -1083,22 +1106,18 @@ Administration/security read access that the default `GITHUB_TOKEN` does not
 have; without it those probes report indeterminate rather than `pass`/`warn`/
 `fail`.
 
-1. Create a PAT for the repositories to audit.
-2. Preferred: a fine-grained PAT scoped only to the selected repositories.
-3. Grant read access for repository metadata plus the security and
-   administration surfaces the posture checks need (secret scanning alerts,
-   Dependabot alerts, administration).
-4. Fallback: a classic PAT with the `repo` scope.
-5. Store the token as an Actions secret named `SCANNING_PAT` at the
-   organization or repository level.
-6. Re-run the workflow and confirm the previously indeterminate rows now show
+1. Run the setup helper with `-Profile security-audit`.
+2. Review the generated minimum permissions and install it for all managed
+  repositories.
+3. Re-run the workflow and confirm the previously indeterminate rows now show
    `pass`, `warn`, or `fail`.
+4. Delete the legacy `SCANNING_PAT` after successful verification.
 
 No consumer wiring is required beyond creating the secret:
 
 - [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)'s
   `code-scan` job always passes
-  `github_token: ${{ secrets.SCANNING_PAT || secrets.GITHUB_TOKEN }}`, and both
+  a short-lived App token first, then the legacy PAT or `GITHUB_TOKEN`, and both
   managed kickers already forward `secrets.SCANNING_PAT` unconditionally — the
   PAT is used automatically the moment the secret exists, with no config
   change needed.
@@ -1111,7 +1130,7 @@ No consumer wiring is required beyond creating the secret:
   is absent (the kit transparently falls back to `GITHUB_TOKEN`), so enabling
   it ahead of provisioning the secret is safe.
 
-### Workflow-file propagation (`WORKFLOW_SYNC_PAT`)
+### Workflow-file propagation (`WORKFLOW_SYNC_APP`)
 
 `GITHUB_TOKEN` can never push changes to `.github/workflows/**` — this is a
 hard GitHub platform restriction, not something a workflow's `permissions:`
@@ -1121,16 +1140,12 @@ managed kicker workflow files
 `bos-universal-marketplace-kicker.yml`, `bos-universal-security-kicker.yml`,
 `bos-universal-sync-kicker.yml`) and syncs every other managed file normally.
 
-1. Create a fine-grained PAT scoped to the repositories that install the
-   kicker workflows, with the **Workflows** repository permission set to
-   **Read and write** (a classic PAT with the `workflow` scope also works).
-2. Store it as an Actions secret named `WORKFLOW_SYNC_PAT` at the
-   organization or repository level.
-3. No further wiring is required: the sync kicker already forwards
-   `secrets.WORKFLOW_SYNC_PAT` unconditionally, and the reusable workflow
-   starts propagating the kicker files as soon as the secret exists.
+1. Run the setup helper with `-Profile workflow-sync`.
+2. Install it for all repositories receiving managed workflow files.
+3. Re-run managed sync and confirm workflow-file propagation succeeds.
+4. Delete the legacy `WORKFLOW_SYNC_PAT`.
 
-### Org-wide kicker fan-out (`ORG_KICK_PAT`)
+### Org-wide kicker fan-out (`DISPATCH_APP`)
 
 [`bos-org-kicker-fanout.yml`](.github/workflows/bos-org-kicker-fanout.yml) runs a
 universal kicker across every repository in the organization, and
@@ -1139,11 +1154,9 @@ dispatches it automatically whenever `sync-files/**` changes. The job-scoped
 `GITHUB_TOKEN` cannot dispatch workflows in other repositories, so the fan-out
 fails closed with an explicit error until a credential exists.
 
-1. Create a fine-grained PAT scoped to the organization's repositories with
-   **Actions: Read and write** and **Metadata: Read**.
-2. Store it as an Actions secret named `ORG_KICK_PAT` on this hub repository
-   (or at the organization level). `DISPATCH_TOKEN` is accepted as a fallback
-   name.
+Run the setup helper with `-Profile dispatch`, install it for all participating
+repositories, and verify a dry-run fan-out. `ORG_KICK_PAT` and `DISPATCH_TOKEN`
+remain temporary compatibility fallbacks only.
 
 Targets are enumerated from the organization API rather than a hardcoded list.
 Participation is opt-out, not opt-in: a repository declines by setting its own

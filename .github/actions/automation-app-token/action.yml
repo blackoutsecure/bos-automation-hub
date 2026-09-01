@@ -29,11 +29,40 @@ inputs:
       installation can access — prefer setting this explicitly.
     required: false
     default: ""
-  permissions: # yamllint disable-line rule:line-length
-    description: >-
-      Newline-separated `key: value` permission overrides, e.g.
-      `contents: write`. Empty uses the App's own installed permissions,
-      which should already be the minimum the App was granted.
+  permission_actions:
+    description: Optional Actions token permission (`read` or `write`).
+    required: false
+    default: ""
+  permission_administration:
+    description: Optional repository Administration token permission (`read` or `write`).
+    required: false
+    default: ""
+  permission_contents:
+    description: Optional repository Contents token permission (`read` or `write`).
+    required: false
+    default: ""
+  permission_members:
+    description: Optional organization Members token permission (`read` or `write`).
+    required: false
+    default: ""
+  permission_pull_requests:
+    description: Optional Pull requests token permission (`read` or `write`).
+    required: false
+    default: ""
+  permission_secret_scanning_alerts:
+    description: Optional Secret scanning alerts token permission (`read` or `write`).
+    required: false
+    default: ""
+  permission_security_events:
+    description: Optional Security events token permission (`read` or `write`).
+    required: false
+    default: ""
+  permission_vulnerability_alerts:
+    description: Optional Dependabot alerts token permission (`read` or `write`).
+    required: false
+    default: ""
+  permission_workflows:
+    description: Optional Workflows token permission (`write`).
     required: false
     default: ""
 outputs:
@@ -55,4 +84,12 @@ runs:
         private-key: ${{ inputs.private_key }}
         owner: ${{ inputs.owner }}
         repositories: ${{ inputs.repositories }}
-        permissions: ${{ inputs.permissions }}
+        permission-actions: ${{ inputs.permission_actions }}
+        permission-administration: ${{ inputs.permission_administration }}
+        permission-contents: ${{ inputs.permission_contents }}
+        permission-members: ${{ inputs.permission_members }}
+        permission-pull-requests: ${{ inputs.permission_pull_requests }}
+        permission-secret-scanning-alerts: ${{ inputs.permission_secret_scanning_alerts }}
+        permission-security-events: ${{ inputs.permission_security_events }}
+        permission-vulnerability-alerts: ${{ inputs.permission_vulnerability_alerts }}
+        permission-workflows: ${{ inputs.permission_workflows }}

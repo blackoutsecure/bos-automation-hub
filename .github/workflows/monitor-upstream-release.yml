@@ -170,6 +170,12 @@ name: Blackout Secure Upstream Watcher
           Ignored for `source: container_image` / `npm` / `pypi` /
           `generic_url`, which do not call the GitHub API.
         required: false
+      UPSTREAM_READ_APP_PRIVATE_KEY:
+        description: Private key for a contents-read App installed on the private upstream repository.
+        required: false
+      DISPATCH_APP_PRIVATE_KEY:
+        description: Private key for the purpose-scoped workflow dispatch GitHub App.
+        required: false
     outputs:
       changed:
         description: '`true` when the upstream version differed from the tracked file.'
@@ -291,6 +297,29 @@ jobs:
       upstream_metadata: ${{ steps.discover.outputs.metadata }}
       dispatched: ${{ steps.dispatch.outputs.dispatched }}
     steps:
+      - name: Mint upstream read token
+        id: upstream-app
+        if: vars.UPSTREAM_READ_APP_ID != '' && startsWith(inputs.upstream_repo, format('{0}/', github.repository_owner))
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.UPSTREAM_READ_APP_ID }}
+          private-key: ${{ secrets.UPSTREAM_READ_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.upstream_repo }}
+          permission-contents: read
+
+      - name: Mint dispatch token
+        id: dispatch-app
+        if: vars.DISPATCH_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.DISPATCH_APP_ID }}
+          private-key: ${{ secrets.DISPATCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: write
+          permission-contents: read
+
       - name: Preflight validation
         env:
           TRACK_FILE: ${{ inputs.track_file }}
@@ -369,7 +398,7 @@ jobs:
           include_prereleases: ${{ inputs.include_prereleases }}
           strip_v_prefix:      ${{ inputs.strip_v_prefix }}
           tracker_path:        ${{ inputs.track_file }}
-          github_token:        ${{ secrets.UPSTREAM_TOKEN || github.token }}
+          github_token:        ${{ steps.upstream-app.outputs.token || secrets.UPSTREAM_TOKEN || github.token }}
 
       # Dispatch happens BEFORE the commit so a transient dispatch failure
       # leaves the marker file unchanged and the next scheduled run retries.
@@ -377,7 +406,7 @@ jobs:
         id: dispatch
         if: steps.discover.outputs.changed == 'true' || inputs.force_dispatch == 'true'
         env:
-          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.dispatch-app.outputs.token || secrets.DISPATCH_TOKEN || github.token }}
           REPO: ${{ github.repository }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           TARGET_WORKFLOWS: ${{ inputs.target_workflows }}

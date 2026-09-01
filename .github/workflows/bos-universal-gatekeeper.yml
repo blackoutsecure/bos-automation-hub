@@ -1143,6 +1143,12 @@ name: '[RUNTIME] Blackout Secure Universal Gatekeeper'
           **private** repo outside the caller. See that workflow for scope
           details. Falls back to `GITHUB_TOKEN`.
         required: false
+      UPSTREAM_READ_APP_PRIVATE_KEY:
+        description: Private key for a contents-read App installed on private same-organization upstream repositories.
+        required: false
+      DISPATCH_APP_PRIVATE_KEY:
+        description: Private key for the purpose-scoped workflow dispatch GitHub App.
+        required: false
       SCANNING_PAT:
         description: >-
           Optional PAT forwarded to the consolidated security-scan stage's
@@ -1163,6 +1169,9 @@ name: '[RUNTIME] Blackout Secure Universal Gatekeeper'
           granted by an org owner), authorized for any SAML SSO orgs the
           PAT will scan against.
         required: false
+      SECURITY_AUDIT_APP_PRIVATE_KEY:
+        description: Private key for the purpose-scoped security audit GitHub App.
+        required: false
       REPO_ADMIN_PAT:
         description: >-
           PAT used by the repo-metadata stage to PATCH the repository
@@ -1179,6 +1188,9 @@ name: '[RUNTIME] Blackout Secure Universal Gatekeeper'
           Fine-grained PAT minimum permissions on the target repo:
           `Administration: Write` + `Metadata: Read`. Classic PAT
           equivalent: the `repo` scope.
+        required: false
+      REPO_ADMIN_APP_PRIVATE_KEY:
+        description: Private key for the purpose-scoped repository administration GitHub App.
         required: false
       RELEASE_PAT:
         description: >-
@@ -1306,6 +1318,7 @@ jobs:
       # `uses:` block, which is what makes `secrets.scanning_pat`
       # resolvable here.
       SCANNING_PAT: ${{ secrets.SCANNING_PAT }}
+      SECURITY_AUDIT_APP_PRIVATE_KEY: ${{ secrets.SECURITY_AUDIT_APP_PRIVATE_KEY }}
 
   # ---------------------------------------------------------------------------
   # Stage 1 — detect upstream change (commits tracking file on the default branch).
@@ -1374,6 +1387,8 @@ jobs:
       # can supply a PAT with `contents: read` on it. Unset = fall back to
       # `GITHUB_TOKEN` inside the monitor (works for public upstreams only).
       UPSTREAM_TOKEN: ${{ secrets.UPSTREAM_TOKEN }}
+      UPSTREAM_READ_APP_PRIVATE_KEY: ${{ secrets.UPSTREAM_READ_APP_PRIVATE_KEY }}
+      DISPATCH_APP_PRIVATE_KEY: ${{ secrets.DISPATCH_APP_PRIVATE_KEY }}
 
   # ---------------------------------------------------------------------------
   # Stage 2 — run the full release pipeline against the new upstream version.
@@ -1713,3 +1728,4 @@ jobs:
       dry_run: ${{ inputs.repo_metadata_dry_run }}
     secrets:
       REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT }}
+      REPO_ADMIN_APP_PRIVATE_KEY: ${{ secrets.REPO_ADMIN_APP_PRIVATE_KEY }}

@@ -190,6 +190,9 @@ name: Security Scan
           advanced posture probes (PS002/PS003). Optional. Ignored
           unless `inputs.use_advanced_pat` is `true`.
         required: false
+      SECURITY_AUDIT_APP_PRIVATE_KEY:
+        description: Private key for the purpose-scoped security audit GitHub App.
+        required: false
     outputs:
       scan_outcome:
         description: >-
@@ -226,6 +229,22 @@ jobs:
     outputs:
       languages: ${{ steps.resolve.outputs.languages }}
     steps:
+      - name: Mint security audit token
+        id: security-app
+        if: inputs.use_advanced_pat && vars.SECURITY_AUDIT_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.SECURITY_AUDIT_APP_ID }}
+          private-key: ${{ secrets.SECURITY_AUDIT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-administration: read
+          permission-contents: read
+          permission-secret-scanning-alerts: read
+          permission-security-events: write
+          permission-vulnerability-alerts: read
+
       - if: inputs.codeql_languages == 'auto'
         name: Checkout (sparse — workflows only)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -237,7 +256,7 @@ jobs:
         name: Resolve language matrix
         env:
           INPUT_LANGUAGES: ${{ inputs.codeql_languages }}
-          GH_TOKEN: ${{ (inputs.use_advanced_pat && secrets.SCANNING_PAT != '') && secrets.SCANNING_PAT || github.token }}
+          GH_TOKEN: ${{ steps.security-app.outputs.token || ((inputs.use_advanced_pat && secrets.SCANNING_PAT != '') && secrets.SCANNING_PAT || github.token) }}
           REPO: ${{ github.repository }}
         shell: bash
         run: |
@@ -329,6 +348,22 @@ jobs:
     outputs:
       outcome: ${{ steps.kit.outputs.outcome }}
     steps:
+      - name: Mint security audit token
+        id: security-app
+        if: inputs.use_advanced_pat && vars.SECURITY_AUDIT_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.SECURITY_AUDIT_APP_ID }}
+          private-key: ${{ secrets.SECURITY_AUDIT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-administration: read
+          permission-contents: read
+          permission-secret-scanning-alerts: read
+          permission-security-events: write
+          permission-vulnerability-alerts: read
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -347,7 +382,7 @@ jobs:
         name: Run BOS Code Scanning Kit
         uses: blackoutsecure/bos-code-scanning-kit@1674e4e0de38ba66ce8a201db70cfd57ff47e225 # v1.0.43
         with:
-          github_token: ${{ (inputs.use_advanced_pat && secrets.SCANNING_PAT != '') && secrets.SCANNING_PAT || github.token }}
+          github_token: ${{ steps.security-app.outputs.token || ((inputs.use_advanced_pat && secrets.SCANNING_PAT != '') && secrets.SCANNING_PAT || github.token) }}
           enable_posture: ${{ inputs.enable_posture }}
           enable_scanners: ${{ inputs.enable_scanners }}
           enable_upload: ${{ inputs.enable_upload }}

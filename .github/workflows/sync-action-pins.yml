@@ -14,8 +14,8 @@
 # `actions/unpinned-tag` all keep passing — while a bad upstream release
 # lands as a reviewable PR instead of instantly breaking every consumer.
 #
-# Requires `WORKFLOW_SYNC_PAT`: GITHUB_TOKEN can never write to
-# `.github/workflows/**`, which is where most of these pins live.
+# Prefers the workflow-sync GitHub App. The legacy PAT remains a migration
+# fallback because GITHUB_TOKEN cannot write `.github/workflows/**`.
 name: Sync first-party action pins
 
 "on":
@@ -47,16 +47,30 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - name: Mint workflow synchronization token
+        id: workflow-app
+        if: vars.WORKFLOW_SYNC_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.WORKFLOW_SYNC_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_SYNC_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
       - name: Resolve workflow-write capability
         id: pat
         env:
+          HAS_WORKFLOW_APP: ${{ steps.workflow-app.outputs.token != '' && 'true' || 'false' }}
           HAS_WORKFLOW_PAT: ${{ secrets.WORKFLOW_SYNC_PAT != '' && 'true' || 'false' }}
-        run: echo "has_pat=${HAS_WORKFLOW_PAT}" >> "${GITHUB_OUTPUT}"
+        run: echo "has_token=$([[ "${HAS_WORKFLOW_APP}" = 'true' || "${HAS_WORKFLOW_PAT}" = 'true' ]] && echo true || echo false)" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          token: ${{ secrets.WORKFLOW_SYNC_PAT || github.token }}
+          token: ${{ steps.workflow-app.outputs.token || secrets.WORKFLOW_SYNC_PAT || github.token }}
           persist-credentials: true
 
       - name: Resolve newest tags and rewrite pins
@@ -73,16 +87,16 @@ jobs:
           git --no-pager diff
 
       - name: Explain missing workflow token
-        if: steps.sync.outputs.changed == 'true' && !inputs.dry_run && steps.pat.outputs.has_pat != 'true'
+        if: steps.sync.outputs.changed == 'true' && !inputs.dry_run && steps.pat.outputs.has_token != 'true'
         run: |
           set -euo pipefail
-          echo "::warning::Action pins are stale but WORKFLOW_SYNC_PAT is not configured. GITHUB_TOKEN cannot write to .github/workflows/**, so no PR was opened."
+          echo "::warning::Action pins are stale but no workflow-sync App token or legacy PAT is configured, so no PR was opened."
           git --no-pager diff
 
       - name: Open pin-bump pull request
-        if: steps.sync.outputs.changed == 'true' && !inputs.dry_run && steps.pat.outputs.has_pat == 'true'
+        if: steps.sync.outputs.changed == 'true' && !inputs.dry_run && steps.pat.outputs.has_token == 'true'
         env:
-          GH_TOKEN: ${{ secrets.WORKFLOW_SYNC_PAT }}
+          GH_TOKEN: ${{ steps.workflow-app.outputs.token || secrets.WORKFLOW_SYNC_PAT }}
           BRANCH: automation/action-pins
         run: |
           set -euo pipefail

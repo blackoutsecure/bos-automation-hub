@@ -122,6 +122,9 @@ name: Repository Metadata Sync
           Preferred fine-grained PAT with Administration: write and Metadata:
           read on the caller repository.
         required: false
+      REPO_ADMIN_APP_PRIVATE_KEY:
+        description: Private key for the purpose-scoped repository administration GitHub App.
+        required: false
       RELEASE_PAT:
         description: >-
           Fallback PAT for repositories using one credential for promotion and
@@ -206,9 +209,21 @@ jobs:
       report_json: ${{ steps.metadata.outputs.report_json }}
       skipped: ${{ steps.token.outputs.available != 'true' }}
     steps:
+      - name: Mint repository administration token
+        id: repo-admin-app
+        if: vars.REPO_ADMIN_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.REPO_ADMIN_APP_ID }}
+          private-key: ${{ secrets.REPO_ADMIN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: write
+
       - name: Resolve metadata token
         id: token
         env:
+          HAS_APP_TOKEN: ${{ steps.repo-admin-app.outputs.token != '' && 'true' || 'false' }}
           HAS_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT != '' && 'true' || 'false' }}
           HAS_RELEASE_PAT: ${{ secrets.RELEASE_PAT != '' && 'true' || 'false' }}
           DRY_RUN: ${{ inputs.dry_run }}
@@ -217,7 +232,10 @@ jobs:
 
           available='false'
           token_source='none'
-          if [ "${HAS_ADMIN_PAT}" = "true" ]; then
+          if [ "${HAS_APP_TOKEN}" = "true" ]; then
+            available='true'
+            token_source='REPO_ADMIN_APP'
+          elif [ "${HAS_ADMIN_PAT}" = "true" ]; then
             available='true'
             token_source='REPO_ADMIN_PAT'
           elif [ "${HAS_RELEASE_PAT}" = "true" ]; then
@@ -236,7 +254,7 @@ jobs:
             {
               echo "## Repository metadata sync"
               echo ""
-              echo "Skipped because neither \`REPO_ADMIN_PAT\` nor \`RELEASE_PAT\` was provided."
+              echo "Skipped because no repository-admin App token or legacy PAT was provided."
               echo ""
               echo "A real sync requires a token with \`Administration: write\` and \`Metadata: read\` on this repository."
             } >> "${GITHUB_STEP_SUMMARY}"
@@ -258,7 +276,7 @@ jobs:
         id: metadata
         uses: blackoutsecure/bos-repo-about-sync-action@f7026ca11eeff654b376faa96a9a007e8d611a36 # v0.1.27
         with:
-          github_token: ${{ secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token }}
+          github_token: ${{ steps.repo-admin-app.outputs.token || secrets.REPO_ADMIN_PAT || secrets.RELEASE_PAT || github.token }}
           readme_path: ${{ inputs.readme_path }}
           description: ${{ inputs.description }}
           description_max_length: ${{ inputs.description_max_length }}
