@@ -351,9 +351,9 @@ def main() -> None:
 
     assert "managed-files-guard:" not in kicker
     assert "bos-universal-sync.yml@main" not in workflow
-    assert (
-        "security_scan.enable != false" in kicker
-    ), "managed Universal callers must enable the release security gate by default"
+    assert kicker.count(
+        "enable_security_scan: ${{ needs.parse-config.outputs.run_security == 'true'"
+    ) == 2, "managed Universal callers must enable security for full and security-only routes"
 
     promote = (ROOT / ".github/workflows/release-promote.yml").read_text()
     dependabot_input = promote.split("      include_dependabot_config:\n", 1)[
@@ -412,6 +412,7 @@ def main() -> None:
     assert "::notice title=Dispatch route::" in kicker
     assert "::notice title=Dispatch route deferred::" in kicker
     assert "SYNC_DEV_CHANGED:" in kicker
+    assert kicker.count("enable_security_scan: ${{ needs.parse-config.outputs.run_security == 'true'") == 2
     assert kicker.count("always() && !cancelled() && needs.parse-config.result == 'success'") >= 4
     assert kicker.count("&& needs.parse-config.result == 'success'") >= 6
     assert "# Blackout Secure README Header Audit" in readme_header_action
