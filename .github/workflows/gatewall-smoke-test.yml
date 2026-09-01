@@ -1,0 +1,137 @@
+# Non-mutating verification for each Gatewall permission subset.
+name: Gatewall App Smoke Test
+
+run-name: Gatewall smoke / ${{ inputs.capability }}
+
+"on":
+  workflow_dispatch:
+    inputs:
+      capability:
+        description: Gatewall permission subset to mint and verify.
+        required: true
+        type: choice
+        options:
+          - administration
+          - workflow-sync
+          - release
+          - security
+          - dispatch
+          - upstream-read
+        default: security
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    name: Authorize smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Mint authorization token
+        id: authz-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.GATEKEEPER_APP_ID }}
+          private-key: ${{ secrets.GATEKEEPER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-members: read
+
+      - name: Check dispatcher authorization
+        uses: blackoutsecure/bos-workflow-gatekeeper@eae1fdd8ab731e72bf890fdb7c1504415d12d88c # v1.0.2
+        with:
+          actor: ${{ github.triggering_actor || github.actor }}
+          organization: ${{ github.repository_owner }}
+          repository: ${{ github.repository }}
+          event_name: ${{ github.event_name }}
+          allow_org_admin: true
+          fail_closed: true
+          token: ${{ steps.authz-token.outputs.token }}
+
+  smoke:
+    name: Verify ${{ inputs.capability }} token
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Mint administration token
+        id: administration
+        if: inputs.capability == 'administration'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: write
+
+      - name: Mint workflow synchronization token
+        id: workflow-sync
+        if: inputs.capability == 'workflow-sync'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Mint release token
+        id: release
+        if: inputs.capability == 'release'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Mint security audit token
+        id: security
+        if: inputs.capability == 'security'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-administration: read
+          permission-contents: read
+          permission-secret-scanning-alerts: read
+          permission-security-events: write
+          permission-vulnerability-alerts: read
+
+      - name: Mint dispatch token
+        id: dispatch
+        if: inputs.capability == 'dispatch'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-actions: write
+          permission-contents: read
+
+      - name: Mint upstream read token
+        id: upstream-read
+        if: inputs.capability == 'upstream-read'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: read
+
+      - name: Verify token identity
+        env:
+          GH_TOKEN: ${{ steps.administration.outputs.token || steps.workflow-sync.outputs.token || steps.release.outputs.token || steps.security.outputs.token || steps.dispatch.outputs.token || steps.upstream-read.outputs.token }}
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN}"
+          gh api /installation/repositories --jq '.total_count' >/dev/null
+          echo "::notice title=Gatewall verified::${{ inputs.capability }} token minted with its restricted permission set."

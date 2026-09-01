@@ -546,6 +546,7 @@ def main() -> None:
         "bos-org-kicker-fanout.yml",
         "bos-hub-managed-sync-propagate.yml",
         "bos-hub-gatekeeper-kicker.yml",
+        "gatewall-smoke-test.yml",
         "osi-license-catalogue-refresh.yml",
     }
 
