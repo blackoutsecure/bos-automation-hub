@@ -523,7 +523,7 @@ def main() -> None:
     assert promote_hub_refs and set(promote_hub_refs) == {"main"}, promote_hub_refs
     assert marketplace_promote.count(
         "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/preflight-runner-config@main"
+        ".github/actions/shared/preflight-runner-config@main"
     ) == 1
     assert "LATEST=\"$(git tag --list" not in marketplace_promote
     publisher_call = (

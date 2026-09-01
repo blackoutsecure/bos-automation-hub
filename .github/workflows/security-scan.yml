@@ -212,7 +212,7 @@ jobs:
     timeout-minutes: 2
     permissions: {}
     steps:
-      - uses: blackoutsecure/bos-automation-hub/.github/actions/preflight-runner-config@main
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
         with:
           default_runner: ${{ vars.DEFAULT_RUNNER }}
           runner_x64: ${{ vars.RUNNER_X64 }}

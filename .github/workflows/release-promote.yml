@@ -307,7 +307,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - uses: blackoutsecure/bos-automation-hub/.github/actions/preflight-runner-config@main
+      - uses: blackoutsecure/bos-automation-hub/.github/actions/shared/preflight-runner-config@main
         with:
           # Forward all three runner vars so the log shows the full
           # org-var state, not just the ones this workflow enforces.
