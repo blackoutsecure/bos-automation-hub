@@ -50,6 +50,10 @@ __pycache__/
 secrets.*
 !SECRETS.md
 .secrets/
+# Local tool and downloader logs
+debug.log
+wget-log
+wget-log.*
 # <<< managed-file-sync:common <<<
 
 # >>> managed-file-sync:coverage_artifacts >>>

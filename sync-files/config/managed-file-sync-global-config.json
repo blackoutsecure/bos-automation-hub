@@ -27,7 +27,12 @@
           "*.pfx",
           "secrets.*",
           "!SECRETS.md",
-          ".secrets/"
+          ".secrets/",
+          "",
+          "# Local tool and downloader logs",
+          "debug.log",
+          "wget-log",
+          "wget-log.*"
         ]
       }
     ],
