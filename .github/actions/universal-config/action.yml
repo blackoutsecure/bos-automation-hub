@@ -25,6 +25,10 @@ inputs:
     description: "'auto' loads global_config_path when the file exists, 'true' requires it, 'false' ignores it."
     required: false
     default: "auto"
+    summary_context:
+      description: Optional service or workflow label included in the configuration summary.
+      required: false
+      default: ""
 
 outputs:
   {
@@ -72,6 +76,7 @@ runs:
         REQUIRE_MARKETPLACE_ENABLED: ${{ inputs.require_marketplace_enabled }}
         GLOBAL_CONFIG_PATH: ${{ inputs.global_config_path }}
         USE_GLOBAL_CONFIG: ${{ inputs.use_global_config }}
+        SUMMARY_CONTEXT: ${{ inputs.summary_context || github.workflow }}
       run: |
         set -euo pipefail
         python3 - <<'PY'
@@ -84,6 +89,7 @@ runs:
         require_marketplace_enabled = (os.environ.get("REQUIRE_MARKETPLACE_ENABLED") or "false").lower() == "true"
         global_config_path = (os.environ.get("GLOBAL_CONFIG_PATH") or "").strip()
         use_global_config = (os.environ.get("USE_GLOBAL_CONFIG") or "auto").strip().lower()
+        summary_context = (os.environ.get("SUMMARY_CONTEXT") or "").strip()
         output_path = os.environ["GITHUB_OUTPUT"]
         summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
 
@@ -645,50 +651,83 @@ runs:
             "managed_files_sync": bool(sync_services),
         }
         enabled_stages = ", ".join([key for key, value in stage_flags.items() if value]) or "(none)"
-        cf_site = (cloudflare_raw.get("site_url") or "").strip() or "(unset)"
-        cf_project = (cloudflare_raw.get("project_name") or "").strip() or "(unset)"
-        cf_env = (cloudflare_raw.get("deployment_environment") or "").strip() or "(unset)"
+        cf_site = (cloudflare_raw.get("site_url") or "").strip()
+        cf_project = (cloudflare_raw.get("project_name") or "").strip()
+        cf_env = (cloudflare_raw.get("deployment_environment") or "").strip()
         sync_mode = (sync_raw.get("mode") or "commit") if isinstance(sync_raw.get("mode"), str) else "commit"
-        sync_services_text = ", ".join(sync_services) if sync_services else "(none)"
-        upstream_source = (upstream.get("source") or "").strip() or "(unset)"
-        release_template_path = (release.get("template_path") or "").strip() or "(unset)"
+        sync_services_text = ", ".join(sync_services)
+        upstream_source = (upstream.get("source") or "").strip()
+        release_template_path = (release.get("template_path") or "").strip()
 
         def label_text(value):
             return ", ".join(value) if isinstance(value, list) else str(value)
 
+        audit_failures = []
+
+        def summary_value(value, *, required=False, field=""):
+            if value:
+                return f"✅ `{value}`"
+            if required:
+                audit_failures.append(field)
+                return "❌ **unset (required)**"
+            return None
+
+        summary_rows = [
+            ("Enabled stages", f"✅ `{enabled_stages}`"),
+            ("Upstream source", summary_value(
+                upstream_source,
+                required=stage_flags["docker"] or stage_flags["balena"],
+                field="upstream.source",
+            ) if stage_flags["docker"] or stage_flags["balena"] else None),
+            ("Cloudflare project", summary_value(
+                cf_project,
+                required=True,
+                field="cloudflare.project_name",
+            ) if stage_flags["cloudflare_pages"] else None),
+            ("Cloudflare environment", summary_value(cf_env) if stage_flags["cloudflare_pages"] else None),
+            ("Cloudflare site URL", summary_value(cf_site) if stage_flags["cloudflare_pages"] else None),
+            ("Sync mode", f"✅ `{sync_mode}`" if stage_flags["managed_files_sync"] else None),
+            ("Sync services", summary_value(sync_services_text) if stage_flags["managed_files_sync"] else None),
+            ("Release template path", summary_value(release_template_path) if stage_flags["github_release"] else None),
+            ("Default runner", f"✅ `{label_text(runners['default'])}`"),
+            ("Runner (x64 / arm64)", f"✅ `{label_text(runners['x64'])}` / `{label_text(runners['arm64'])}`"),
+            ("Default job timeout", f"✅ `{default_timeout}` min"),
+            ("Report policy", f"✅ `fail_on={reporting['fail_on']}`, "
+             f"summary={str(reporting['enable_job_summary']).lower()}, "
+             f"annotations={str(reporting['enable_annotations']).lower()}"),
+        ]
         summary_lines = [
-            "## Universal config snapshot",
+            "## Universal config snapshot" + (f" - {summary_context}" if summary_context else ""),
             "",
             "| Field | Value |",
             "| --- | --- |",
-            f"| Enabled stages | `{enabled_stages}` |",
-            f"| Upstream source | `{upstream_source}` |",
-            f"| Cloudflare project | `{cf_project}` |",
-            f"| Cloudflare environment | `{cf_env}` |",
-            f"| Cloudflare site URL | `{cf_site}` |",
-            f"| Sync mode | `{sync_mode}` |",
-            f"| Sync services | `{sync_services_text}` |",
-            f"| Release template path | `{release_template_path}` |",
-            f"| Default runner | `{label_text(runners['default'])}` |",
-            f"| Runner (x64 / arm64) | `{label_text(runners['x64'])}` / `{label_text(runners['arm64'])}` |",
-            f"| Default job timeout | `{default_timeout}` min |",
-            f"| Report policy | `fail_on={reporting['fail_on']}`, "
-            f"summary={str(reporting['enable_job_summary']).lower()}, "
-            f"annotations={str(reporting['enable_annotations']).lower()} |",
         ]
+        summary_lines.extend(
+            f"| {field} | {value} |"
+            for field, value in summary_rows
+            if value is not None
+        )
 
         if summary_path:
             with open(summary_path, "a", encoding="utf-8") as handle:
                 handle.write("\n".join(summary_lines) + "\n")
 
-        print("Universal config snapshot:")
+        if audit_failures:
+            for field in audit_failures:
+                error(f"::error file={config_path}::Required applicable configuration is unset: {field}.")
+            sys.exit(1)
+
+        print("Universal config snapshot" + (f" ({summary_context})" if summary_context else "") + ":")
         print(f"  enabled_stages: {enabled_stages}")
-        print(f"  upstream_source: {upstream_source}")
-        print(f"  cloudflare_project: {cf_project}")
-        print(f"  cloudflare_environment: {cf_env}")
-        print(f"  cloudflare_site_url: {cf_site}")
-        print(f"  sync_mode: {sync_mode}")
-        print(f"  sync_services: {sync_services_text}")
+        if stage_flags["docker"] or stage_flags["balena"]:
+            print(f"  upstream_source: {upstream_source or '(unset)'}")
+        if stage_flags["cloudflare_pages"]:
+            print(f"  cloudflare_project: {cf_project or '(unset)'}")
+            print(f"  cloudflare_environment: {cf_env or '(unset)'}")
+            print(f"  cloudflare_site_url: {cf_site or '(unset)'}")
+        if stage_flags["managed_files_sync"]:
+            print(f"  sync_mode: {sync_mode}")
+            print(f"  sync_services: {sync_services_text}")
         print(f"  default_runner: {label_text(runners['default'])}")
         print(f"  default_timeout_minutes: {default_timeout}")
         print(f"  reporting_fail_on: {reporting['fail_on']}")

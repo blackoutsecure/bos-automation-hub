@@ -71,7 +71,7 @@ def run_universal_config(config: object) -> subprocess.CompletedProcess[str]:
 def run_universal_config_raw(raw_text: str) -> subprocess.CompletedProcess[str]:
     action = (
         ROOT / ".github/actions/universal-config/action.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     script = action.split("        python3 - <<'PY'\n", 1)[1].split(
         "\n        PY", 1
     )[0]
@@ -85,17 +85,19 @@ def run_universal_config_raw(raw_text: str) -> subprocess.CompletedProcess[str]:
             "ALLOW_MISSING": "false",
             "GITHUB_OUTPUT": str(temp / "output"),
             "GITHUB_STEP_SUMMARY": str(temp / "summary"),
+            "SUMMARY_CONTEXT": "Universal config contract test",
         }
         result = subprocess.run(
             [sys.executable, "-c", textwrap.dedent(script)],
             cwd=temp,
             env=env,
             text=True,
+            encoding="utf-8",
             capture_output=True,
             check=False,
         )
         if result.returncode == 0:
-            result.stdout += (temp / "output").read_text()
+            result.stdout += (temp / "output").read_text(encoding="utf-8")
         return result
 
 
@@ -255,6 +257,28 @@ def main() -> None:
         entry == {"runs_on": "ubuntu-latest", "timeout_minutes": 30}
         for entry in org_defaults["workflows"].values()
     )
+
+    # The summary only lists fields relevant to enabled stages. Configured
+    # values are visibly marked as passing, while active stages cannot hide
+    # mandatory unset values behind a neutral placeholder.
+    summary = (ROOT / ".github/actions/universal-config/action.yml").read_text()
+    assert "Required applicable configuration is unset" in summary
+    assert "✅ `" in summary
+    assert "❌ **unset (required)**" in summary
+    assert "summary_context" in summary
+    assert "Universal config snapshot\" + (f\" - {summary_context}\"" in summary
+
+    missing_cloudflare_project = run_universal_config(
+        {"stages": {"cloudflare_pages": True}}
+    )
+    assert missing_cloudflare_project.returncode == 1
+    assert "Required applicable configuration is unset: cloudflare.project_name" in missing_cloudflare_project.stderr
+
+    configured_cloudflare = run_universal_config(
+        {"stages": {"cloudflare_pages": True}, "cloudflare": {"project_name": "site"}}
+    )
+    assert configured_cloudflare.returncode == 0, configured_cloudflare.stderr
+    assert "cloudflare_project: site" in configured_cloudflare.stdout
 
     # A per-workflow override wins over the org default; unset workflows
     # keep inheriting it.
