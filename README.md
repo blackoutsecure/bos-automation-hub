@@ -57,6 +57,17 @@ and routes secrets through one trusted boundary; the reusable
 already splits release, deployment, and metadata concerns into independent
 backend jobs with their own `needs`, permissions, outputs, and skip gates.
 
+It triggers on `push` to both `dev` and `main`, matching the dual-branch job
+graph (`resolve-target-ref` -> `sync-check-dev`/`sync-check-main` ->
+`release-dev`/`release-main`). It carries no `on.push.paths` filter, because
+`on:` is parsed before any job runs and cannot read a config file, so one
+`file`-mode managed template cannot express a path list that suits every repo
+shape. The `changed-paths` job decides relevance instead, from
+`triggers.push_paths` in each consumer's own `.github/bos-universal-config.json`
+(see [`sync-files/README.md`](sync-files/README.md)). It runs before
+`sync-check-*` acquires `contents: write`, so an irrelevant push never reaches a
+job that can commit, and an absent list means "run on every push".
+
 `workflow_dispatch` exposes these operations, each routed to the backend that
 owns it:
 

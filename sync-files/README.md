@@ -167,6 +167,82 @@ The service name is intentionally license-agnostic. If the organization-wide
 standard changes later, keep `license_service` selected and update only the
 service definition/template in this hub.
 
+### Proprietary license service
+
+Internal and commercial repositories that are not published as a reusable
+Action, package, or library carry the Blackout Secure Proprietary License
+instead. `proprietary_license_service` owns `LICENSE` in whole-file mode from
+[`legal/LICENSE-PROPRIETARY`](legal/LICENSE-PROPRIETARY), so those repositories
+stay byte-identical to one standard the same way Apache-2.0 repositories do.
+
+It is opt-in and deliberately absent from the default service list. Both
+services own `LICENSE` in `file` mode, and the sync engine rejects two
+non-`block` services claiming one path, so a repository selecting this one must
+disable `license_service` in the same config or the run fails with an
+ambiguous-ownership error:
+
+```json
+{
+  "managed_file_sync": {
+    "services": ["proprietary_license_service"],
+    "disabled_services": ["license_service"]
+  }
+}
+```
+
+Repositories on the launchpad express the same thing under `sync_files` in
+`bos-launchpad-config.json`.
+
+Two constraints apply before selecting it. A repository listed on the GitHub
+Marketplace must carry an OSI-approved license, and `bos-marketplace-kit`
+enforces `allowed_licenses: ["Apache-2.0"]` with `require_license_audit: fail`,
+so a Marketplace Action can never use this service. A repository that
+redistributes a copyleft dependency cannot use it either; its license is
+inherited, not chosen.
+
+Third-party components are not covered by the proprietary grant. Any repository
+using this service that bundles, vendors, or loads a third-party component must
+record that component's license in its own `NOTICE` or `NOTICE.md`.
+
+## Kicker push triggers
+
+`bos_universal_gatekeeper_kicker` fires on `push` to both `dev` and `main`,
+and carries no `on.push.paths` filter. GitHub parses the `on:` block before
+any job runs and cannot evaluate expressions there, so a single `file`-mode
+managed template cannot express a path list that fits a Docker image repo, a
+Node Action, and a static site at the same time.
+
+Relevance is decided instead by the kicker's `changed-paths` job, which reads
+an allowlist from the consumer's own `.github/bos-universal-config.json`:
+
+```json
+{
+  "triggers": {
+    "push_paths": ["action.yml", "src/**", "dist/**", "test/**"]
+  }
+}
+```
+
+The key is accepted at top level or under `launchpad`, matching how
+`universal-config` hoists the other launchpad subkeys. Patterns are shell
+globs matched against `git diff --name-only` between the push's before and
+after commits.
+
+Behaviour worth knowing:
+
+- An absent, empty, or unreadable list means "run on every push", so a repo
+  that has not opted in keeps working.
+- `.github/workflows/bos-universal-gatekeeper-kicker.yml` and
+  `.github/bos-universal-config.json` are always in scope, so a managed-file
+  sync commit to either can still re-trigger the pipeline.
+- A branch creation (all-zero before-SHA) or a force-push whose base is no
+  longer reachable fails open and runs, because neither yields a usable diff.
+- `schedule` and `workflow_dispatch` bypass the filter entirely.
+
+The job runs before `resolve-target-ref`, and therefore before
+`sync-check-dev`/`sync-check-main` hold `contents: write`, so an irrelevant
+push never reaches a job that can commit.
+
 ## Branch policy
 
 `dev` is the hub development branch; `main` is the promoted stable runtime.

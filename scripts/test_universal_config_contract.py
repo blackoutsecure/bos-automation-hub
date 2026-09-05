@@ -407,6 +407,28 @@ def main() -> None:
     assert kicker.count("security_scan_enable_kit_composite: ${{ toJSON(") == 2
     assert kicker.count("security_scan_use_advanced_pat: ${{ toJSON(") == 2
 
+    # Push trigger covers both long-lived branches: the job graph is already
+    # dual-branch (`release-dev` / `release-main` gate on `github.ref_name`),
+    # so a `main`-only trigger would leave the dev route unreachable on push.
+    assert "branches: [dev, main]" in kicker, (
+        "managed kicker must trigger on both dev and main"
+    )
+    # `on:` is parsed before any job runs and cannot read a config file, so a
+    # single file-mode template cannot carry a path list that fits every repo
+    # shape. Relevance is decided by the `changed-paths` job instead.
+    assert not re.search(r"^    paths:$", kicker, re.MULTILINE), (
+        "managed kicker must not reintroduce a static push path filter; "
+        "per-repo relevance belongs in triggers.push_paths"
+    )
+    assert "\n  changed-paths:\n" in kicker
+    assert "needs: [authorize, changed-paths]" in kicker, (
+        "the path gate must run before sync-check acquires contents: write"
+    )
+    assert "if: needs.changed-paths.outputs.should_run == 'true'" in kicker
+    assert "push_paths" in kicker
+    # Absent config, absent key, and an unusable diff base must all fail open.
+    assert kicker.count('should_run=true" >> "${GITHUB_OUTPUT}"') >= 4
+
     promote = (ROOT / ".github/workflows/release-promote.yml").read_text()
     dependabot_input = promote.split("      include_dependabot_config:\n", 1)[
         1

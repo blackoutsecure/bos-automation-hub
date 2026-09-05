@@ -47,6 +47,16 @@
           }
         ]
       },
+      "proprietary_license_service": {
+        "mode": "file",
+        "description": "Organization-standard proprietary license, for internal and commercial repositories that are not published as reusable Actions, packages, or libraries. Opt-in: not in the default service list. Both this service and license_service own LICENSE in whole-file mode, so a repository selecting this one MUST also set disabled_services: [license_service] or the sync fails with an ambiguous-ownership error. Repositories using it must not be listed on the GitHub Marketplace, which requires an OSI-approved license.",
+        "files": [
+          {
+            "path": "LICENSE",
+            "content_file": "legal/LICENSE-PROPRIETARY"
+          }
+        ]
+      },
       "license_catalogue_service": {
         "mode": "file",
         "description": "OSI/SPDX licence catalogue plus the shared resolver module, consumed by the marketplace-kit LC### rules and the code-scanning-kit LD### rules. Generated in the hub by scripts/build_osi_catalogue.py so both kits classify a licence identically. The module and the data file are a versioned pair and must move together. Consumers that vendor them at different paths override this definition in their own service_definitions.",
