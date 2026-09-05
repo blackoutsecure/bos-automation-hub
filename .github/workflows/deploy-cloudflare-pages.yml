@@ -674,7 +674,7 @@ jobs:
 
       - name: Resolve & validate Cloudflare account ID
         id: account
-        uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-resolve-id@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-resolve-id@main
         with:
           value: ${{ env.ACCOUNT_ID || steps.account_autoresolve.outputs.value }}
           kind: account
@@ -920,7 +920,7 @@ jobs:
       - name: Verify Cloudflare Pages project exists
         id: project
         if: steps.gate.outputs.deploy == 'true'
-        uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-project-exists@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-project-exists@main
         with:
           account_id: ${{ steps.account.outputs.value }}
           project_name: ${{ inputs.cloudflare_project_name }}
@@ -946,7 +946,7 @@ jobs:
 
       - name: Stage deploy directory
         if: inputs.deploy_artifact_name == ''
-        uses: blackoutsecure/bos-automation-hub/.github/actions/stage-deploy-dir@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/stage-deploy-dir@main
         with:
           public_dir: ${{ inputs.public_dir }}
           deploy_dir: ${{ inputs.deploy_dir }}
@@ -1050,7 +1050,7 @@ jobs:
 
       - name: Generate _redirects
         if: inputs.generate_redirects
-        uses: blackoutsecure/bos-automation-hub/.github/actions/cf-pages-redirects-generate@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cf-pages-redirects-generate@main
         with:
           output_dir: ${{ inputs.deploy_dir }}
           site_url: ${{ inputs.site_url }}
@@ -1136,7 +1136,7 @@ jobs:
       # generator-emitted asset is in place.
       - name: Generate _headers
         if: inputs.generate_headers
-        uses: blackoutsecure/bos-automation-hub/.github/actions/cf-pages-headers-generate@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cf-pages-headers-generate@main
         with:
           output_dir: ${{ inputs.deploy_dir }}
           presets: ${{ inputs.headers_presets }}
@@ -1319,7 +1319,7 @@ jobs:
       - name: Compose wrangler command
         id: cmd
         if: steps.gate.outputs.deploy == 'true'
-        uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-pages-compose-command@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-pages-compose-command@main
         with:
           deploy_dir: ${{ inputs.deploy_dir }}
           project_name: ${{ inputs.cloudflare_project_name }}
@@ -1388,7 +1388,7 @@ jobs:
       - name: Purge Cloudflare zone cache
         id: purge
         if: steps.purge_gate.outputs.purge == 'true'
-        uses: blackoutsecure/bos-automation-hub/.github/actions/cloudflare-zone-purge@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/cloudflare-zone-purge@main
         with:
           zone_id: ${{ env.ZONE_ID }}
           site_url: ${{ inputs.site_url }}
