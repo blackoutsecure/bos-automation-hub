@@ -820,6 +820,7 @@ def main() -> None:
         "require_permissions_block": "fail",
         "forbid_write_all": "fail",
         "require_pinned_actions": "warn",
+        "msdo_coverage": "codeless",
         "allow_tag_pin": ["blackoutsecure/bos-automation-hub"],
     }
     assert global_code_scan_config["code_scanning"]["posture"]["branches"] == {
