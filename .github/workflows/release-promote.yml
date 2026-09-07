@@ -435,7 +435,7 @@ jobs:
 
       - name: Resolve tag
         id: resolve_tag
-        uses: blackoutsecure/bos-automation-hub/.github/actions/resolve-release-tag@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-release-tag@main
         with:
           tag_name: ${{ inputs.tag_name }}
           bump: patch

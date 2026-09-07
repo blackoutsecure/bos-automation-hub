@@ -435,7 +435,7 @@ jobs:
           PY
 
       - name: Render balena.yml
-        uses: blackoutsecure/bos-automation-hub/.github/actions/render-balena-yml@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/render-balena-yml@main
         with:
           out_path: ${{ inputs.balena_yml_path }}
           name: ${{ inputs.block_name }}
@@ -460,7 +460,7 @@ jobs:
         # on the host's read-only rootfs). See
         # `.github/actions/balena-publish/action.yml` for the
         # full rationale; input contract is a strict subset.
-        uses: blackoutsecure/bos-automation-hub/.github/actions/balena-publish@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/balena-publish@main
         with:
           balena_token: ${{ secrets.BALENA_API_TOKEN }}
           fleet: ${{ matrix.fleet }}
