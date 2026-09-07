@@ -337,7 +337,7 @@ jobs:
       - name: Resolve version
         id: tags
         if: inputs.auto_resolve_version
-        uses: blackoutsecure/bos-automation-hub/.github/actions/resolve-docker-image-tags@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-docker-image-tags@main
         with:
           version_override: ${{ inputs.version }}
           version_source: ${{ inputs.version_source }}
@@ -347,7 +347,7 @@ jobs:
 
       - name: Resolve release context
         id: ctx
-        uses: blackoutsecure/bos-automation-hub/.github/actions/resolve-release-context@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/resolve-release-context@main
         with:
           publish_override: ${{ inputs.publish }}
           auto_resolve_version: ${{ inputs.auto_resolve_version }}
@@ -476,7 +476,7 @@ jobs:
 
       - name: Render balena.yml
         if: inputs.generate_balena_yml
-        uses: blackoutsecure/bos-automation-hub/.github/actions/render-balena-yml@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/render-balena-yml@main
         with:
           out_path: ${{ inputs.balena_yml_path }}
           name: ${{ inputs.block_name }}
@@ -502,7 +502,7 @@ jobs:
         # on the host's read-only rootfs). See
         # `.github/actions/balena-publish/action.yml` for the
         # full rationale; input contract is a strict subset.
-        uses: blackoutsecure/bos-automation-hub/.github/actions/balena-publish@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/balena-publish@main
         with:
           balena_token: ${{ secrets.BALENA_API_TOKEN }}
           fleet: ${{ needs.setup.outputs.fleet }}

@@ -591,7 +591,7 @@ def main() -> None:
     assert ".github/workflows/release.yml@main" not in marketplace_promote
     assert marketplace_promote.count(
         "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/resolve-release-tag@main"
+        ".github/actions/shared/resolve-release-tag@main"
     ) == 1
     promote_hub_refs = re.findall(
         r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)",
@@ -676,7 +676,7 @@ def main() -> None:
     ).read_text()
     shared_balena_action = (
         "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/balena-publish@main"
+        ".github/actions/shared/balena-publish@main"
     )
     for balena_workflow in (balena_block, balena_fleet):
         assert balena_workflow.count(shared_balena_action) == 1
@@ -694,7 +694,7 @@ def main() -> None:
     ).read_text()
     compose_build_args = (
         "uses: blackoutsecure/bos-automation-hub/"
-        ".github/actions/compose-docker-build-args@main"
+        ".github/actions/shared/compose-docker-build-args@main"
     )
     assert docker_workflow.count(compose_build_args) == 2
     assert "echo \"build_args<<__EOF__\"" not in docker_workflow

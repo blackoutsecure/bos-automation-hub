@@ -1264,7 +1264,7 @@ jobs:
           persist-credentials: false
       - name: Load universal config
         id: config
-        uses: blackoutsecure/bos-automation-hub/.github/actions/universal-config@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
 
   # ---------------------------------------------------------------------------
   # Stage 0 — Consolidated security scan (opt-in, gating by default).

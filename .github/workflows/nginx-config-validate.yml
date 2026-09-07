@@ -122,7 +122,7 @@ jobs:
 
       - name: Validate
         id: validate
-        uses: blackoutsecure/bos-automation-hub/.github/actions/nginx-config-validate@main
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/nginx-config-validate@main
         with:
           config_path: ${{ inputs.config_path }}
           templates_path: ${{ inputs.templates_path }}
