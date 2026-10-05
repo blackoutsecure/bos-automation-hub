@@ -30,6 +30,10 @@ callers select the matching runtime through their static `uses:` refs; other
 callers can pass `hub_ref: dev` or `hub_ref: main` when they need a deliberate
 override.
 
+The managed kicker sparse-checks out both flattened development actions and
+nested promoted actions. Its resolver selects the directory present on the
+chosen hub branch without changing the dev/main routing policy.
+
 [`release-hub.yml`](.github/workflows/release-hub.yml) promotes shared actions,
 managed templates, `LICENSE`, this README, and every workflow declaring
 `workflow_call`. Event-only maintenance workflows stay on `dev` automatically.
