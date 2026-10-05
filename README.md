@@ -199,6 +199,11 @@ re-pin branch protection whenever a gate moved between groups:
   posture audit), and pinned-action enforcement;
 - **Compliance:** README-header and PR-title checks.
 
+The code-scanning job mints and consumes its Gatewall audit token in the same
+job, scoped to the caller repository. Configuration resolution stays read-only
+and does not mint a privileged App token. The audit permission profile and
+PAT/`GITHUB_TOKEN` fallback remain unchanged.
+
 The hub itself runs
 [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)
 directly. Use **Actions → Blackout Secure Universal Security → Run

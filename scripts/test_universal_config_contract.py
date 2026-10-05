@@ -21,6 +21,15 @@ def workflow_input_names(body: str) -> set[str]:
     return set(re.findall(r"^      ([a-z][a-z0-9_]+):", inputs, re.MULTILINE))
 
 
+def workflow_job_body(body: str, job_id: str) -> str:
+    match = re.search(
+        rf"(?ms)^  {re.escape(job_id)}:\n(.*?)(?=^  [a-z][a-z0-9_-]*:\n|\Z)",
+        body,
+    )
+    assert match is not None, job_id
+    return match.group(1)
+
+
 def caller_input_names(body: str, workflow_name: str) -> set[str]:
     call_pattern = re.compile(
         r"^    uses: (?:\./|blackoutsecure/bos-automation-hub/)"
@@ -267,6 +276,9 @@ def main() -> None:
     assert "❌ **unset (required)**" in summary
     assert "summary_context" in summary
     assert "Universal config snapshot\" + (f\" - {summary_context}\"" in summary
+    summary_inputs = summary.split("\ninputs:\n", 1)[1].split("\noutputs:\n", 1)[0]
+    assert re.search(r"^  summary_context:\n", summary_inputs, re.MULTILINE)
+    assert not re.search(r"^    summary_context:\n", summary_inputs, re.MULTILINE)
 
     missing_cloudflare_project = run_universal_config(
         {"stages": {"cloudflare_pages": True}}
@@ -467,6 +479,21 @@ def main() -> None:
     )
     assert "steps.security-app.outputs.token || secrets.SCANNING_PAT" in gate_workflow
     assert "vars.GATEWALL_APP_ID" in gate_workflow
+    code_scan_job = workflow_job_body(gate_workflow, "code-scan")
+    config_job = workflow_job_body(gate_workflow, "resolve-config")
+    assert "id: security-app" in code_scan_job
+    assert "id: security-app" not in config_job
+    assert "steps.security-app.outputs.token || secrets.SCANNING_PAT" in code_scan_job
+    assert code_scan_job.index("id: security-app") < code_scan_job.index("id: code_scan")
+    for permission in (
+        "permission-actions: read",
+        "permission-administration: read",
+        "permission-contents: read",
+        "permission-secret-scanning-alerts: read",
+        "permission-security-events: write",
+        "permission-vulnerability-alerts: read",
+    ):
+        assert permission in code_scan_job, permission
 
     readme = (ROOT / "README.md").read_text()
     readme_header_action = (
