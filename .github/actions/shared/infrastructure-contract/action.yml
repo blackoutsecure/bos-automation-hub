@@ -1,0 +1,57 @@
+name: Infrastructure contract
+description: Validate a caller-owned infrastructure registry and emit one allowlisted stack.
+inputs:
+  registry:
+    description: Repository-relative registry JSON path.
+    required: false
+    default: infrastructure.json
+  stack_id:
+    description: Allowlisted stack identifier.
+    required: true
+  source_revision:
+    description: Immutable caller commit, checked against the checked-out tree.
+    required: true
+outputs:
+  environment:
+    description: Protected apply environment.
+    value: ${{ steps.inspect.outputs.environment }}
+  planning_environment:
+    description: Separate read-only provider planning environment.
+    value: ${{ steps.inspect.outputs.planning_environment }}
+  terraform_directory:
+    description: Validated repository-relative Terraform root.
+    value: ${{ steps.inspect.outputs.terraform_directory }}
+  application_repository:
+    description: Allowlisted application repository.
+    value: ${{ steps.inspect.outputs.application_repository }}
+  application_revision:
+    description: Immutable application commit.
+    value: ${{ steps.inspect.outputs.application_revision }}
+  application_name:
+    description: Repository name used to attenuate the application-read token.
+    value: ${{ steps.inspect.outputs.application_name }}
+  application_directory:
+    description: Pinned application checkout path.
+    value: ${{ steps.inspect.outputs.application_directory }}
+  hub_revision:
+    description: Immutable executor revision.
+    value: ${{ steps.inspect.outputs.hub_revision }}
+  settings_variable:
+    description: Nonsecret environment variable containing explicit provider/runtime settings.
+    value: ${{ steps.inspect.outputs.settings_variable }}
+  bucket_variable:
+    description: Nonsecret environment variable selecting the isolated private backend bucket.
+    value: ${{ steps.inspect.outputs.bucket_variable }}
+runs:
+  using: composite
+  steps:
+    - name: Inspect authoritative stack
+      id: inspect
+      shell: bash
+      env:
+        REGISTRY_PATH: ${{ inputs.registry }}
+        STACK_ID: ${{ inputs.stack_id }}
+        SOURCE_REVISION: ${{ inputs.source_revision }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/contract.py"

@@ -199,6 +199,11 @@ re-pin branch protection whenever a gate moved between groups:
   posture audit), and pinned-action enforcement;
 - **Compliance:** README-header and PR-title checks.
 
+The code-scanning job mints and consumes its Gatewall audit token in the same
+job, scoped to the caller repository. Configuration resolution stays read-only
+and does not mint a privileged App token. The audit permission profile and
+PAT/`GITHUB_TOKEN` fallback remain unchanged.
+
 The hub itself runs
 [`bos-universal-security.yml`](.github/workflows/bos-universal-security.yml)
 directly. Use **Actions → Blackout Secure Universal Security → Run
@@ -398,6 +403,23 @@ independently versioned public product rather than the current BOS reusable
 workflow.
 
 ## Workflow boundaries
+
+### Opt-in infrastructure execution
+
+The [infrastructure executor](.github/workflows/bos-universal-infrastructure.yml)
+validates an immutable caller-owned stack registry, authorizes the actual
+triggering actor, serializes one stack/state at a time and delegates to the
+reviewed private repository runner. Desired state, private plans and provider
+credentials stay with that caller, not this hub or a portal. Apply requires a
+protected environment reviewer and an exact unexpired, one-use private plan;
+ordinary validation has no cloud credentials.
+
+The [registry contract](.github/actions/infrastructure-contract/action.yml),
+[execution adapter](.github/actions/infrastructure-execute/action.yml) and
+[Worker delivery leaf](.github/actions/cloudflare-worker-delivery/action.yml)
+are additive opt-in interfaces. Candidate consumers pin an exact development
+commit until normal hub promotion is explicitly approved; no organization-wide
+runtime or managed-file policy is changed by introducing these helpers.
 
 Gate and release workflows intentionally remain separate because they run at
 different trust and permission boundaries:

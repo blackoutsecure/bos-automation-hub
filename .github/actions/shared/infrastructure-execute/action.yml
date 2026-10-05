@@ -1,0 +1,36 @@
+name: Infrastructure execution
+description: Execute the fixed caller-owned runner for a validated immutable infrastructure stack.
+inputs:
+  operation:
+    description: Validated operation, plan, apply or drift.
+    required: true
+  stack_id:
+    description: Allowlisted registry stack.
+    required: true
+  plan_run_id:
+    description: Original successful plan run required for apply.
+    required: false
+    default: ""
+  source_revision:
+    description: Exact authoritative source commit.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Execute reviewed operation
+      shell: bash
+      env:
+        INFRA_OPERATION: ${{ inputs.operation }}
+        INFRA_STACK_ID: ${{ inputs.stack_id }}
+        INFRA_PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+        INFRA_SOURCE_REVISION: ${{ inputs.source_revision }}
+        BOS_HUB_ROOT: ${{ github.action_path }}/../../..
+      run: |
+        set -euo pipefail
+        case "$INFRA_OPERATION" in
+          plan|apply|drift) ;;
+          *) echo "::error::Unsupported infrastructure operation."; exit 1 ;;
+        esac
+        node node_modules/tsx/dist/cli.mjs scripts/infrastructure.ts \
+          "$INFRA_OPERATION" --stack "$INFRA_STACK_ID" \
+          --source "$INFRA_SOURCE_REVISION" --plan-run "$INFRA_PLAN_RUN_ID"

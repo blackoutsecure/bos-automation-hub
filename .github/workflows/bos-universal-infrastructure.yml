@@ -1,0 +1,203 @@
+# Opt-in infrastructure executor. Desired state and private plans belong to the
+# caller. This workflow never owns organization stacks, promotes the hub, stores
+# plan/state artifacts in GitHub, or executes repository submissions from a UI.
+# Consumers pin the candidate commit until normal runtime promotion is approved.
+name: Infrastructure execution
+on:
+  workflow_call:
+    inputs:
+      stack_id:
+        description: Allowlisted caller-owned stack.
+        required: true
+        type: string
+      operation:
+        description: Plan, apply or read-only drift.
+        required: false
+        type: string
+        default: plan
+      source_revision:
+        description: Exact reviewed caller commit.
+        required: true
+        type: string
+      hub_revision:
+        description: Exact immutable hub executor commit matching this workflow pin.
+        required: true
+        type: string
+      plan_run_id:
+        description: Original successful private plan run, required only for apply.
+        required: false
+        type: string
+        default: ""
+      request_id:
+        description: Correlation ID only, never authorization.
+        required: false
+        type: string
+        default: ""
+      requested_by:
+        description: Human requester audit metadata; triggering actor and environment govern authorization.
+        required: false
+        type: string
+        default: ""
+    secrets:
+      READER_APP_PRIVATE_KEY:
+        description: Contents-read installation credential for the pinned private application; missing prevents checkout.
+        required: false
+      CLOUDFLARE_PLAN_TOKEN:
+        description: Read-only account-scoped planning credential; never falls back to an apply token.
+        required: false
+      CLOUDFLARE_APPLY_TOKEN:
+        description: Protected environment-scoped provider write credential; missing blocks apply.
+        required: false
+      STATE_ACCESS_KEY_ID:
+        description: Private backend and plan-object access key; missing blocks cloud operations.
+        required: false
+      STATE_SECRET_ACCESS_KEY:
+        description: Private backend and plan-object secret; missing blocks cloud operations.
+        required: false
+      EBAY_CLIENT_SECRET:
+        description: Application credential needed only for Worker delivery.
+        required: false
+      EBAY_TOKEN_ENCRYPTION_KEY:
+        description: Established application encryption key; missing or invalid blocks apply.
+        required: false
+    outputs:
+      assessment:
+        description: Execution job result, never a claim of live external provider readiness.
+        value: ${{ jobs.execute.outputs.assessment }}
+permissions:
+  contents: read
+jobs:
+  inspect:
+    name: Inspect immutable infrastructure contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    outputs:
+      environment: ${{ steps.contract.outputs.environment }}
+      planning_environment: ${{ steps.contract.outputs.planning_environment }}
+      application_repository: ${{ steps.contract.outputs.application_repository }}
+      application_name: ${{ steps.contract.outputs.application_name }}
+      application_revision: ${{ steps.contract.outputs.application_revision }}
+      application_directory: ${{ steps.contract.outputs.application_directory }}
+      settings_variable: ${{ steps.contract.outputs.settings_variable }}
+      bucket_variable: ${{ steps.contract.outputs.bucket_variable }}
+    steps:
+      - name: Require an exact trusted candidate
+        shell: bash
+        env:
+          SOURCE_REVISION: ${{ inputs.source_revision }}
+          HUB_REVISION: ${{ inputs.hub_revision }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_REVISION" =~ ^[a-f0-9]{40}$ ]] && [[ "$HUB_REVISION" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::Immutable source and executor revisions are required."; exit 1; }
+          [[ "$GITHUB_REF" == "refs/heads/dev" && "$SOURCE_REVISION" == "$GITHUB_SHA" ]] || { echo "::error::The request must match the current trusted dev commit."; exit 1; }
+          case "$OPERATION" in plan|apply|drift) ;; *) echo "::error::Unsupported operation."; exit 1 ;; esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_revision }}
+          path: .hub
+          persist-credentials: false
+      - name: Resolve one stack
+        id: contract
+        uses: ./.hub/.github/actions/infrastructure-contract
+        with:
+          stack_id: ${{ inputs.stack_id }}
+          source_revision: ${{ inputs.source_revision }}
+  execute:
+    name: Authorized isolated infrastructure operation
+    needs: inspect
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.operation == 'apply' && needs.inspect.outputs.environment || needs.inspect.outputs.planning_environment }}
+    concurrency:
+      group: infrastructure-${{ github.repository }}-${{ inputs.stack_id }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      assessment: ${{ steps.completed.outputs.assessment }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_revision }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_revision }}
+          path: .hub
+          persist-credentials: false
+      - name: Authorize the actual triggering actor
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLOUD_COMPASS_APP_SLUG: ${{ vars.CLOUD_COMPASS_APP_SLUG }}
+          INFRA_OPERATION: ${{ inputs.operation }}
+          INFRA_ENVIRONMENT: ${{ needs.inspect.outputs.environment }}
+        run: |
+          set -euo pipefail
+          python3 .hub/.github/actions/infrastructure-contract/authorize.py
+      - name: Mint repository-read token
+        id: reader
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.INFRA_READER_APP_ID }}
+          private-key: ${{ secrets.READER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ needs.inspect.outputs.application_name }}
+          permission-contents: read
+      - name: Check out the immutable application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ needs.inspect.outputs.application_repository }}
+          ref: ${{ needs.inspect.outputs.application_revision }}
+          path: ${{ needs.inspect.outputs.application_directory }}
+          token: ${{ steps.reader.outputs.token }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.16.5"
+          terraform_wrapper: false
+      - name: Install trusted locked runner dependencies
+        shell: bash
+        env:
+          APPLICATION_DIRECTORY: ${{ needs.inspect.outputs.application_directory }}
+        run: |
+          set -euo pipefail
+          npm ci --no-fund
+          npm ci --no-fund --prefix "$APPLICATION_DIRECTORY"
+      - name: Execute selected operation
+        uses: ./.hub/.github/actions/infrastructure-execute
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INFRA_STACK_SETTINGS: ${{ vars[needs.inspect.outputs.settings_variable] }}
+          INFRA_BACKEND_BUCKET: ${{ vars[needs.inspect.outputs.bucket_variable] }}
+          CLOUDFLARE_APPLY_TOKEN: ${{ secrets.CLOUDFLARE_APPLY_TOKEN }}
+          CLOUDFLARE_PLAN_TOKEN: ${{ secrets.CLOUDFLARE_PLAN_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.STATE_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.STATE_SECRET_ACCESS_KEY }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          EBAY_TOKEN_ENCRYPTION_KEY: ${{ secrets.EBAY_TOKEN_ENCRYPTION_KEY }}
+        with:
+          operation: ${{ inputs.operation }}
+          stack_id: ${{ inputs.stack_id }}
+          plan_run_id: ${{ inputs.plan_run_id }}
+          source_revision: ${{ inputs.source_revision }}
+      - name: Record bounded execution assessment
+        id: completed
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "assessment=execution_completed_external_readiness_not_assessed" >> "$GITHUB_OUTPUT"

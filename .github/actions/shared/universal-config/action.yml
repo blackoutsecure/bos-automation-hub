@@ -25,10 +25,10 @@ inputs:
     description: "'auto' loads global_config_path when the file exists, 'true' requires it, 'false' ignores it."
     required: false
     default: "auto"
-    summary_context:
-      description: Optional service or workflow label included in the configuration summary.
-      required: false
-      default: ""
+  summary_context:
+    description: Optional service or workflow label included in the configuration summary.
+    required: false
+    default: ""
 
 outputs:
   {

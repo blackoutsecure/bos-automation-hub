@@ -228,22 +228,6 @@ jobs:
       org: ${{ steps.config.outputs.organization }}
       config: ${{ steps.config.outputs.cfg }}
     steps:
-      - name: Mint security audit token
-        id: security-app
-        if: vars.GATEWALL_APP_ID != ''
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ vars.GATEWALL_APP_ID }}
-          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-actions: read
-          permission-administration: read
-          permission-contents: read
-          permission-secret-scanning-alerts: read
-          permission-security-events: write
-          permission-vulnerability-alerts: read
-
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -255,6 +239,7 @@ jobs:
           path: hub-runtime
           sparse-checkout: .github/actions/universal-config
           sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Load universal config
         id: config
         uses: ./hub-runtime/.github/actions/universal-config
@@ -581,7 +566,24 @@ jobs:
       actions: read
       pull-requests: read
     steps:
+      - name: Mint security audit token
+        id: security-app
+        if: vars.GATEWALL_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-actions: read
+          permission-administration: read
+          permission-contents: read
+          permission-secret-scanning-alerts: read
+          permission-security-events: write
+          permission-vulnerability-alerts: read
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Checkout canonical hub code-scanning global config
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

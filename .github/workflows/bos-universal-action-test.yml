@@ -58,7 +58,7 @@
 # this workflow the same way as every other hub-managed kicker, through
 # `action_test` in `.github/bos-universal-config.json`, not `with:`.
 
-name: '[RUNTIME] Blackout Secure Universal Action Test'
+name: "[RUNTIME] Blackout Secure Universal Action Test"
 
 on:
   workflow_call:
@@ -95,7 +95,7 @@ jobs:
         uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
         with:
           config_path: .github/bos-universal-config.json
-          allow_missing: 'false'
+          allow_missing: "false"
           global_config_path: hub-config/sync-files/config/action-test-global-config.json
           use_global_config: auto
 
@@ -319,4 +319,3 @@ jobs:
             fi
           fi
           echo "::notice::failure-summary: AI request unavailable (HTTP ${HTTP_CODE:-none}); deterministic listing above stands alone."
-
