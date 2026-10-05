@@ -580,6 +580,14 @@ def main() -> None:
     assert "name: Resolve hub ref" in resolver
     assert 'echo "ref=${ref}"' in resolver
     assert '[[ "${ref}" == "main" ]] || ref="dev"' in resolver
+    resolver_job = workflow_job_body(kicker, "resolve-target-ref")
+    assert "steps.target_ref.outputs.ref || steps.target_ref_shared.outputs.ref" in resolver_job
+    assert "uses: ./hub-runtime/.github/actions/resolve-hub-ref" in resolver_job
+    assert "uses: ./hub-runtime/.github/actions/shared/resolve-hub-ref" in resolver_job
+    assert "hashFiles('hub-runtime/.github/actions/resolve-hub-ref/action.yml') != ''" in resolver_job
+    assert "hashFiles('hub-runtime/.github/actions/resolve-hub-ref/action.yml') == ''" in resolver_job
+    assert "github.ref_name == 'main' && 'main' || 'dev'" in resolver_job
+    assert "persist-credentials: false" in resolver_job
 
 
     repo_metadata_workflow = (
