@@ -703,11 +703,29 @@ jobs:
     permissions:
       pull-requests: read
     steps:
+      - name: Format allowed PR title types
+        id: title_types
+        shell: bash
+        env:
+          PR_TITLE_TYPES: ${{ fromJSON(needs.resolve-config.outputs.gate).pr_title_types }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import uuid
+
+          types = [item.strip() for item in os.environ["PR_TITLE_TYPES"].split(",")]
+          if not types or any(not item for item in types):
+              raise SystemExit("::error::pr_title_types must contain non-empty comma-separated types.")
+          delimiter = f"BOS_PR_TYPES_{uuid.uuid4().hex}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"types<<{delimiter}\n" + "\n".join(types) + f"\n{delimiter}\n")
+          PY
       - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          types: ${{ fromJSON(needs.resolve-config.outputs.gate).pr_title_types }}
+          types: ${{ steps.title_types.outputs.types }}
           requireScope: false
           subjectPattern: ^.{3,}$
           subjectPatternError: |

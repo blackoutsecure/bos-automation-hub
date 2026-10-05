@@ -479,6 +479,32 @@ def main() -> None:
     )
     assert "steps.security-app.outputs.token || secrets.SCANNING_PAT" in gate_workflow
     assert "vars.GATEWALL_APP_ID" in gate_workflow
+    title_job = workflow_job_body(gate_workflow, "pr-title")
+    assert "PR_TITLE_TYPES: ${{ fromJSON(needs.resolve-config.outputs.gate).pr_title_types }}" in title_job
+    assert "types: ${{ steps.title_types.outputs.types }}" in title_job
+    title_script = title_job.split("          python3 - <<'PY'\n", 1)[1].split(
+        "\n          PY", 1
+    )[0]
+    for raw_types, expected_types in (
+        ("feat,fix,chore", ["feat", "fix", "chore"]),
+        (" feat , fix , chore ", ["feat", "fix", "chore"]),
+        ("chore", ["chore"]),
+    ):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "outputs"
+            title_result = subprocess.run(
+                [sys.executable, "-c", textwrap.dedent(title_script)],
+                env=os.environ | {"PR_TITLE_TYPES": raw_types, "GITHUB_OUTPUT": str(output_path)},
+                text=True,
+                encoding="utf-8",
+                capture_output=True,
+                check=False,
+            )
+            assert title_result.returncode == 0, title_result.stderr
+            output_lines = output_path.read_text(encoding="utf-8").splitlines()
+            assert output_lines[0].startswith("types<<BOS_PR_TYPES_")
+            assert output_lines[1:-1] == expected_types
+            assert output_lines[-1] == output_lines[0].split("<<", 1)[1]
     code_scan_job = workflow_job_body(gate_workflow, "code-scan")
     config_job = workflow_job_body(gate_workflow, "resolve-config")
     assert "id: security-app" in code_scan_job

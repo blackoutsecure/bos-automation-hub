@@ -203,6 +203,10 @@ re-pin branch protection whenever a gate moved between groups:
   posture audit), and pinned-action enforcement;
 - **Compliance:** README-header and PR-title checks.
 
+The PR-title API accepts comma-separated conventional-commit types. The gate
+formats that list as one type per line for the semantic-title action without
+changing the allowed types.
+
 The code-scanning job mints and consumes its Gatewall audit token in the same
 job, scoped to the caller repository. Configuration resolution stays read-only
 and does not mint a privileged App token. The audit permission profile and
