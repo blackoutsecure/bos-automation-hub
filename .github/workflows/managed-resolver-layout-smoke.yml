@@ -1,0 +1,56 @@
+name: Managed Resolver Layout Smoke
+
+on:
+  push:
+    branches: [ci/managed-resolver-layout-smoke-7848b049]
+
+permissions:
+  contents: read
+
+jobs:
+  resolver:
+    name: Resolver (${{ matrix.hub-ref }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        hub-ref: [dev, main]
+    steps:
+      - name: Checkout hub resolver
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ matrix.hub-ref }}
+          path: hub-runtime
+          sparse-checkout: |
+            .github/actions/resolve-hub-ref
+            .github/actions/shared/resolve-hub-ref
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Resolve flattened layout
+        id: flat
+        if: hashFiles('hub-runtime/.github/actions/resolve-hub-ref/action.yml') != ''
+        uses: ./hub-runtime/.github/actions/resolve-hub-ref
+        with:
+          event_name: push
+          ref_name: ${{ matrix.hub-ref }}
+      - name: Resolve nested layout
+        id: shared
+        if: hashFiles('hub-runtime/.github/actions/resolve-hub-ref/action.yml') == ''
+        uses: ./hub-runtime/.github/actions/shared/resolve-hub-ref
+        with:
+          event_name: push
+          ref_name: ${{ matrix.hub-ref }}
+      - name: Verify actual branch output
+        shell: bash
+        env:
+          EXPECTED_REF: ${{ matrix.hub-ref }}
+          ACTUAL_REF: ${{ steps.flat.outputs.ref || steps.shared.outputs.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "${ACTUAL_REF}" != "${EXPECTED_REF}" ]]; then
+            echo "::error::Resolver output did not match the selected runtime branch."
+            exit 1
+          fi
