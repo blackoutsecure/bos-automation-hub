@@ -48,9 +48,13 @@ def authorize(repository: str, actor: str, token: str, trusted_app: str, environ
 def main(argv: list[str] | None = None) -> int:
     del argv
     try:
-        if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch" or os.environ.get("GITHUB_REF") != "refs/heads/dev":
+        scheduled_drift = os.environ.get("GITHUB_EVENT_NAME") == "schedule" and os.environ.get("INFRA_OPERATION") == "drift"
+        if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch" and not scheduled_drift) or os.environ.get("GITHUB_REF") != "refs/heads/dev":
             raise ValueError("Infrastructure operations require the trusted dev dispatch.")
         actor = os.environ.get("GITHUB_TRIGGERING_ACTOR") or os.environ.get("GITHUB_ACTOR", "")
+        if scheduled_drift:
+            print("Trusted read-only scheduled drift authorized; apply and Worker delivery are disabled.")
+            return 0
         authorize(
             os.environ.get("GITHUB_REPOSITORY", ""), actor, os.environ.get("GH_TOKEN", ""),
             os.environ.get("CLOUD_COMPASS_APP_SLUG", ""), os.environ.get("INFRA_ENVIRONMENT", ""),
