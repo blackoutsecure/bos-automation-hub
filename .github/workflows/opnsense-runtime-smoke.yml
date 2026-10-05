@@ -1,0 +1,24 @@
+name: OPNsense Hub Runtime Smoke
+
+on:
+  push:
+    branches: [ci/opnsense-runtime-smoke-7848b049]
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    name: security (dev)
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      security-events: write
+    uses: ./.github/workflows/bos-universal-security.yml
+    with:
+      hub_ref: dev
+      config_authoritative: true
+    secrets:
+      scanning_pat: ${{ secrets.SCANNING_PAT }}
+      GATEWALL_APP_PRIVATE_KEY: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
