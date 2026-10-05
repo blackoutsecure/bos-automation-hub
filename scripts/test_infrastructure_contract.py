@@ -21,6 +21,7 @@ def load(name: str, filename: str):
 
 contract = load("infrastructure_contract", "contract.py")
 auth = load("infrastructure_authorization", "authorize.py")
+preflight = load("infrastructure_preflight", "preflight.py")
 
 
 def registry() -> dict:
@@ -51,6 +52,23 @@ class ContractTests(unittest.TestCase):
         result = contract.inspect_registry(registry(), self.root, registry()["repository"], "flipiq-production")
         self.assertEqual(result["application_name"], "int-blackout-flipiq")
         self.assertEqual(result["environment"], "flipiq-production")
+
+    def test_reader_inputs_are_explicit_without_fallback(self) -> None:
+        self.assertEqual(
+            preflight.missing_reader_inputs({}),
+            ["INFRA_READER_APP_ID", "READER_APP_PRIVATE_KEY"],
+        )
+        self.assertEqual(
+            preflight.missing_reader_inputs({
+                "INFRA_READER_APP_ID": "12345",
+                "READER_APP_PRIVATE_KEY": "offline-only-private-key",
+            }),
+            [],
+        )
+        self.assertEqual(
+            preflight.missing_reader_inputs({"GITHUB_TOKEN": "unrelated-token"}),
+            ["INFRA_READER_APP_ID", "READER_APP_PRIVATE_KEY"],
+        )
 
     def test_duplicate_owner_rejected(self) -> None:
         value = registry()

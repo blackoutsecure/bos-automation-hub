@@ -145,6 +145,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 .hub/.github/actions/infrastructure-contract/authorize.py
+      - name: Require selected-repository App inputs
+        shell: bash
+        env:
+          INFRA_READER_APP_ID: ${{ vars.INFRA_READER_APP_ID }}
+          READER_APP_PRIVATE_KEY: ${{ secrets.READER_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          python3 .hub/.github/actions/infrastructure-contract/preflight.py
       - name: Mint repository-read token
         id: reader
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
