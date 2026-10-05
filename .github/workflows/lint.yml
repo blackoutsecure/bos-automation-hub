@@ -34,6 +34,9 @@ on:
       - "scripts/test_release_validation.py"
       - "scripts/start-gatekeeper-app-setup.ps1"
       - "scripts/test_gatekeeper_app_setup.py"
+      - "scripts/test_infrastructure_contract.py"
+      - ".github/actions/infrastructure-contract/**"
+      - ".github/actions/cloudflare-worker-delivery/**"
       - "tools/gatekeeper-app-setup/**"
       - ".github/actions/release-validation/**"
       - "sync-files/config/release-validation-global-config.json"
@@ -51,6 +54,9 @@ on:
       - "scripts/test_release_validation.py"
       - "scripts/start-gatekeeper-app-setup.ps1"
       - "scripts/test_gatekeeper_app_setup.py"
+      - "scripts/test_infrastructure_contract.py"
+      - ".github/actions/infrastructure-contract/**"
+      - ".github/actions/cloudflare-worker-delivery/**"
       - "tools/gatekeeper-app-setup/**"
       - ".github/actions/release-validation/**"
       - "sync-files/config/release-validation-global-config.json"
@@ -87,6 +93,8 @@ jobs:
 
       - name: Validate Gatekeeper App setup helper
         run: python3 scripts/test_gatekeeper_app_setup.py
+      - name: Validate infrastructure ownership and authorization
+        run: python3 scripts/test_infrastructure_contract.py
 
   actionlint:
     name: actionlint

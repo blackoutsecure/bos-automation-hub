@@ -399,6 +399,23 @@ workflow.
 
 ## Workflow boundaries
 
+### Opt-in infrastructure execution
+
+The [infrastructure executor](.github/workflows/bos-universal-infrastructure.yml)
+validates an immutable caller-owned stack registry, authorizes the actual
+triggering actor, serializes one stack/state at a time and delegates to the
+reviewed private repository runner. Desired state, private plans and provider
+credentials stay with that caller, not this hub or a portal. Apply requires a
+protected environment reviewer and an exact unexpired, one-use private plan;
+ordinary validation has no cloud credentials.
+
+The [registry contract](.github/actions/infrastructure-contract/action.yml),
+[execution adapter](.github/actions/infrastructure-execute/action.yml) and
+[Worker delivery leaf](.github/actions/cloudflare-worker-delivery/action.yml)
+are additive opt-in interfaces. Candidate consumers pin an exact development
+commit until normal hub promotion is explicitly approved; no organization-wide
+runtime or managed-file policy is changed by introducing these helpers.
+
 Gate and release workflows intentionally remain separate because they run at
 different trust and permission boundaries:
 

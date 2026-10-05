@@ -1,0 +1,24 @@
+name: Cloudflare Worker delivery
+description: Deliver a pinned application's guarded migration, Worker version and smoke contracts without owning Terraform state.
+inputs:
+  application_directory:
+    description: Pinned application checkout directory under the caller workspace.
+    required: true
+  configuration:
+    description: Generated application-owned Wrangler contract path.
+    required: true
+  secrets_file:
+    description: Private temporary version-bound application secrets.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Deliver guarded Worker
+      shell: bash
+      env:
+        APPLICATION_DIRECTORY: ${{ inputs.application_directory }}
+        APPLICATION_CONFIGURATION: ${{ inputs.configuration }}
+        APPLICATION_SECRETS_FILE: ${{ inputs.secrets_file }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/deliver.py"
