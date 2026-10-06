@@ -1341,6 +1341,21 @@ def main() -> None:
     assert "RELEASE_PAT:\n        description:" in gatekeeper_workflow
     assert "GATEWALL_APP_PRIVATE_KEY:" in gatekeeper_workflow
 
+    overlay = json.loads((ROOT / "sync-files/legal/osi-overlay.json").read_text())
+    catalogue = json.loads((ROOT / "sync-files/legal/osi-licenses.json").read_text())
+    for identifier in ("CNRI-Python-GPL-Compatible", "Python-2.0.1"):
+        expected_policy = {
+            "category": "legacy",
+            "reciprocity": "permissive",
+            "prefer": None,
+        }
+        assert overlay["licenses"][identifier] == expected_policy
+        assert {
+            key: catalogue["licenses"][identifier][key] for key in expected_policy
+        } == expected_policy
+    assert "curl" not in overlay["osi_approved_not_in_spdx"]
+    assert catalogue["licenses"]["curl"]["osi_only"] is False
+
     assert_markdown_links_exist(ROOT / "README.md")
     assert_markdown_links_exist(ROOT / "sync-files/README.md")
 

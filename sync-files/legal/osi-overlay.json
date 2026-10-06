@@ -213,6 +213,11 @@
       "reciprocity": "permissive",
       "prefer": null
     },
+    "CNRI-Python-GPL-Compatible": {
+      "category": "legacy",
+      "reciprocity": "permissive",
+      "prefer": null
+    },
     "CPAL-1.0": {
       "category": "uncategorized",
       "reciprocity": "network-copyleft",
@@ -663,6 +668,11 @@
       "reciprocity": "permissive",
       "prefer": null
     },
+    "Python-2.0.1": {
+      "category": "legacy",
+      "reciprocity": "permissive",
+      "prefer": null
+    },
     "QPL-1.0": {
       "category": "other",
       "reciprocity": "strong-copyleft",
@@ -808,7 +818,6 @@
   "osi_approved_not_in_spdx": {
     "GPL-1.0": "OSI lists GNU GPL v1 as superseded; SPDX marks the identifier deprecated and reports isOsiApproved=false",
     "MIT-CMU": "OSI lists the CMU License; SPDX reports isOsiApproved=false",
-    "curl": "OSI lists the curl License under Legacy; SPDX reports isOsiApproved=false",
     "eCos-2.0": "OSI lists eCos 2.0 as non-reusable; SPDX marks the identifier deprecated and reports isOsiApproved=false"
   }
 }
