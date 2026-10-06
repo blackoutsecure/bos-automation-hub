@@ -1,0 +1,42 @@
+name: Infrastructure requester authorization
+description: Enforce the repository-scoped Gatekeeper policy without provider credentials or organization permissions.
+inputs:
+  trusted_app_slug:
+    description: One exact portal App slug; empty disables machine requests.
+    required: false
+    default: ""
+outputs:
+  authorized:
+    description: Whether Gatekeeper authorized the actual triggering actor.
+    value: ${{ steps.gate.outputs.authorized }}
+  enforced:
+    description: Whether Gatekeeper enforced the policy rather than passing through.
+    value: ${{ steps.gate.outputs.enforced }}
+runs:
+  using: composite
+  steps:
+    - name: Validate the current portal App identity
+      id: context
+      shell: bash
+      env:
+        TRUSTED_APP_SLUG: ${{ inputs.trusted_app_slug }}
+      run: |
+        set -euo pipefail
+        if [[ -n "$TRUSTED_APP_SLUG" && ! "$TRUSTED_APP_SLUG" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]]; then
+          echo "::error::CLOUD_COMPASS_APP_SLUG must be one exact App slug, not a list or bot login."
+          exit 1
+        fi
+        echo "trusted_app_slug=$TRUSTED_APP_SLUG" >> "$GITHUB_OUTPUT"
+    - name: Authorize the actual triggering actor with Gatekeeper
+      id: gate
+      uses: blackoutsecure/bos-workflow-gatekeeper@c06e9fa7a60a75a3a1c8a8913b361fc39fc7dc35 # v1.0.3
+      with:
+        actor: ${{ github.triggering_actor || github.actor }}
+        organization: ${{ github.repository_owner }}
+        repository: ${{ github.repository }}
+        token: ${{ github.token }}
+        trusted_app_slugs: ${{ steps.context.outputs.trusted_app_slug }}
+        required_repo_permission: write
+        allow_org_admin: "false"
+        restrict_to_events: "*"
+        fail_closed: "true"
