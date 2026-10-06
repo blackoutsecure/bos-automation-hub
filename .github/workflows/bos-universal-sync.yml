@@ -80,8 +80,8 @@ jobs:
     permissions:
       contents: read
     outputs:
-      org: ${{ steps.config.outputs.organization }}
-      config: ${{ steps.config.outputs.cfg }}
+      org: ${{ steps.config.outputs.organization || steps.config-shared.outputs.organization }}
+      config: ${{ steps.config.outputs.cfg || steps.config-shared.outputs.cfg }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,11 +92,21 @@ jobs:
           repository: blackoutsecure/bos-automation-hub
           ref: ${{ inputs.hub_ref != 'auto' && inputs.hub_ref || (github.event_name == 'pull_request' && github.base_ref || github.event_name == 'merge_group' && github.event.merge_group.base_ref || github.ref_name == 'main' && 'main' || 'dev') }}
           path: hub-runtime
-          sparse-checkout: .github/actions/universal-config
+          sparse-checkout: |
+            .github/actions/universal-config
+            .github/actions/shared/universal-config
           sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Load universal config
         id: config
+        if: hashFiles('hub-runtime/.github/actions/universal-config/action.yml') != ''
         uses: ./hub-runtime/.github/actions/universal-config
+        with:
+          allow_missing: "true"
+      - name: Load universal config (promoted layout)
+        id: config-shared
+        if: hashFiles('hub-runtime/.github/actions/universal-config/action.yml') == ''
+        uses: ./hub-runtime/.github/actions/shared/universal-config
         with:
           allow_missing: "true"
 
@@ -113,7 +123,7 @@ jobs:
     outputs:
       changed: ${{ steps.sync.outputs.changed }}
       changed_files: ${{ steps.sync.outputs.changed_files }}
-      commit_sha: ${{ steps.commit.outputs.commit_sha }}
+      commit_sha: ${{ steps.commit.outputs.commit_sha || steps.commit-shared.outputs.commit_sha }}
     steps:
       - name: Mint workflow synchronization token
         id: workflow-app
@@ -192,7 +202,19 @@ jobs:
         if: >-
           (inputs.mode || 'commit') == 'commit'
           && steps.sync.outputs.changed == 'true'
+          && hashFiles('hub-source/.github/actions/commit-and-push/action.yml') != ''
         uses: ./hub-source/.github/actions/commit-and-push
+        with:
+          files: ${{ steps.sync.outputs.changed_files }}
+          message: "${{ inputs.commit_message || 'chore: sync managed files' }}"
+
+      - name: Commit and push (promoted layout)
+        id: commit-shared
+        if: >-
+          (inputs.mode || 'commit') == 'commit'
+          && steps.sync.outputs.changed == 'true'
+          && hashFiles('hub-source/.github/actions/commit-and-push/action.yml') == ''
+        uses: ./hub-source/.github/actions/shared/commit-and-push
         with:
           files: ${{ steps.sync.outputs.changed_files }}
           message: "${{ inputs.commit_message || 'chore: sync managed files' }}"
@@ -205,7 +227,7 @@ jobs:
           SYNC_RESULT: ${{ steps.sync.outcome }}
           CHANGED: ${{ steps.sync.outputs.changed }}
           CHANGED_FILES: ${{ steps.sync.outputs.changed_files }}
-          COMMIT_SHA: ${{ steps.commit.outputs.commit_sha }}
+          COMMIT_SHA: ${{ steps.commit.outputs.commit_sha || steps.commit-shared.outputs.commit_sha }}
           HAS_SYNC_TOKEN: ${{ steps.workflow-pat.outputs.has_token }}
           RUNS_ON: ${{ toJSON(fromJSON(needs.resolve-config.outputs.org).workflows.sync.runs_on) }}
           REPORTING: ${{ toJSON(fromJSON(needs.resolve-config.outputs.org).reporting) }}
@@ -377,8 +399,33 @@ jobs:
           PY
 
       - name: Publish managed file sync report
-        if: ${{ always() }}
+        if: ${{ always() && hashFiles('hub-source/.github/actions/job-report/action.yml') != '' }}
         uses: ./hub-source/.github/actions/job-report
+        with:
+          title: ${{ steps.findings.outputs.title_prefix }} Managed File Sync Report
+          subject: >-
+            **Repository:** `${{ github.repository }}`  ·
+            **Ref:** `${{ github.ref_name }}`  ·
+            **Mode:** `${{ inputs.mode || 'commit' }}`
+          findings: ${{ steps.findings.outputs.findings }}
+          context_rows: ${{ steps.findings.outputs.context_rows }}
+          groups: >-
+            {"sync":{"title":"Reconciliation","blurb":"Engine result and drift disposition"},
+             "credentials":{"title":"Credentials","blurb":"Token reach and resulting scope limits"},
+             "files":{"title":"Managed files","blurb":"Per-file outcome for this run"}}
+          fail_on: ${{ steps.findings.outputs.fail_on }}
+          enable_summary: ${{ steps.findings.outputs.enable_summary }}
+          enable_annotations: ${{ steps.findings.outputs.enable_annotations }}
+          enable_html: ${{ steps.findings.outputs.enable_html }}
+          enable_pdf: ${{ steps.findings.outputs.enable_pdf }}
+          html_path: ${{ steps.findings.outputs.html_path }}
+          pdf_path: ${{ steps.findings.outputs.pdf_path }}
+          footer: >-
+            This report was generated by the Blackout Secure managed file sync
+            workflow (`bos-universal-sync.yml`).
+      - name: Publish managed file sync report (promoted layout)
+        if: ${{ always() && hashFiles('hub-source/.github/actions/job-report/action.yml') == '' }}
+        uses: ./hub-source/.github/actions/shared/job-report
         with:
           title: ${{ steps.findings.outputs.title_prefix }} Managed File Sync Report
           subject: >-

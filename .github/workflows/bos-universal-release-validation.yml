@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      outcome: ${{ steps.report.outputs.outcome }}
+      outcome: ${{ steps.report.outputs.outcome || steps.report-shared.outputs.outcome }}
     steps:
       - name: Checkout release candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,11 +55,26 @@ jobs:
             .github/actions/job-report
             .github/actions/release-validation
             .github/actions/universal-config
+            .github/actions/shared/job-report
+            .github/actions/shared/release-validation
+            .github/actions/shared/universal-config
             sync-files/config/release-validation-global-config.json
+          sparse-checkout-cone-mode: false
 
       - name: Resolve release validation policy
         id: config
+        if: hashFiles('hub-release-validation/.github/actions/universal-config/action.yml') != ''
         uses: ./hub-release-validation/.github/actions/universal-config
+        with:
+          config_path: .github/bos-universal-config.json
+          allow_missing: 'true'
+          global_config_path: hub-release-validation/sync-files/config/release-validation-global-config.json
+          use_global_config: 'true'
+
+      - name: Resolve release validation policy (promoted layout)
+        id: config-shared
+        if: hashFiles('hub-release-validation/.github/actions/universal-config/action.yml') == ''
+        uses: ./hub-release-validation/.github/actions/shared/universal-config
         with:
           config_path: .github/bos-universal-config.json
           allow_missing: 'true'
@@ -68,22 +83,48 @@ jobs:
 
       - name: Run release validation
         id: validate
+        if: hashFiles('hub-release-validation/.github/actions/release-validation/action.yml') != ''
         uses: ./hub-release-validation/.github/actions/release-validation
         with:
-          config: ${{ steps.config.outputs.release_validation }}
+          config: ${{ steps.config.outputs.release_validation || steps.config-shared.outputs.release_validation }}
+          expected_tag: ${{ inputs.expected_tag }}
+          release_kind: ${{ inputs.release_kind }}
+
+      - name: Run release validation (promoted layout)
+        id: validate-shared
+        if: hashFiles('hub-release-validation/.github/actions/release-validation/action.yml') == ''
+        uses: ./hub-release-validation/.github/actions/shared/release-validation
+        with:
+          config: ${{ steps.config.outputs.release_validation || steps.config-shared.outputs.release_validation }}
           expected_tag: ${{ inputs.expected_tag }}
           release_kind: ${{ inputs.release_kind }}
 
       - name: Publish release validation report
         id: report
-        if: always()
+        if: always() && hashFiles('hub-release-validation/.github/actions/job-report/action.yml') != ''
         uses: ./hub-release-validation/.github/actions/job-report
         with:
           title: Blackout Secure Release Validation Report
           subject: ${{ github.repository }} @ ${{ inputs.checkout_ref || github.sha }}
-          findings: ${{ steps.validate.outputs.findings || '[]' }}
+          findings: ${{ steps.validate.outputs.findings || steps.validate-shared.outputs.findings || '[]' }}
           groups: '{"policy":{"title":"Policy","blurb":"Central release policy and configuration."},"metadata":{"title":"Release metadata","blurb":"Required files, tag, and declared versions."},"tests":{"title":"Tests and builds","blurb":"Auto-detected ecosystem checks."},"extensions":{"title":"Repository extensions","blurb":"Optional checks unique to this repository."},"artifacts":{"title":"Artifact integrity","blurb":"Generated output must reproduce without tracked changes."}}'
-          fail_on: ${{ fromJSON(steps.config.outputs.release_validation || '{}').enforce || 'fail' }}
+          fail_on: ${{ fromJSON(steps.config.outputs.release_validation || steps.config-shared.outputs.release_validation || '{}').enforce || 'fail' }}
+          enable_json: 'true'
+          json_path: release-validation-report.json
+          enable_artifact_upload: 'true'
+          artifact_name: release-validation-${{ github.run_id }}
+          enable_automation_policy: 'false'
+
+      - name: Publish release validation report (promoted layout)
+        id: report-shared
+        if: always() && hashFiles('hub-release-validation/.github/actions/job-report/action.yml') == ''
+        uses: ./hub-release-validation/.github/actions/shared/job-report
+        with:
+          title: Blackout Secure Release Validation Report
+          subject: ${{ github.repository }} @ ${{ inputs.checkout_ref || github.sha }}
+          findings: ${{ steps.validate.outputs.findings || steps.validate-shared.outputs.findings || '[]' }}
+          groups: '{"policy":{"title":"Policy","blurb":"Central release policy and configuration."},"metadata":{"title":"Release metadata","blurb":"Required files, tag, and declared versions."},"tests":{"title":"Tests and builds","blurb":"Auto-detected ecosystem checks."},"extensions":{"title":"Repository extensions","blurb":"Optional checks unique to this repository."},"artifacts":{"title":"Artifact integrity","blurb":"Generated output must reproduce without tracked changes."}}'
+          fail_on: ${{ fromJSON(steps.config.outputs.release_validation || steps.config-shared.outputs.release_validation || '{}').enforce || 'fail' }}
           enable_json: 'true'
           json_path: release-validation-report.json
           enable_artifact_upload: 'true'

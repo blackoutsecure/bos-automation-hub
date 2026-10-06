@@ -21,46 +21,73 @@ def github_json(path: str, token: str) -> object:
     return json.loads(source)
 
 
-def authorize(repository: str, actor: str, token: str, trusted_app: str, environment: str, applying: bool) -> None:
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) or not re.fullmatch(r"[A-Za-z0-9_.\[\]-]+", actor):
-        raise ValueError("Invalid authoritative repository or triggering actor.")
+def is_human_reviewer(value: object) -> bool:
+    if not isinstance(value, dict) or not isinstance(value.get("reviewer"), dict):
+        return False
+    reviewer = value["reviewer"]
+    if type(reviewer.get("id")) is not int or reviewer["id"] <= 0:
+        return False
+    if value.get("type") == "Team":
+        return isinstance(reviewer.get("slug"), str) and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", reviewer["slug"]))
+    return (
+        value.get("type") == "User"
+        and reviewer.get("type") == "User"
+        and isinstance(reviewer.get("login"), str)
+        and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", reviewer["login"]))
+    )
+
+
+def validate_environment(repository: str, token: str, environment: str, applying: bool) -> None:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", environment):
+        raise ValueError("Invalid authoritative repository or execution environment.")
     if not token:
-        raise ValueError("Repository authorization token is unavailable.")
-    if not trusted_app or actor != trusted_app + "[bot]":
-        value = github_json(f"repos/{repository}/collaborators/{quote(actor)}/permission", token)
-        if not isinstance(value, dict) or value.get("permission") not in ("admin", "maintain", "write"):
-            raise ValueError("The triggering actor is not authorized to request infrastructure operations.")
+        raise ValueError("Environment metadata token is unavailable.")
+    path = f"repos/{repository}/environments/{quote(environment, safe='')}"
+    value = github_json(path, token)
+    if not isinstance(value, dict):
+        raise ValueError("Execution environment metadata is unavailable.")
+    policy = value.get("deployment_branch_policy")
+    if not isinstance(policy, dict) or policy.get("custom_branch_policies") is not True or policy.get("protected_branches") is not False:
+        raise ValueError("Execution requires an explicit dev-only deployment branch policy.")
+    branches = github_json(f"{path}/deployment-branch-policies?per_page=100", token)
+    if not isinstance(branches, dict):
+        raise ValueError("Deployment branch metadata is unavailable.")
+    entries = branches.get("branch_policies")
+    if (
+        type(branches.get("total_count")) is not int or branches["total_count"] != 1
+        or not isinstance(entries, list) or len(entries) != 1
+        or not isinstance(entries[0], dict) or entries[0].get("name") != "dev"
+        or entries[0].get("type") != "branch"
+    ):
+        raise ValueError("Execution requires exactly the dev branch; tags, wildcards and additional policies are denied.")
     if applying:
-        value = github_json(f"repos/{repository}/environments/{quote(environment)}", token)
-        if not isinstance(value, dict):
-            raise ValueError("Protected environment metadata is unavailable.")
+        if value.get("can_admins_bypass") is not False:
+            raise ValueError("Apply requires administrator bypass to be disabled.")
         rules = value.get("protection_rules")
         if not isinstance(rules, list) or not any(
-            isinstance(rule, dict) and rule.get("type") == "required_reviewers" and isinstance(rule.get("reviewers"), list) and bool(rule["reviewers"])
+            isinstance(rule, dict) and rule.get("type") == "required_reviewers"
+            and isinstance(rule.get("reviewers"), list) and any(is_human_reviewer(reviewer) for reviewer in rule["reviewers"])
             for rule in rules
         ):
-            raise ValueError("Apply requires a configured GitHub environment reviewer; an unprotected environment cannot authorize it.")
-        policy = value.get("deployment_branch_policy")
-        if not isinstance(policy, dict) or not policy.get("custom_branch_policies"):
-            raise ValueError("Apply requires an explicit protected deployment branch policy.")
+            raise ValueError("Apply requires an eligible human or team environment reviewer; an App is not an approver.")
 
 
 def main(argv: list[str] | None = None) -> int:
     del argv
     try:
-        scheduled_drift = os.environ.get("GITHUB_EVENT_NAME") == "schedule" and os.environ.get("INFRA_OPERATION") == "drift"
+        operation = os.environ.get("INFRA_OPERATION", "")
+        if operation not in {"plan", "apply", "drift"}:
+            raise ValueError("Unsupported infrastructure operation.")
+        scheduled_drift = os.environ.get("GITHUB_EVENT_NAME") == "schedule" and operation == "drift"
         if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch" and not scheduled_drift) or os.environ.get("GITHUB_REF") != "refs/heads/dev":
             raise ValueError("Infrastructure operations require the trusted dev dispatch.")
-        actor = os.environ.get("GITHUB_TRIGGERING_ACTOR") or os.environ.get("GITHUB_ACTOR", "")
-        if scheduled_drift:
-            print("Trusted read-only scheduled drift authorized; apply and Worker delivery are disabled.")
-            return 0
-        authorize(
-            os.environ.get("GITHUB_REPOSITORY", ""), actor, os.environ.get("GH_TOKEN", ""),
-            os.environ.get("CLOUD_COMPASS_APP_SLUG", ""), os.environ.get("INFRA_ENVIRONMENT", ""),
-            os.environ.get("INFRA_OPERATION") == "apply",
+        if os.environ.get("GATEKEEPER_AUTHORIZED") != "true" or os.environ.get("GATEKEEPER_ENFORCED") != "true":
+            raise ValueError("An enforced Gatekeeper authorization is required; a skipped or unassessed gate cannot authorize execution.")
+        validate_environment(
+            os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GH_TOKEN", ""),
+            os.environ.get("INFRA_ENVIRONMENT", ""), operation == "apply",
         )
-        print("Triggering actor authorization verified; environment approval remains the apply authority.")
+        print("Gatekeeper enforcement and environment controls verified; human approval remains the apply authority.")
         return 0
     except (ValueError, HTTPError, URLError, OSError) as error:
         print(f"Infrastructure authorization denied: {error}", file=sys.stderr)
