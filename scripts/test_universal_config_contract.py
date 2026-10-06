@@ -552,13 +552,44 @@ def main() -> None:
     assert "single manual-dispatch front door" in readme
     assert "### Dispatch authorization" in readme
     assert "name: Validate routing outputs" in kicker
-    assert "github.ref_name == 'dev'" in kicker
-    assert "github.ref_name == 'main'" in kicker
+    assert "needs.parse-config.outputs.target_ref == 'dev'" in kicker
+    assert "needs.parse-config.outputs.target_ref == 'main'" in kicker
     assert "inputs.operation == 'metadata'" in kicker
     assert "::notice title=Dispatch route::" in kicker
     assert "::notice title=Dispatch route deferred::" in kicker
     assert "SYNC_DEV_CHANGED:" in kicker
     assert kicker.count("enable_security_scan: ${{ needs.parse-config.outputs.run_security == 'true'") == 2
+    for route in (
+        "action-test", "metadata", "marketplace-validate",
+        "marketplace-release", "release-dev", "release-main",
+    ):
+        route_body = workflow_job_body(kicker, route)
+        assert "needs: [parse-config, preflight]" in route_body
+        assert "always()" in route_body
+        assert (
+            "&& (needs.preflight.result == 'success' || needs.preflight.result == 'skipped')"
+            in route_body
+        )
+    for route in ("release-dev", "release-main"):
+        route_body = workflow_job_body(kicker, route)
+        target = route.removeprefix("release-")
+        assert f"needs.parse-config.outputs.target_ref == '{target}'" in route_body
+        for field, default in (("description_mode", "auto"), ("description_fallback", "")):
+            assert (
+                f"repo_metadata_{field}: "
+                "${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata."
+                f"{field} || '{default}' }}}}"
+            ) in route_body
+    metadata_job = workflow_job_body(kicker, "metadata")
+    for field, default in (("description_mode", "auto"), ("description_fallback", "")):
+        assert (
+            f"{field}: "
+            "${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata."
+            f"{field} || '{default}' }}}}"
+        ) in metadata_job
+    verdict_job = workflow_job_body(kicker, "route-verdict")
+    assert "TARGET_REF: ${{ needs.parse-config.outputs.target_ref }}" in verdict_job
+    assert "runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER" in verdict_job
     assert kicker.count("always() && !cancelled() && needs.parse-config.result == 'success'") >= 4
     assert kicker.count("&& needs.parse-config.result == 'success'") >= 6
     assert "# Blackout Secure README Header Audit" in readme_header_action
@@ -1332,6 +1363,11 @@ def main() -> None:
     gatekeeper_workflow = (
         ROOT / ".github/workflows/bos-universal-gatekeeper.yml"
     ).read_text()
+    metadata_route = workflow_job_body(gatekeeper_workflow, "repo-metadata")
+    metadata_sync = (ROOT / ".github/workflows/repo-metadata-sync.yml").read_text()
+    for field in ("description_mode", "description_fallback"):
+        assert f"{field}: ${{{{ inputs.repo_metadata_{field} }}}}" in metadata_route
+        assert f"{field}: ${{{{ inputs.{field} }}}}" in metadata_sync
     assert "secrets: inherit" in kicker
     assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" not in kicker
     assert (
