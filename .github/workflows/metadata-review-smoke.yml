@@ -1,0 +1,28 @@
+name: Metadata forwarding dry-run smoke
+
+"on":
+  push:
+    branches: [ci/managed-metadata-smoke-40]
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    name: Exercise candidate metadata forwarding
+    permissions:
+      contents: write
+      actions: write
+      pull-requests: write
+      security-events: write
+      models: read
+    uses: ./.github/workflows/bos-universal-gatekeeper.yml
+    with:
+      enable_security_scan: false
+      enable_repo_metadata: true
+      repo_metadata_description_mode: fallback
+      repo_metadata_description_fallback: Hub PR 40 metadata forwarding dry-run fixture.
+      repo_metadata_ai_enabled: false
+      repo_metadata_generate_topics: false
+      repo_metadata_dry_run: true
+    secrets: inherit
