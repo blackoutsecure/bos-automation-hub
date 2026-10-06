@@ -15,7 +15,6 @@ npm-debug.log*
 
 
 # >>> managed-file-sync:common >>>
-# Managed by Blackout Secure Managed File Sync — configure services in .github/bos-universal-config.json.
 # OS + editor noise
 .DS_Store
 Thumbs.db
@@ -40,24 +39,9 @@ __pycache__/
 .env
 .env.*
 !.env.example
-
-# Private keys / certs — never commit (e.g. GitHub App private keys).
-*.pem
-*.key
-*.crt
-*.p12
-*.pfx
-secrets.*
-!SECRETS.md
-.secrets/
-# Local tool and downloader logs
-debug.log
-wget-log
-wget-log.*
 # <<< managed-file-sync:common <<<
 
 # >>> managed-file-sync:coverage_artifacts >>>
-# Managed by Blackout Secure Managed File Sync — configure services in .github/bos-universal-config.json.
 .coverage
 .coverage.*
 coverage.xml

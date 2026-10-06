@@ -2,7 +2,6 @@ version: 2
 updates:
 
 # >>> managed-file-sync:dependabot_actions >>>
-# Managed by Blackout Secure Managed File Sync — configure services in .github/bos-universal-config.json.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
