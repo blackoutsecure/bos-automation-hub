@@ -1,0 +1,29 @@
+name: Promoted runtime layout smoke
+
+"on":
+  push:
+    branches: [ci/runtime-layout-smoke-31]
+
+permissions:
+  contents: read
+
+jobs:
+  release-readiness:
+    name: Promoted release validation
+    uses: ./.github/workflows/bos-universal-release-validation.yml
+    with:
+      checkout_ref: 3ecd525731d48cf4e68431ecdb0a8959bfa0edd5
+      release_kind: hub
+
+  security:
+    name: Promoted security validation
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      security-events: write
+    uses: ./.github/workflows/bos-universal-security.yml
+    with:
+      hub_ref: main
+      config_authoritative: true
+    secrets: inherit
