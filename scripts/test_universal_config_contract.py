@@ -812,6 +812,13 @@ def main() -> None:
     refresh = (ROOT / ".github/workflows/osi-license-catalogue-refresh.yml").read_text()
     assert "tracker_path: .github/tracked-osi-license-list.json" in refresh
     assert "track_file:" not in refresh
+    assert "id: catalogue-app" in refresh
+    assert "permission-contents: write" in refresh
+    assert "permission-pull-requests: write" in refresh
+    assert "permission-workflows:" not in refresh
+    assert "repositories: ${{ github.event.repository.name }}" in refresh
+    assert "token: ${{ steps.catalogue-app.outputs.token || github.token }}" in refresh
+    assert "GH_TOKEN: ${{ steps.catalogue-app.outputs.token || github.token }}" in refresh
     hub_config = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
     assert "dependabot_pip" in hub_config["managed_file_sync"]["disabled_services"]
     dependabot = (ROOT / ".github/dependabot.yml").read_text()

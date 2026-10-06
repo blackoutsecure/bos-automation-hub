@@ -1261,6 +1261,12 @@ would be dispatched and which would be seeded, without writing anything.
 Dispatch choices such as `"off"` must stay quoted in the workflow so YAML
 does not turn them into booleans and cause GitHub to reject the CLI input.
 
+The [OSI catalogue refresh](.github/workflows/osi-license-catalogue-refresh.yml)
+also uses the existing Gatewall App, scoped to this repository's Contents and
+Pull requests only, to push its generated branch and open a review PR. Dry runs
+do not mint that token. Without Gatewall it uses `GITHUB_TOKEN`, which requires
+the repository to permit Actions to create pull requests.
+
 ## Development and validation
 
 Run the repository contract before promotion:
