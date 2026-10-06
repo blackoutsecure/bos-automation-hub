@@ -688,6 +688,9 @@ def main() -> None:
         "gatewall-smoke-test.yml",
         "osi-license-catalogue-refresh.yml",
     }
+    fanout = (ROOT / ".github/workflows/bos-org-kicker-fanout.yml").read_text()
+    assert 'options: [warn, block, "off"]' in fanout
+    assert 'options: [pr, "off"]' in fanout
 
     release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
     assert "name: Hub runtime release" in release_hub
