@@ -36,10 +36,12 @@
   "launchpad": {
     "repo_metadata": {
       "enable": true,
+      "dry_run": true,
       "homepage": "https://github.com/blackoutsecure/bos-automation-hub",
+      "ai_enabled": false,
       "ai_model": "auto",
-      "description_mode": "auto",
-      "description_fallback": "",
+      "description_mode": "fallback",
+      "description_fallback": "Canonical managed receiver dry-run fixture.",
       "use_existing_readme": true,
       "generate_readme": false,
       "generate_topics": true,
