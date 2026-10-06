@@ -1709,6 +1709,8 @@ jobs:
     uses: ./.github/workflows/repo-metadata-sync.yml
     with:
       description: ${{ inputs.repo_metadata_description }}
+      description_mode: ${{ inputs.repo_metadata_description_mode }}
+      description_fallback: ${{ inputs.repo_metadata_description_fallback }}
       homepage: ${{ inputs.repo_metadata_homepage }}
       topics: ${{ inputs.repo_metadata_topics }}
       generate_topics: ${{ inputs.repo_metadata_generate_topics }}
