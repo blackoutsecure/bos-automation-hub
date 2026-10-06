@@ -1348,6 +1348,9 @@ def main() -> None:
     gatekeeper_workflow = (
         ROOT / ".github/workflows/bos-universal-gatekeeper.yml"
     ).read_text()
+    metadata_route = workflow_job_body(gatekeeper_workflow, "repo-metadata")
+    for field in ("description_mode", "description_fallback"):
+        assert f"{field}: ${{{{ inputs.repo_metadata_{field} }}}}" in metadata_route
     assert "secrets: inherit" in kicker
     assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" not in kicker
     assert (
