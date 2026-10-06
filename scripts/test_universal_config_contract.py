@@ -572,9 +572,19 @@ def main() -> None:
         )
     for route in ("release-dev", "release-main"):
         route_body = workflow_job_body(kicker, route)
-        for field in ("description_mode", "description_fallback"):
-            assert f"repo_metadata_{field}:" in route_body
-    assert "description_fallback:" in workflow_job_body(kicker, "metadata")
+        for field, default in (("description_mode", "auto"), ("description_fallback", "")):
+            assert (
+                f"repo_metadata_{field}: "
+                "${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata."
+                f"{field} || '{default}' }}}}"
+            ) in route_body
+    metadata_job = workflow_job_body(kicker, "metadata")
+    for field, default in (("description_mode", "auto"), ("description_fallback", "")):
+        assert (
+            f"{field}: "
+            "${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata."
+            f"{field} || '{default}' }}}}"
+        ) in metadata_job
     assert kicker.count("always() && !cancelled() && needs.parse-config.result == 'success'") >= 4
     assert kicker.count("&& needs.parse-config.result == 'success'") >= 6
     assert "# Blackout Secure README Header Audit" in readme_header_action
@@ -1349,8 +1359,10 @@ def main() -> None:
         ROOT / ".github/workflows/bos-universal-gatekeeper.yml"
     ).read_text()
     metadata_route = workflow_job_body(gatekeeper_workflow, "repo-metadata")
+    metadata_sync = (ROOT / ".github/workflows/repo-metadata-sync.yml").read_text()
     for field in ("description_mode", "description_fallback"):
         assert f"{field}: ${{{{ inputs.repo_metadata_{field} }}}}" in metadata_route
+        assert f"{field}: ${{{{ inputs.{field} }}}}" in metadata_sync
     assert "secrets: inherit" in kicker
     assert "REPO_ADMIN_PAT: ${{ secrets.REPO_ADMIN_PAT }}" not in kicker
     assert (
