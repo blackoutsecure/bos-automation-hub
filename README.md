@@ -418,6 +418,34 @@ credentials stay with that caller, not this hub or a portal. Apply requires a
 protected environment reviewer and an exact unexpired, one-use private plan;
 ordinary validation has no cloud credentials.
 
+The [requester authorization adapter](.github/actions/infrastructure-authorize/action.yml)
+delegates actor decisions to the released
+[`bos-workflow-gatekeeper`](https://github.com/blackoutsecure/bos-workflow-gatekeeper)
+action, not a separate hub policy: human requesters need repository `write`,
+`maintain` or `admin`, while a machine requester must exactly match the single
+configured `CLOUD_COMPASS_APP_SLUG[bot]`. Organization-owner checks are disabled
+for this repository-scoped policy, so the ordinary read-only `GITHUB_TOKEN`
+handles its metadata lookup without a Gatekeeper Members-read App or PAT.
+Gatekeeper runs in a read-only `authorize` job and again before execution
+credentials on job-only reruns, validating the current App setting each time.
+Both `authorized` and `enforced` must be true;
+scheduled drift also checks its actual triggering actor instead of passing
+through an event exemption.
+
+The [environment validator](.github/actions/infrastructure-contract/authorize.py)
+checks the selected environment immediately before credential use: both planning
+and apply require exactly the `dev` deployment branch, and apply additionally
+requires an eligible human/team reviewer and disabled administrator bypass.
+Missing, malformed or inaccessible controls deny execution. The validator does
+not perform actor lookups or replace GitHub's protected-environment approval.
+
+Keep onboarding credentials purpose-specific. The
+[Gatekeeper/Gatewall helper](tools/gatekeeper-app-setup/README.md) remains for
+organization authorization and repository automation. A private infrastructure
+owner uses its separate selected-repository Reader and portal App setup; neither
+requires expanding those organization Apps. GitHub-stored settings and secret
+names are not proof of live Worker activation or provider readiness.
+
 The [registry contract](.github/actions/infrastructure-contract/action.yml),
 [execution adapter](.github/actions/infrastructure-execute/action.yml) and
 [Worker delivery leaf](.github/actions/cloudflare-worker-delivery/action.yml)

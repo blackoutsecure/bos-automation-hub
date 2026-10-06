@@ -94,6 +94,7 @@ jobs:
           [[ "$SOURCE_REVISION" =~ ^[a-f0-9]{40}$ ]] && [[ "$HUB_REVISION" =~ ^[a-f0-9]{40}$ ]] || { echo "::error::Immutable source and executor revisions are required."; exit 1; }
           [[ "$GITHUB_REF" == "refs/heads/dev" && "$SOURCE_REVISION" == "$GITHUB_SHA" ]] || { echo "::error::The request must match the current trusted dev commit."; exit 1; }
           case "$OPERATION" in plan|apply|drift) ;; *) echo "::error::Unsupported operation."; exit 1 ;; esac
+          case "$GITHUB_EVENT_NAME:$OPERATION" in workflow_dispatch:*|schedule:drift) ;; *) echo "::error::Only dispatch or scheduled read-only drift is permitted."; exit 1 ;; esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.source_revision }}
@@ -110,9 +111,32 @@ jobs:
         with:
           stack_id: ${{ inputs.stack_id }}
           source_revision: ${{ inputs.source_revision }}
+  authorize:
+    name: Authorize infrastructure requester
+    needs: inspect
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    outputs:
+      authorized: ${{ steps.gate.outputs.authorized }}
+      enforced: ${{ steps.gate.outputs.enforced }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: ${{ inputs.hub_revision }}
+          path: .hub
+          persist-credentials: false
+      - name: Authorize the actual triggering actor
+        id: gate
+        uses: ./.hub/.github/actions/infrastructure-authorize
+        with:
+          trusted_app_slug: ${{ vars.CLOUD_COMPASS_APP_SLUG }}
   execute:
     name: Authorized isolated infrastructure operation
-    needs: inspect
+    needs: [inspect, authorize]
+    if: needs.authorize.outputs.authorized == 'true' && needs.authorize.outputs.enforced == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: ${{ inputs.operation == 'apply' && needs.inspect.outputs.environment || needs.inspect.outputs.planning_environment }}
@@ -135,13 +159,20 @@ jobs:
           ref: ${{ inputs.hub_revision }}
           path: .hub
           persist-credentials: false
-      - name: Authorize the actual triggering actor
+      # A job-only rerun must not reuse an earlier actor or portal App setting.
+      - name: Reauthorize the actual triggering actor before credentials
+        id: gate
+        uses: ./.hub/.github/actions/infrastructure-authorize
+        with:
+          trusted_app_slug: ${{ vars.CLOUD_COMPASS_APP_SLUG }}
+      - name: Recheck protected environment controls after approval
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          CLOUD_COMPASS_APP_SLUG: ${{ vars.CLOUD_COMPASS_APP_SLUG }}
+          GATEKEEPER_AUTHORIZED: ${{ steps.gate.outputs.authorized }}
+          GATEKEEPER_ENFORCED: ${{ steps.gate.outputs.enforced }}
           INFRA_OPERATION: ${{ inputs.operation }}
-          INFRA_ENVIRONMENT: ${{ needs.inspect.outputs.environment }}
+          INFRA_ENVIRONMENT: ${{ inputs.operation == 'apply' && needs.inspect.outputs.environment || needs.inspect.outputs.planning_environment }}
         run: |
           set -euo pipefail
           python3 .hub/.github/actions/infrastructure-contract/authorize.py
