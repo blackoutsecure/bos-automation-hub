@@ -778,6 +778,10 @@ def main() -> None:
     assert_hub_action_layout(
         workflow_job_body(gate_workflow, "summary"), "hub-runtime", "job-report"
     )
+    assert_hub_action_layout(
+        workflow_job_body(gate_workflow, "code-scan"), "hub-config", "ai-remediation-pr"
+    )
+    assert "steps.remediation.outputs.report || steps.remediation-shared.outputs.report" in gate_workflow
     assert ".github/actions/shared/job-report" in gate_workflow
     sync_job = workflow_job_body(sync_backend, "sync")
     for action in ("commit-and-push", "job-report"):
@@ -786,6 +790,22 @@ def main() -> None:
         "steps.commit.outputs.commit_sha || steps.commit-shared.outputs.commit_sha"
         in sync_job
     )
+    release_validation = (
+        ROOT / ".github/workflows/bos-universal-release-validation.yml"
+    ).read_text()
+    validation_job = workflow_job_body(release_validation, "validate")
+    for action in ("universal-config", "release-validation", "job-report"):
+        assert_hub_action_layout(validation_job, "hub-release-validation", action)
+        assert f"            .github/actions/shared/{action}\n" in validation_job
+    for step, output in (
+        ("config", "release_validation"),
+        ("validate", "findings"),
+        ("report", "outcome"),
+    ):
+        assert (
+            f"steps.{step}.outputs.{output} || steps.{step}-shared.outputs.{output}"
+            in validation_job
+        )
     refresh = (ROOT / ".github/workflows/osi-license-catalogue-refresh.yml").read_text()
     assert "tracker_path: .github/tracked-osi-license-list.json" in refresh
     assert "track_file:" not in refresh

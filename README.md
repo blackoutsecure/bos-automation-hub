@@ -30,11 +30,12 @@ callers select the matching runtime through their static `uses:` refs; other
 callers can pass `hub_ref: dev` or `hub_ref: main` when they need a deliberate
 override.
 
-The managed kicker and reusable security and managed-file-sync workflows
-support both flattened development actions and nested promoted actions under
-`.github/actions/shared/`. Config loading, reports, and sync commits select
-the directory present on the chosen hub branch without changing dev/main
-routing, gate policy, or output contracts.
+The managed kicker and reusable security, managed-file-sync, and release-validation
+workflows support both flattened development actions and nested promoted actions
+under `.github/actions/shared/`. Config loading, release validation, reports,
+sync commits, and notify-only recommendation reconciliation select the directory
+present on the chosen hub branch without changing dev/main routing, gate policy,
+or output contracts.
 
 The hub has no pip dependency manifest: its repository-tier managed-file-sync
 config disables `dependabot_pip`, while GitHub Actions dependency updates remain
