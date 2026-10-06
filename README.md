@@ -1253,11 +1253,13 @@ dispatch token has no reason to hold write access to code. That token needs
 **Contents: Read and write**, **Workflows: Read and write** and **Pull
 requests: Read and write** on the targets. If it is absent or under-scoped,
 the run logs a warning, marks those repositories as seed failures, and
-continues; nothing else in the fan-out is affected. Set `seed_missing: off` to
+continues; nothing else in the fan-out is affected. Set `seed_missing: "off"` to
 leave repositories without a kicker untouched.
 
 Run with `dry_run: true` (the manual default) to preview which repositories
 would be dispatched and which would be seeded, without writing anything.
+Dispatch choices such as `"off"` must stay quoted in the workflow so YAML
+does not turn them into booleans and cause GitHub to reject the CLI input.
 
 ## Development and validation
 

@@ -92,7 +92,7 @@ run-name: >-
           check entirely.
         required: false
         type: choice
-        options: [warn, block, off]
+        options: [warn, block, "off"]
         default: warn
       seed_missing:
         description: >-
@@ -102,7 +102,7 @@ run-name: >-
           it up once merged); `off` leaves such repositories untouched.
         required: false
         type: choice
-        options: [pr, off]
+        options: [pr, "off"]
         default: pr
 
 permissions:
