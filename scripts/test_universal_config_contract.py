@@ -813,6 +813,7 @@ def main() -> None:
     assert "tracker_path: .github/tracked-osi-license-list.json" in refresh
     assert "track_file:" not in refresh
     assert "id: catalogue-app" in refresh
+    assert "if: ${{ !inputs.dry_run && vars.GATEWALL_APP_ID != '' }}" in refresh
     assert "permission-contents: write" in refresh
     assert "permission-pull-requests: write" in refresh
     assert "permission-workflows:" not in refresh
