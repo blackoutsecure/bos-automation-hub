@@ -342,8 +342,8 @@
     },
     "CNRI-Python-GPL-Compatible": {
       "name": "CNRI Python Open Source GPL Compatible License Agreement",
-      "category": "uncategorized",
-      "reciprocity": "unknown",
+      "category": "legacy",
+      "reciprocity": "permissive",
       "prefer": null,
       "deprecated": false,
       "osi_only": false
@@ -1070,8 +1070,8 @@
     },
     "Python-2.0.1": {
       "name": "Python License 2.0.1",
-      "category": "uncategorized",
-      "reciprocity": "unknown",
+      "category": "legacy",
+      "reciprocity": "permissive",
       "prefer": null,
       "deprecated": false,
       "osi_only": false
