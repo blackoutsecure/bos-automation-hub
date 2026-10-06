@@ -59,9 +59,22 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      - name: Mint catalogue maintenance token
+        id: catalogue-app
+        if: ${{ !inputs.dry_run && vars.GATEWALL_APP_ID != '' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.GATEWALL_APP_ID }}
+          private-key: ${{ secrets.GATEWALL_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          token: ${{ steps.catalogue-app.outputs.token || github.token }}
           persist-credentials: true
 
       - name: Resolve the SPDX license list release
@@ -117,7 +130,7 @@ jobs:
       - name: Open catalogue-refresh pull request
         if: steps.build.outputs.changed == 'true' && !inputs.dry_run
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.catalogue-app.outputs.token || github.token }}
           BRANCH: automation/osi-license-catalogue
           SPDX_REF: ${{ steps.fetch.outputs.spdx_ref }}
         run: |
