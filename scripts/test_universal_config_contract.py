@@ -559,6 +559,22 @@ def main() -> None:
     assert "::notice title=Dispatch route deferred::" in kicker
     assert "SYNC_DEV_CHANGED:" in kicker
     assert kicker.count("enable_security_scan: ${{ needs.parse-config.outputs.run_security == 'true'") == 2
+    for route in (
+        "action-test", "metadata", "marketplace-validate",
+        "marketplace-release", "release-dev", "release-main",
+    ):
+        route_body = workflow_job_body(kicker, route)
+        assert "needs: [parse-config, preflight]" in route_body
+        assert "always()" in route_body
+        assert (
+            "&& (needs.preflight.result == 'success' || needs.preflight.result == 'skipped')"
+            in route_body
+        )
+    for route in ("release-dev", "release-main"):
+        route_body = workflow_job_body(kicker, route)
+        for field in ("description_mode", "description_fallback"):
+            assert f"repo_metadata_{field}:" in route_body
+    assert "description_fallback:" in workflow_job_body(kicker, "metadata")
     assert kicker.count("always() && !cancelled() && needs.parse-config.result == 'success'") >= 4
     assert kicker.count("&& needs.parse-config.result == 'success'") >= 6
     assert "# Blackout Secure README Header Audit" in readme_header_action
