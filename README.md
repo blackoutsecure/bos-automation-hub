@@ -219,6 +219,9 @@ Configured runner preflight is a prerequisite for every routed action-test,
 metadata, Marketplace, and release job. An absent preflight remains optional;
 a failed or cancelled preflight blocks the route. Metadata description mode
 and fallback are forwarded consistently on both development and stable routes.
+Release jobs and the final dispatch verdict use the resolver's selected runtime
+ref, including feature refs that resolve to `dev`. The verdict uses the same
+configured runner resolution as the other managed receiver jobs.
 
 The code-scanning job mints and consumes its Gatewall audit token in the same
 job, scoped to the caller repository. Configuration resolution stays read-only

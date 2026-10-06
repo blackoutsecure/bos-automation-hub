@@ -552,8 +552,8 @@ def main() -> None:
     assert "single manual-dispatch front door" in readme
     assert "### Dispatch authorization" in readme
     assert "name: Validate routing outputs" in kicker
-    assert "github.ref_name == 'dev'" in kicker
-    assert "github.ref_name == 'main'" in kicker
+    assert "needs.parse-config.outputs.target_ref == 'dev'" in kicker
+    assert "needs.parse-config.outputs.target_ref == 'main'" in kicker
     assert "inputs.operation == 'metadata'" in kicker
     assert "::notice title=Dispatch route::" in kicker
     assert "::notice title=Dispatch route deferred::" in kicker
@@ -572,6 +572,8 @@ def main() -> None:
         )
     for route in ("release-dev", "release-main"):
         route_body = workflow_job_body(kicker, route)
+        target = route.removeprefix("release-")
+        assert f"needs.parse-config.outputs.target_ref == '{target}'" in route_body
         for field, default in (("description_mode", "auto"), ("description_fallback", "")):
             assert (
                 f"repo_metadata_{field}: "
@@ -585,6 +587,9 @@ def main() -> None:
             "${{ fromJson(needs.parse-config.outputs.cfg).repo_metadata."
             f"{field} || '{default}' }}}}"
         ) in metadata_job
+    verdict_job = workflow_job_body(kicker, "route-verdict")
+    assert "TARGET_REF: ${{ needs.parse-config.outputs.target_ref }}" in verdict_job
+    assert "runs-on: ${{ fromJSON(startsWith(vars.DEFAULT_RUNNER" in verdict_job
     assert kicker.count("always() && !cancelled() && needs.parse-config.result == 'success'") >= 4
     assert kicker.count("&& needs.parse-config.result == 'success'") >= 6
     assert "# Blackout Secure README Header Audit" in readme_header_action
