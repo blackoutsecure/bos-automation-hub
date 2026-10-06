@@ -30,6 +30,23 @@ def workflow_job_body(body: str, job_id: str) -> str:
     return match.group(1)
 
 
+def assert_hub_action_layout(body: str, checkout_path: str, action: str) -> None:
+    steps = re.split(r"(?m)(?=^      - (?:name:|uses:))", body)
+    flat_path = f"./{checkout_path}/.github/actions/{action}"
+    shared_path = f"./{checkout_path}/.github/actions/shared/{action}"
+    flat_steps = [step for step in steps if f"uses: {flat_path}\n" in step]
+    shared_steps = [step for step in steps if f"uses: {shared_path}\n" in step]
+    assert len(flat_steps) == len(shared_steps) == 1, (checkout_path, action)
+    flat, shared = flat_steps[0], shared_steps[0]
+    probe = f"hashFiles('{checkout_path}/.github/actions/{action}/action.yml')"
+    assert f"{probe} != ''" in flat, action
+    assert f"{probe} == ''" in shared, action
+    assert flat.split("        with:\n", 1)[1].strip() == shared.split(
+        "        with:\n", 1
+    )[1].strip(), action
+    assert ("always()" in flat) == ("always()" in shared), action
+
+
 def caller_input_names(body: str, workflow_name: str) -> set[str]:
     call_pattern = re.compile(
         r"^    uses: (?:\./|blackoutsecure/bos-automation-hub/)"
@@ -749,6 +766,35 @@ def main() -> None:
     assert "mv \"${action_dir}\" .github/actions/shared/" in release_hub
     assert "github.event_name == 'merge_group'" in sync_backend
 
+    for workflow in (gate_workflow, sync_backend):
+        config_job = workflow_job_body(workflow, "resolve-config")
+        assert_hub_action_layout(config_job, "hub-runtime", "universal-config")
+        assert "            .github/actions/shared/universal-config\n" in config_job
+        for output in ("organization", "cfg"):
+            assert (
+                f"steps.config.outputs.{output} || steps.config-shared.outputs.{output}"
+                in config_job
+            )
+    assert_hub_action_layout(
+        workflow_job_body(gate_workflow, "summary"), "hub-runtime", "job-report"
+    )
+    assert ".github/actions/shared/job-report" in gate_workflow
+    sync_job = workflow_job_body(sync_backend, "sync")
+    for action in ("commit-and-push", "job-report"):
+        assert_hub_action_layout(sync_job, "hub-source", action)
+    assert (
+        "steps.commit.outputs.commit_sha || steps.commit-shared.outputs.commit_sha"
+        in sync_job
+    )
+    refresh = (ROOT / ".github/workflows/osi-license-catalogue-refresh.yml").read_text()
+    assert "tracker_path: .github/tracked-osi-license-list.json" in refresh
+    assert "track_file:" not in refresh
+    hub_config = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
+    assert "dependabot_pip" in hub_config["managed_file_sync"]["disabled_services"]
+    dependabot = (ROOT / ".github/dependabot.yml").read_text()
+    assert "package-ecosystem: github-actions" in dependabot
+    assert "package-ecosystem: pip" not in dependabot
+
     # ── standardized reporting ────────────────────────────────────
     # One shared audit-report surface, driven by findings data, so every
     # workflow reports status the same way instead of hand-rolling a
@@ -794,11 +840,16 @@ def main() -> None:
         )
 
     # Runner topology comes from the organization block, never a literal.
-    assert "org: ${{ steps.config.outputs.organization }}" in gate_workflow
-    assert "config: ${{ steps.config.outputs.cfg }}" in gate_workflow
+    for workflow in (gate_workflow, sync_backend):
+        assert (
+            "org: ${{ steps.config.outputs.organization || steps.config-shared.outputs.organization }}"
+            in workflow
+        )
+        assert (
+            "config: ${{ steps.config.outputs.cfg || steps.config-shared.outputs.cfg }}"
+            in workflow
+        )
     assert "title: ${{ steps.findings.outputs.title_prefix }} Security Gate Report" in gate_workflow
-    assert "org: ${{ steps.config.outputs.organization }}" in sync_backend
-    assert "config: ${{ steps.config.outputs.cfg }}" in sync_backend
     assert "title: ${{ steps.findings.outputs.title_prefix }} Managed File Sync Report" in sync_backend
     assert (
         "runs-on: ${{ fromJSON(needs.resolve-config.outputs.org)"
