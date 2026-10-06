@@ -70,7 +70,7 @@ jobs:
         with:
           source: github_release
           upstream_repo: spdx/license-list-data
-          track_file: .github/tracked-osi-license-list.json
+          tracker_path: .github/tracked-osi-license-list.json
 
       - name: Fetch json/licenses.json at the resolved ref
         id: fetch
