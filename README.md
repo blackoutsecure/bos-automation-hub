@@ -211,6 +211,10 @@ re-pin branch protection whenever a gate moved between groups:
   posture audit), and pinned-action enforcement;
 - **Compliance:** README-header and PR-title checks.
 
+The PR-title API accepts comma-separated conventional-commit types. The gate
+formats that list as one type per line for the semantic-title action without
+changing the allowed types.
+
 The code-scanning job mints and consumes its Gatewall audit token in the same
 job, scoped to the caller repository. Configuration resolution stays read-only
 and does not mint a privileged App token. The audit permission profile and
@@ -1253,11 +1257,19 @@ dispatch token has no reason to hold write access to code. That token needs
 **Contents: Read and write**, **Workflows: Read and write** and **Pull
 requests: Read and write** on the targets. If it is absent or under-scoped,
 the run logs a warning, marks those repositories as seed failures, and
-continues; nothing else in the fan-out is affected. Set `seed_missing: off` to
+continues; nothing else in the fan-out is affected. Set `seed_missing: "off"` to
 leave repositories without a kicker untouched.
 
 Run with `dry_run: true` (the manual default) to preview which repositories
 would be dispatched and which would be seeded, without writing anything.
+Dispatch choices such as `"off"` must stay quoted in the workflow so YAML
+does not turn them into booleans and cause GitHub to reject the CLI input.
+
+The [OSI catalogue refresh](.github/workflows/osi-license-catalogue-refresh.yml)
+also uses the existing Gatewall App, scoped to this repository's Contents and
+Pull requests only, to push its generated branch and open a review PR. Dry runs
+do not mint that token. Without Gatewall it uses `GITHUB_TOKEN`, which requires
+the repository to permit Actions to create pull requests.
 
 ## Development and validation
 
