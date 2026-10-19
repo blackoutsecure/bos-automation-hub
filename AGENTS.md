@@ -20,7 +20,7 @@ every subscribed repository on the next sync run — `LICENSE`, `.editorconfig`,
 without any of those repositories changing a line. Treat this as production infrastructure
 with dozens of live consumers.
 
-The stack is deliberately thin: GitHub Actions YAML (27 workflows), composite actions in
+The stack is deliberately thin: GitHub Actions YAML (28 workflows), composite actions in
 bash plus embedded or sibling Python, and Python 3 stdlib-only scripts under `scripts/`.
 There is no application runtime, package manifest, lockfile, build step, or server. The
 only non-stdlib dependency is PyYAML, needed by `scripts/test_check_readme_header.sh` to
@@ -120,7 +120,7 @@ LICENSE                                Apache-2.0; also the source for the licen
 .github/bos-universal-config.json      The hub's OWN repo-tier config, plus the action_pins manifest
 .github/CODEOWNERS                      Placeholder; no owners assigned yet
 .github/dependabot.yml                  github-actions + pip, both inside managed-file-sync blocks
-.github/workflows/                      27 workflows: reusable runtime + hub-only maintenance
+.github/workflows/                      28 workflows: reusable runtime + hub-only maintenance
 .github/actions/                        32 composite actions (dev layout; `main` still nests under shared/)
 .github/actions/README.md               Authoring rules for composite actions — read before editing one
 sync-files/                             The managed-file payload pushed into every subscribed repo

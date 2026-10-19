@@ -332,6 +332,57 @@ a hub-authored file. `bos-universal-sync.yml` checks out this hub alongside
 the consumer repo and passes `global_config_path` at the checked-out copy, so
 the policy stays a real, editable JSON file instead of an inline blob.
 
+## Universal Playwright test
+
+[`bos-universal-playwright.yml`](.github/workflows/bos-universal-playwright.yml)
+is an opt-in reusable browser-test workflow for repositories that use Playwright
+Test with npm. A consumer adds a small job to its own pull-request or push
+workflow; this workflow is deliberately not part of the required universal
+security summary or Gatekeeper authorization.
+
+The default contract is Node.js 24, `npm ci`, the `test:e2e` npm script, and
+Chromium. The project must check in its npm lockfile, declare Playwright Test as
+a development dependency, and configure reporters in `playwright.config.*` if
+it wants the HTML report artifact. HTML reports and test-result artifacts
+(including traces/screenshots configured by the project) are uploaded when
+present. No secrets are passed to the test job.
+
+The hub's
+[`playwright-global-config.json`](sync-files/config/playwright-global-config.json)
+provides defaults. Repositories can override them in their own
+`.github/bos-universal-config.json`:
+
+```json
+{
+  "playwright": {
+    "node_version": "24",
+    "test_script": "test:ui",
+    "working_directory": ".",
+    "browsers": ["chromium"],
+    "timeout_minutes": 20,
+    "artifact_retention_days": 14
+  }
+}
+```
+
+Example caller job:
+
+```yaml
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    uses: blackoutsecure/bos-automation-hub/.github/workflows/bos-universal-playwright.yml@main
+```
+
+`working_directory` must be a repository-relative directory containing
+`package.json` and `package-lock.json`; the workflow always uses `npm ci`.
+Browser choices are `chromium`, `firefox`, and `webkit`. Agent definitions,
+seed tests, plans, and generated test code stay in each product repository,
+where they can be grounded in its own fixtures and reviewed alongside the
+application changes.
+
 ## Universal action test
 
 [`bos-universal-action-test.yml`](.github/workflows/bos-universal-action-test.yml)
@@ -623,7 +674,7 @@ used by the Marketplace guard and promotion workflows.
 
 ### Config sections
 
-Launchpad, Marketplace, security, and action-test workflows read this file
+Launchpad, Marketplace, security, action-test, and Playwright workflows read this file
 through the shared
 [`universal-config`](.github/actions/universal-config/action.yml)
 action. Managed-file synchronization is the exception: the published
@@ -640,7 +691,7 @@ section-nested equivalent when both are present.
 | `managed_file_sync` | `managed_file_sync`                                                                                                                                       | `bos-universal-sync.yml` and `bos-managed-file-sync-action` |
 | `launchpad`         | `upstream`, `stages`, `docker`, `scout`, `balena`, `companion_docker`, `release`, `platforms`, `security_scan`, `repo_metadata`, `cloudflare`, `triggers` | `bos-universal-gatekeeper.yml`                              |
 | `marketplace`       | `marketplace` (already the flat key name)                                                                                                                 | `bos-universal-marketplace.yml`                             |
-| `general`           | any key not owned by the shared workflow sections above (e.g. `action_test`)                                                                              | whichever workflow reads that key                           |
+| `general`           | any key not owned by the shared workflow sections above (e.g. `action_test`, `playwright`)                                                                  | whichever workflow reads that key                           |
 
 Unlike the other sections, `general` hoists every key it contains rather than
 a fixed allowlist — it's the landing spot for a new standalone service's

@@ -26,6 +26,9 @@ The Cloudflare deploy workflow loads
 `sync-files/config/humanstxt-generator-global-config.json`, and
 `sync-files/config/web-manifest-generator-global-config.json` as the global
 tier for the site generators' built-in compliance audits.
+The opt-in Playwright reusable workflow reads
+`sync-files/config/playwright-global-config.json` as its default Node, browser,
+test-script, timeout, and artifact-retention policy.
 Settings may be authored as flat top-level keys or grouped under a named
 section per service (`launchpad`, `marketplace`, `security`, plus a
 `general` catch-all for anything else) — see the ["Config sections"](../README.md#config-sections)

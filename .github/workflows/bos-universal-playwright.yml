@@ -1,0 +1,120 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# bos-universal-playwright.yml — opt-in reusable Playwright Test workflow
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# Consumer contract:
+#   * Add a locked npm project with a `test:e2e` script and Playwright Test
+#     as a dev dependency.
+#   * Call this workflow from a repository-owned PR/push workflow.
+#   * Configure non-default values in `.github/bos-universal-config.json`
+#     under `playwright`.
+#
+# This is an optional browser-test runner, not an authorization or security
+# gate. It receives no secrets and has read-only repository permissions.
+name: "[RUNTIME] Blackout Secure Universal Playwright"
+
+"on":
+  workflow_call:
+
+permissions: {}
+
+concurrency:
+  group: bos-playwright-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-config:
+    name: Resolve Playwright configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      playwright: ${{ steps.config.outputs.playwright }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out Playwright organization defaults
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: blackoutsecure/bos-automation-hub
+          ref: main
+          path: hub-config
+          sparse-checkout: sync-files/config/playwright-global-config.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Load universal configuration
+        id: config
+        uses: blackoutsecure/bos-automation-hub/.github/actions/shared/universal-config@main
+        with:
+          config_path: .github/bos-universal-config.json
+          allow_missing: "false"
+          global_config_path: hub-config/sync-files/config/playwright-global-config.json
+          use_global_config: "true"
+          summary_context: Playwright
+
+  playwright:
+    name: Playwright (${{ join(fromJSON(needs.resolve-config.outputs.playwright).browsers, ', ') }})
+    needs: resolve-config
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(needs.resolve-config.outputs.playwright).timeout_minutes }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ fromJSON(needs.resolve-config.outputs.playwright).node_version }}
+          cache: npm
+          cache-dependency-path: ${{ fromJSON(needs.resolve-config.outputs.playwright).working_directory }}/package-lock.json
+
+      - name: Install locked npm dependencies
+        working-directory: ${{ fromJSON(needs.resolve-config.outputs.playwright).working_directory }}
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright browsers
+        working-directory: ${{ fromJSON(needs.resolve-config.outputs.playwright).working_directory }}
+        env:
+          PLAYWRIGHT_BROWSERS: ${{ toJSON(fromJSON(needs.resolve-config.outputs.playwright).browsers) }}
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const { spawnSync } = require("node:child_process");
+          const browsers = JSON.parse(process.env.PLAYWRIGHT_BROWSERS);
+          const allowed = new Set(["chromium", "firefox", "webkit"]);
+          if (!Array.isArray(browsers) || browsers.length === 0 ||
+              browsers.some((browser) => !allowed.has(browser))) {
+            throw new Error("Invalid Playwright browser configuration.");
+          }
+          const result = spawnSync(
+            "npm",
+            ["exec", "--", "playwright", "install", "--with-deps", ...browsers],
+            { stdio: "inherit" },
+          );
+          if (result.error) throw result.error;
+          process.exit(result.status ?? 1);
+          NODE
+
+      - name: Run Playwright tests
+        working-directory: ${{ fromJSON(needs.resolve-config.outputs.playwright).working_directory }}
+        env:
+          PLAYWRIGHT_TEST_SCRIPT: ${{ fromJSON(needs.resolve-config.outputs.playwright).test_script }}
+        run: |
+          set -euo pipefail
+          npm run "${PLAYWRIGHT_TEST_SCRIPT}"
+
+      - name: Upload Playwright reports and failure artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-results
+          path: |
+            ${{ fromJSON(needs.resolve-config.outputs.playwright).working_directory }}/playwright-report/
+            ${{ fromJSON(needs.resolve-config.outputs.playwright).working_directory }}/test-results/
+          if-no-files-found: ignore
+          retention-days: ${{ fromJSON(needs.resolve-config.outputs.playwright).artifact_retention_days }}

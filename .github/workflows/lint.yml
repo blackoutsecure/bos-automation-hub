@@ -40,6 +40,7 @@ on:
       - "tools/gatekeeper-app-setup/**"
       - ".github/actions/release-validation/**"
       - "sync-files/config/release-validation-global-config.json"
+      - "sync-files/config/playwright-global-config.json"
   pull_request:
     paths:
       - "**/*.md"
@@ -60,6 +61,7 @@ on:
       - "tools/gatekeeper-app-setup/**"
       - ".github/actions/release-validation/**"
       - "sync-files/config/release-validation-global-config.json"
+      - "sync-files/config/playwright-global-config.json"
   workflow_dispatch:
 
 permissions:

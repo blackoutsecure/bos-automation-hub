@@ -47,6 +47,11 @@ outputs:
         description: "Normalized action_test block derived from the config.",
         value: "${{ steps.config.outputs.action_test }}",
       },
+    playwright:
+      {
+        description: "Normalized Playwright block derived from the config.",
+        value: "${{ steps.config.outputs.playwright }}",
+      },
     release_validation:
       {
         description: "Normalized release_validation policy.",
@@ -494,6 +499,130 @@ runs:
             "ai_model": str(merged_scalar("ai_model") or "auto"),
         }
 
+        # Playwright CI merges repository overrides over the hub's global
+        # defaults. The workflow is opt-in at the caller level; this block
+        # only supplies the safe, shared run contract.
+        global_playwright_value = global_cfg.get("playwright", {})
+        repo_playwright_value = cfg.get("playwright", {})
+        if not isinstance(global_playwright_value, dict):
+            error(
+                f"::error file={config_path}::global playwright config must be an object."
+            )
+            sys.exit(1)
+        if not isinstance(repo_playwright_value, dict):
+            error(
+                f"::error file={config_path}::playwright config must be an object."
+            )
+            sys.exit(1)
+        global_playwright_raw = global_playwright_value
+        repo_playwright_raw = repo_playwright_value
+
+        def playwright_scalar(field, default):
+            for source in (repo_playwright_raw, global_playwright_raw):
+                value = source.get(field)
+                if value not in (None, ""):
+                    return value
+            return default
+
+        def playwright_list(field, default):
+            for source in (repo_playwright_raw, global_playwright_raw):
+                value = source.get(field)
+                if value not in (None, ""):
+                    if not isinstance(value, list):
+                        error(
+                            f"::error file={config_path}::playwright.{field} "
+                            "must be an array."
+                        )
+                        sys.exit(1)
+                    return value
+            return default
+
+        def playwright_int(field, default, minimum, maximum):
+            value = playwright_scalar(field, default)
+            if isinstance(value, bool):
+                parsed = None
+            elif isinstance(value, int):
+                parsed = value
+            elif isinstance(value, str) and value.strip().isdigit():
+                parsed = int(value.strip())
+            else:
+                parsed = None
+            if parsed is None or not minimum <= parsed <= maximum:
+                error(
+                    f"::error file={config_path}::playwright.{field} must be "
+                    f"an integer between {minimum} and {maximum}."
+                )
+                sys.exit(1)
+            return parsed
+
+        playwright_node_version = str(playwright_scalar("node_version", "24")).strip()
+        if not __import__("re").fullmatch(r"\d+(?:\.\d+){0,2}", playwright_node_version):
+            error(
+                f"::error file={config_path}::playwright.node_version must be "
+                "a Node.js version such as '24' or '24.19.0'."
+            )
+            sys.exit(1)
+
+        playwright_test_script = str(
+            playwright_scalar("test_script", "test:e2e")
+        ).strip()
+        if not __import__("re").fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9:_-]*", playwright_test_script
+        ):
+            error(
+                f"::error file={config_path}::playwright.test_script must be "
+                "a valid npm script name."
+            )
+            sys.exit(1)
+
+        playwright_working_directory = str(
+            playwright_scalar("working_directory", ".")
+        ).strip()
+        if (
+            not playwright_working_directory
+            or playwright_working_directory.startswith("/")
+            or "\\" in playwright_working_directory
+            or any(part == ".." for part in playwright_working_directory.split("/"))
+            or not __import__("re").fullmatch(
+                r"[A-Za-z0-9._/-]+", playwright_working_directory
+            )
+        ):
+            error(
+                f"::error file={config_path}::playwright.working_directory must be "
+                "a safe repository-relative path."
+            )
+            sys.exit(1)
+
+        playwright_browsers = playwright_list("browsers", ["chromium"])
+        if (
+            not playwright_browsers
+            or any(
+                not isinstance(browser, str)
+                or browser not in {"chromium", "firefox", "webkit"}
+                for browser in playwright_browsers
+            )
+            or len(set(playwright_browsers)) != len(playwright_browsers)
+        ):
+            error(
+                f"::error file={config_path}::playwright.browsers must be a "
+                "non-empty array of unique chromium, firefox, and/or webkit values."
+            )
+            sys.exit(1)
+
+        playwright_timeout = playwright_int("timeout_minutes", 20, 1, 120)
+        playwright_artifact_retention = playwright_int(
+            "artifact_retention_days", 14, 1, 90
+        )
+
+        playwright = {
+            "node_version": playwright_node_version,
+            "test_script": playwright_test_script,
+            "working_directory": playwright_working_directory,
+            "browsers": playwright_browsers,
+            "timeout_minutes": playwright_timeout,
+            "artifact_retention_days": playwright_artifact_retention,
+        }
+
         # Release validation is centrally defaulted and repository-extensible.
         global_release_validation = as_dict(global_cfg.get("release_validation"))
         repo_release_validation = as_dict(cfg.get("release_validation"))
@@ -639,6 +768,7 @@ runs:
         compact_cloudflare = json.dumps(cloudflare, separators=(",", ":"))
         compact_sync = json.dumps(sync, separators=(",", ":"))
         compact_action_test = json.dumps(action_test, separators=(",", ":"))
+        compact_playwright = json.dumps(playwright, separators=(",", ":"))
         compact_release_validation = json.dumps(release_validation, separators=(",", ":"))
         compact_organization = json.dumps(organization, separators=(",", ":"))
 
@@ -739,6 +869,7 @@ runs:
             handle.write(f"cloudflare={compact_cloudflare}\n")
             handle.write(f"sync={compact_sync}\n")
             handle.write(f"action_test={compact_action_test}\n")
+            handle.write(f"playwright={compact_playwright}\n")
             handle.write(f"release_validation={compact_release_validation}\n")
             handle.write(f"organization={compact_organization}\n")
         PY

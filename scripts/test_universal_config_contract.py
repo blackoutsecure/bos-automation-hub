@@ -90,11 +90,15 @@ def assert_markdown_links_exist(path: Path) -> None:
     assert not missing, {str(path.relative_to(ROOT)): sorted(missing)}
 
 
-def run_universal_config(config: object) -> subprocess.CompletedProcess[str]:
-    return run_universal_config_raw(json.dumps(config))
+def run_universal_config(
+    config: object, global_config: object | None = None
+) -> subprocess.CompletedProcess[str]:
+    return run_universal_config_raw(json.dumps(config), global_config)
 
 
-def run_universal_config_raw(raw_text: str) -> subprocess.CompletedProcess[str]:
+def run_universal_config_raw(
+    raw_text: str, global_config: object | None = None
+) -> subprocess.CompletedProcess[str]:
     action = (
         ROOT / ".github/actions/universal-config/action.yml"
     ).read_text(encoding="utf-8")
@@ -106,15 +110,24 @@ def run_universal_config_raw(raw_text: str) -> subprocess.CompletedProcess[str]:
         config_path = temp / ".github" / "bos-universal-config.json"
         config_path.parent.mkdir()
         config_path.write_text(raw_text)
+        script_path = temp / "universal-config.py"
+        script_path.write_text(textwrap.dedent(script), encoding="utf-8")
+        global_config_path = temp / "global-config.json"
+        if global_config is not None:
+            global_config_path.write_text(json.dumps(global_config))
         env = os.environ | {
             "CONFIG_PATH": ".github/bos-universal-config.json",
             "ALLOW_MISSING": "false",
+            "GLOBAL_CONFIG_PATH": (
+                str(global_config_path) if global_config is not None else ""
+            ),
+            "USE_GLOBAL_CONFIG": "true" if global_config is not None else "auto",
             "GITHUB_OUTPUT": str(temp / "output"),
             "GITHUB_STEP_SUMMARY": str(temp / "summary"),
             "SUMMARY_CONTEXT": "Universal config contract test",
         }
         result = subprocess.run(
-            [sys.executable, "-c", textwrap.dedent(script)],
+            [sys.executable, str(script_path)],
             cwd=temp,
             env=env,
             text=True,
@@ -191,6 +204,70 @@ def main() -> None:
     )
     assert legacy_paths.returncode == 1
     assert "marketplace.allowlist_paths must be an array of strings" in legacy_paths.stderr
+
+    playwright_global_config = json.loads(
+        (ROOT / "sync-files/config/playwright-global-config.json").read_text()
+    )
+    playwright_defaults = run_universal_config({}, playwright_global_config)
+    assert playwright_defaults.returncode == 0, playwright_defaults.stderr
+    assert playwright_defaults.stdout.count("\nplaywright=") == 1
+    config_action = (ROOT / ".github/actions/universal-config/action.yml").read_text(
+        encoding="utf-8"
+    )
+    assert config_action.count("\n    playwright:\n") == 1
+    playwright_output = playwright_defaults.stdout.split("playwright=", 1)[1].split(
+        "\n", 1
+    )[0]
+    assert json.loads(playwright_output) == {
+        "node_version": "24",
+        "test_script": "test:e2e",
+        "working_directory": ".",
+        "browsers": ["chromium"],
+        "timeout_minutes": 20,
+        "artifact_retention_days": 14,
+    }
+    playwright_fallback = run_universal_config({})
+    assert playwright_fallback.returncode == 0, playwright_fallback.stderr
+    assert json.loads(
+        playwright_fallback.stdout.split("playwright=", 1)[1].split("\n", 1)[0]
+    ) == json.loads(playwright_output)
+    playwright_override = run_universal_config(
+        {
+            "playwright": {
+                "node_version": "22.14.0",
+                "test_script": "test:ui",
+                "working_directory": "apps/web",
+                "browsers": ["chromium", "firefox"],
+                "timeout_minutes": 35,
+                "artifact_retention_days": 7,
+            }
+        },
+        {"playwright": {"test_script": "test:e2e", "browsers": ["webkit"]}},
+    )
+    assert playwright_override.returncode == 0, playwright_override.stderr
+    playwright_override_output = playwright_override.stdout.split(
+        "playwright=", 1
+    )[1].split("\n", 1)[0]
+    assert json.loads(playwright_override_output) == {
+        "node_version": "22.14.0",
+        "test_script": "test:ui",
+        "working_directory": "apps/web",
+        "browsers": ["chromium", "firefox"],
+        "timeout_minutes": 35,
+        "artifact_retention_days": 7,
+    }
+    for invalid_playwright in (
+        {"playwright": "disabled"},
+        {"playwright": {"browsers": ["chromium; echo unsafe"]}},
+        {"playwright": {"test_script": "test:e2e && echo unsafe"}},
+        {"playwright": {"working_directory": "../outside"}},
+        {"playwright": {"timeout_minutes": 0}},
+        {"playwright": {"timeout_minutes": "20 minutes"}},
+        {"playwright": {"artifact_retention_days": 91}},
+    ):
+        invalid = run_universal_config(invalid_playwright)
+        assert invalid.returncode == 1, invalid_playwright
+        assert "playwright" in invalid.stderr
 
     # Invalid JSON syntax must fail cleanly with a line/column-annotated
     # error, not a raw Python traceback.
@@ -405,6 +482,17 @@ def main() -> None:
     action_test_workflow = (
         ROOT / ".github/workflows/bos-universal-action-test.yml"
     ).read_text()
+    playwright_workflow = (
+        ROOT / ".github/workflows/bos-universal-playwright.yml"
+    ).read_text()
+    assert "workflow_call:" in playwright_workflow
+    assert "permissions: {}" in playwright_workflow
+    assert "global_config_path: hub-config/sync-files/config/playwright-global-config.json" in playwright_workflow
+    assert "npm ci --no-audit --no-fund" in playwright_workflow
+    assert 'npm run "${PLAYWRIGHT_TEST_SCRIPT}"' in playwright_workflow
+    assert "playwright-report/" in playwright_workflow
+    assert "test-results/" in playwright_workflow
+    assert "enable_node_lint:" not in playwright_workflow
     assert "source: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config.source || '' }}" in action_test_workflow
     assert "package_name: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config.package_name || '' }}" in action_test_workflow
     kicker = (
