@@ -81,7 +81,7 @@ def assert_first_party_pin(body: str, action: str) -> None:
 
 def assert_markdown_links_exist(path: Path) -> None:
     missing = set()
-    for raw_target in re.findall(r"\[[^]]+\]\(([^)]+)\)", path.read_text()):
+    for raw_target in re.findall(r"\[[^]]+\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
         target = unquote(raw_target.split("#", 1)[0].strip())
         if not target or "://" in target or target.startswith(("#", "mailto:")):
             continue
@@ -206,7 +206,7 @@ def main() -> None:
     assert "marketplace.allowlist_paths must be an array of strings" in legacy_paths.stderr
 
     playwright_global_config = json.loads(
-        (ROOT / "sync-files/config/playwright-global-config.json").read_text()
+        (ROOT / "sync-files/config/playwright-global-config.json").read_text(encoding="utf-8")
     )
     playwright_defaults = run_universal_config({}, playwright_global_config)
     assert playwright_defaults.returncode == 0, playwright_defaults.stderr
@@ -364,7 +364,7 @@ def main() -> None:
     # The summary only lists fields relevant to enabled stages. Configured
     # values are visibly marked as passing, while active stages cannot hide
     # mandatory unset values behind a neutral placeholder.
-    summary = (ROOT / ".github/actions/universal-config/action.yml").read_text()
+    summary = (ROOT / ".github/actions/universal-config/action.yml").read_text(encoding="utf-8")
     assert "Required applicable configuration is unset" in summary
     assert "✅ `" in summary
     assert "❌ **unset (required)**" in summary
@@ -478,13 +478,13 @@ def main() -> None:
     assert general["action_test"] == {"python_versions": ["3.12"]}
     assert general["upstream"]["repo"] == "owner/flat-wins"
 
-    workflow = (ROOT / ".github/workflows/bos-universal-gatekeeper.yml").read_text()
+    workflow = (ROOT / ".github/workflows/bos-universal-gatekeeper.yml").read_text(encoding="utf-8")
     action_test_workflow = (
         ROOT / ".github/workflows/bos-universal-action-test.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     playwright_workflow = (
         ROOT / ".github/workflows/bos-universal-playwright.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "workflow_call:" in playwright_workflow
     assert "permissions: {}" in playwright_workflow
     assert "global_config_path: hub-config/sync-files/config/playwright-global-config.json" in playwright_workflow
@@ -497,7 +497,7 @@ def main() -> None:
     assert "package_name: ${{ fromJSON(needs.resolve-config.outputs.test).smoke_test_config.package_name || '' }}" in action_test_workflow
     kicker = (
         ROOT / "sync-files/workflows/bos-universal-gatekeeper-kicker.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
 
     declared = workflow_input_names(workflow)
     forwarded = caller_input_names(kicker, "bos-universal-gatekeeper.yml")
@@ -510,7 +510,7 @@ def main() -> None:
     assert "ref: ${{ github.ref_name == 'main' && 'main' || 'dev' }}" in kicker
     assert "config_path: .github/bos-universal-config.json" in action_test_workflow
 
-    monitor_workflow = (ROOT / ".github/workflows/monitor-upstream-release.yml").read_text()
+    monitor_workflow = (ROOT / ".github/workflows/monitor-upstream-release.yml").read_text(encoding="utf-8")
     assert_first_party_pin(monitor_workflow, "blackoutsecure/bos-upstream-watcher")
     assert "config_path: .github/bos-universal-config.json" in monitor_workflow
     assert "global_config_path: hub-config/sync-files/config/upstream-watcher-global-config.json" in monitor_workflow
@@ -548,14 +548,14 @@ def main() -> None:
     # Absent config, absent key, and an unusable diff base must all fail open.
     assert kicker.count('should_run=true" >> "${GITHUB_OUTPUT}"') >= 4
 
-    promote = (ROOT / ".github/workflows/release-promote.yml").read_text()
+    promote = (ROOT / ".github/workflows/release-promote.yml").read_text(encoding="utf-8")
     dependabot_input = promote.split("      include_dependabot_config:\n", 1)[
         1
     ].split("      include_github_metadata:\n", 1)[0]
     assert "        default: true\n" in dependabot_input
 
 
-    gate_workflow = (ROOT / ".github/workflows/bos-universal-security.yml").read_text()
+    gate_workflow = (ROOT / ".github/workflows/bos-universal-security.yml").read_text(encoding="utf-8")
     gate_declared = workflow_input_names(gate_workflow)
     assert "  workflow_dispatch:" not in gate_workflow
     assert not (ROOT / ".github/workflows/bos-universal-security-kicker.yml").exists()
@@ -626,10 +626,10 @@ def main() -> None:
     ):
         assert permission in code_scan_job, permission
 
-    readme = (ROOT / "README.md").read_text()
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
     readme_header_action = (
         ROOT / ".github/actions/check-readme-header/action.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "enable_baseline" not in readme
     assert "## Managed file sync" in readme
     assert "The reusable workflow never self-triggers" in readme
@@ -687,8 +687,8 @@ def main() -> None:
     for managed_template in (
         ROOT / "sync-files/workflows"
     ).glob("*.yml"):
-        assert "\non:\n" not in managed_template.read_text()
-        assert "\n\"on\":\n" in managed_template.read_text()
+        assert "\non:\n" not in managed_template.read_text(encoding="utf-8")
+        assert "\n\"on\":\n" in managed_template.read_text(encoding="utf-8")
     managed_templates = sorted(
         path.name for path in (ROOT / "sync-files/workflows").glob("*.yml")
     )
@@ -701,7 +701,7 @@ def main() -> None:
     marketplace_ruleset_path = (
         ROOT / "scripts/marketplace-repo/main-protection-ruleset.json"
     )
-    marketplace_ruleset = json.loads(marketplace_ruleset_path.read_text())
+    marketplace_ruleset = json.loads(marketplace_ruleset_path.read_text(encoding="utf-8"))
     assert marketplace_ruleset["name"] == "marketplace-action-default-branch-guard"
     assert marketplace_ruleset["target"] == "branch"
     assert marketplace_ruleset["enforcement"] == "active"
@@ -717,7 +717,7 @@ def main() -> None:
     assert {"deletion", "non_fast_forward", "pull_request", "file_path_restriction"} <= ruleset_types
     marketplace_ruleset_readme = (
         ROOT / "scripts/marketplace-repo/README.md"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "does not satisfy `PS020` on its own" in marketplace_ruleset_readme
 
     marketplace_workflow = (
@@ -738,7 +738,7 @@ def main() -> None:
     assert "github.repository" in kicker
     assert "cancel-in-progress:" in kicker
 
-    resolver = (ROOT / ".github/actions/resolve-hub-ref/action.yml").read_text()
+    resolver = (ROOT / ".github/actions/resolve-hub-ref/action.yml").read_text(encoding="utf-8")
     assert "name: Resolve hub ref" in resolver
     assert 'echo "ref=${ref}"' in resolver
     assert '[[ "${ref}" == "main" ]] || ref="dev"' in resolver
@@ -754,7 +754,7 @@ def main() -> None:
 
     repo_metadata_workflow = (
         ROOT / ".github/workflows/repo-metadata-sync.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "  workflow_call:" in repo_metadata_workflow
     assert "\n  release:\n" not in repo_metadata_workflow
     assert repo_metadata_workflow.count(
@@ -772,10 +772,10 @@ def main() -> None:
     assert workflow.count("uses: ./.github/workflows/repo-metadata-sync.yml") == 1
     assert ".github/actions/repo-metadata@main" not in workflow
 
-    artifact_release = (ROOT / ".github/workflows/release.yml").read_text()
+    artifact_release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     marketplace_promote = (
         ROOT / ".github/workflows/release-promote.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert artifact_release.startswith(
         "# Tag-driven release **pipeline**."
     )
@@ -816,10 +816,10 @@ def main() -> None:
     ) == 1
 
     workflows = sorted((ROOT / ".github/workflows").glob("*.yml"))
-    lint_workflow = (ROOT / ".github/workflows/lint.yml").read_text()
+    lint_workflow = (ROOT / ".github/workflows/lint.yml").read_text(encoding="utf-8")
     assert "branches: [main, dev]" in lint_workflow
     reusable = {
-        path.name for path in workflows if "\n  workflow_call:\n" in path.read_text()
+        path.name for path in workflows if "\n  workflow_call:\n" in path.read_text(encoding="utf-8")
     }
     event_only = {path.name for path in workflows} - reusable
     assert event_only == {
@@ -833,11 +833,11 @@ def main() -> None:
         "gatewall-smoke-test.yml",
         "osi-license-catalogue-refresh.yml",
     }
-    fanout = (ROOT / ".github/workflows/bos-org-kicker-fanout.yml").read_text()
+    fanout = (ROOT / ".github/workflows/bos-org-kicker-fanout.yml").read_text(encoding="utf-8")
     assert 'options: [warn, block, "off"]' in fanout
     assert 'options: [pr, "off"]' in fanout
 
-    release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
+    release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text(encoding="utf-8")
     assert "name: Hub runtime release" in release_hub
     assert "grep -lE '^  workflow_call:'" in release_hub
     assert "DENYLIST=(" not in release_hub
@@ -867,13 +867,13 @@ def main() -> None:
 
     balena_block = (
         ROOT / ".github/workflows/balena-block-publish.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     balena_fleet = (
         ROOT / ".github/workflows/balena-fleet-deploy.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     balena_publisher = (
         ROOT / ".github/actions/balena-publish/action.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     shared_balena_action = (
         "uses: blackoutsecure/bos-automation-hub/"
         ".github/actions/shared/balena-publish@main"
@@ -888,7 +888,7 @@ def main() -> None:
     assert "${plat}-${arch}-standalone.tar.gz" in balena_publisher
     assert "sync-balena-yml:" in balena_block
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in balena_fleet
-    artifact_release = (ROOT / ".github/workflows/release.yml").read_text()
+    artifact_release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     balena_release_job = workflow_job_body(artifact_release, "balena")
     for required_gate in (
         "always()", "!cancelled()", "inputs.balena",
@@ -903,7 +903,7 @@ def main() -> None:
         "deploy-cloudflare-pages.yml", "docker-build-push.yml",
         "balena-block-publish.yml", "balena-fleet-deploy.yml",
     ):
-        body = (ROOT / ".github/workflows" / delivery_leaf).read_text()
+        body = (ROOT / ".github/workflows" / delivery_leaf).read_text(encoding="utf-8")
         for infrastructure_only_input in (
             "STATE_ACCESS_KEY_ID", "STATE_SECRET_ACCESS_KEY",
             "INFRA_STACK_SETTINGS", "INFRA_PLAN_RUN_ID",
@@ -912,7 +912,7 @@ def main() -> None:
 
     docker_workflow = (
         ROOT / ".github/workflows/docker-build-push.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     compose_build_args = (
         "uses: blackoutsecure/bos-automation-hub/"
         ".github/actions/shared/compose-docker-build-args@main"
@@ -924,12 +924,12 @@ def main() -> None:
     refs = re.findall(r"uses: blackoutsecure/bos-automation-hub/[^\s]+@(\w+)", kicker)
     assert refs and set(refs) == {"main", "dev"}, refs
 
-    sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text()
+    sync_backend = (ROOT / ".github/workflows/bos-universal-sync.yml").read_text(encoding="utf-8")
     assert "[RUNTIME] Blackout Secure Managed File Sync" in sync_backend
     assert "uses: ./hub-runtime/.github/actions/universal-config" in sync_backend
     assert "inputs.hub_ref != 'auto' && inputs.hub_ref" in sync_backend
     assert "github.ref_name == 'main' && 'main' || 'dev'" in sync_backend
-    release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text()
+    release_hub = (ROOT / ".github/workflows/release-hub.yml").read_text(encoding="utf-8")
     assert "mkdir -p .github/actions/shared" in release_hub
     assert '[ "$(basename "${action_dir}")" = "shared" ] && continue' in release_hub
     assert "mv \"${action_dir}\" .github/actions/shared/" in release_hub
@@ -961,7 +961,7 @@ def main() -> None:
     )
     release_validation = (
         ROOT / ".github/workflows/bos-universal-release-validation.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     validation_job = workflow_job_body(release_validation, "validate")
     for action in ("universal-config", "release-validation", "job-report"):
         assert_hub_action_layout(validation_job, "hub-release-validation", action)
@@ -975,7 +975,7 @@ def main() -> None:
             f"steps.{step}.outputs.{output} || steps.{step}-shared.outputs.{output}"
             in validation_job
         )
-    refresh = (ROOT / ".github/workflows/osi-license-catalogue-refresh.yml").read_text()
+    refresh = (ROOT / ".github/workflows/osi-license-catalogue-refresh.yml").read_text(encoding="utf-8")
     assert "tracker_path: .github/tracked-osi-license-list.json" in refresh
     assert "track_file:" not in refresh
     assert "id: catalogue-app" in refresh
@@ -986,9 +986,9 @@ def main() -> None:
     assert "repositories: ${{ github.event.repository.name }}" in refresh
     assert "token: ${{ steps.catalogue-app.outputs.token || github.token }}" in refresh
     assert "GH_TOKEN: ${{ steps.catalogue-app.outputs.token || github.token }}" in refresh
-    hub_config = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
+    hub_config = json.loads((ROOT / ".github/bos-universal-config.json").read_text(encoding="utf-8"))
     assert "dependabot_pip" in hub_config["managed_file_sync"]["disabled_services"]
-    dependabot = (ROOT / ".github/dependabot.yml").read_text()
+    dependabot = (ROOT / ".github/dependabot.yml").read_text(encoding="utf-8")
     assert "package-ecosystem: github-actions" in dependabot
     assert "package-ecosystem: pip" not in dependabot
 
@@ -996,7 +996,7 @@ def main() -> None:
     # One shared audit-report surface, driven by findings data, so every
     # workflow reports status the same way instead of hand-rolling a
     # summary block per job.
-    job_report = (ROOT / ".github/actions/job-report/action.yml").read_text()
+    job_report = (ROOT / ".github/actions/job-report/action.yml").read_text(encoding="utf-8")
     assert "name: Job report" in job_report
     for token in ("outcome", "verdict", "passes", "warns", "fails", "skips", "total"):
         assert f"{token}:" in job_report
@@ -1064,7 +1064,7 @@ def main() -> None:
     assert 'set_value(row.get("value"))' in job_report
     assert 'for key in LABELS if counts[key]' in job_report
 
-    hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text())
+    hub_config_raw = json.loads((ROOT / ".github/bos-universal-config.json").read_text(encoding="utf-8"))
     assert set(hub_config_raw) == {
         "action_pins", "gate", "launchpad", "managed_file_sync", "organization", "remediation",
     }
@@ -1142,7 +1142,7 @@ def main() -> None:
     # tier for both; `fail_on: never` keeps a failing control visible in
     # the report without blocking a deploy.
     global_sitemap_config = json.loads(
-        (ROOT / "sync-files/config/sitemap-generator-global-config.json").read_text()
+        (ROOT / "sync-files/config/sitemap-generator-global-config.json").read_text(encoding="utf-8")
     )
     sitemap_audit = global_sitemap_config["sitemap"]["audit"]
     assert sitemap_audit["enable"] is True
@@ -1154,7 +1154,7 @@ def main() -> None:
     }
 
     global_securitytxt_config = json.loads(
-        (ROOT / "sync-files/config/securitytxt-generator-global-config.json").read_text()
+        (ROOT / "sync-files/config/securitytxt-generator-global-config.json").read_text(encoding="utf-8")
     )
     securitytxt_audit = global_securitytxt_config["security_txt"]["audit"]
     assert securitytxt_audit["enable"] is True
@@ -1173,7 +1173,7 @@ def main() -> None:
         "enable_ai_findings_summary": False
     }
 
-    cloudflare_workflow = (ROOT / ".github/workflows/deploy-cloudflare-pages.yml").read_text()
+    cloudflare_workflow = (ROOT / ".github/workflows/deploy-cloudflare-pages.yml").read_text(encoding="utf-8")
     assert "generator_audit:" in cloudflare_workflow
     assert "generator_audit_fail_on:" in cloudflare_workflow
     assert (
@@ -1196,7 +1196,7 @@ def main() -> None:
     assert "path: generator-audit/" in cloudflare_workflow
 
     global_humanstxt_config = json.loads(
-        (ROOT / "sync-files/config/humanstxt-generator-global-config.json").read_text()
+        (ROOT / "sync-files/config/humanstxt-generator-global-config.json").read_text(encoding="utf-8")
     )
     humanstxt_audit = global_humanstxt_config["humans_txt"]["audit"]
     assert humanstxt_audit["enable"] is True
@@ -1213,7 +1213,7 @@ def main() -> None:
     }
 
     global_robotstxt_config = json.loads(
-        (ROOT / "sync-files/config/robotstxt-generator-global-config.json").read_text()
+        (ROOT / "sync-files/config/robotstxt-generator-global-config.json").read_text(encoding="utf-8")
     )
     robotstxt_audit = global_robotstxt_config["robots_txt"]["audit"]
     assert robotstxt_audit["enable"] is True
@@ -1232,7 +1232,7 @@ def main() -> None:
     }
 
     global_web_manifest_config = json.loads(
-        (ROOT / "sync-files/config/web-manifest-generator-global-config.json").read_text()
+        (ROOT / "sync-files/config/web-manifest-generator-global-config.json").read_text(encoding="utf-8")
     )
     web_manifest_audit = global_web_manifest_config["web_manifest"]["audit"]
     assert web_manifest_audit["enable"] is True
@@ -1262,7 +1262,7 @@ def main() -> None:
     # Every first-party action pinned in this repo must be tracked by the
     # pin bumper, otherwise its SHA silently goes stale.
     action_pins = json.loads(
-        (ROOT / ".github/bos-universal-config.json").read_text()
+        (ROOT / ".github/bos-universal-config.json").read_text(encoding="utf-8")
     )["action_pins"]
     tracked = {entry["repository"] for entry in action_pins["repositories"]}
     for generator in (
@@ -1273,20 +1273,20 @@ def main() -> None:
     ):
         assert generator in tracked, generator
 
-    gatekeeper_workflow = (ROOT / ".github/workflows/bos-universal-gatekeeper.yml").read_text()
+    gatekeeper_workflow = (ROOT / ".github/workflows/bos-universal-gatekeeper.yml").read_text(encoding="utf-8")
     assert cloudflare_workflow.count("generator_audit_artifact_name") >= 2
     assert gatekeeper_workflow.count("cloudflare_generator_audit:") >= 1
     assert gatekeeper_workflow.count("generator_audit_fail_on:") >= 3
 
     gatekeeper_kicker = (
         ROOT / "sync-files/workflows/bos-universal-gatekeeper-kicker.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert gatekeeper_kicker.count("cloudflare_generator_audit:") == 2
     assert gatekeeper_kicker.count("cloudflare_generator_audit_fail_on:") == 2
 
     universal_config_action = (
         ROOT / ".github/actions/universal-config/action.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert '"generator_audit": cloudflare_raw.get("generator_audit") is True' in universal_config_action
     assert '"generator_audit_fail_on"' in universal_config_action
 
@@ -1299,7 +1299,7 @@ def main() -> None:
     assert_first_party_pin(gate_workflow, "blackoutsecure/bos-code-scanning-kit")
     standalone_scan_workflow = (
         ROOT / ".github/workflows/security-scan.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "sparse-checkout: sync-files/config/code-scanning-kit-global-config.json" in standalone_scan_workflow
     assert re.search(r'use_global_config:\s+["\']true["\']', standalone_scan_workflow)
     assert "config: .github/bos-universal-config.json" in standalone_scan_workflow
@@ -1307,7 +1307,7 @@ def main() -> None:
         standalone_scan_workflow, "blackoutsecure/bos-code-scanning-kit"
     )
     global_sync_config = json.loads(
-        (ROOT / "sync-files/config/managed-file-sync-global-config.json").read_text()
+        (ROOT / "sync-files/config/managed-file-sync-global-config.json").read_text(encoding="utf-8")
     )
     sync_policy = global_sync_config["managed_file_sync"]
     assert "exclude_services" not in sync_policy
@@ -1370,7 +1370,7 @@ def main() -> None:
     )
     assert "variables" not in sync_policy
     hub_config = cfg_from(
-        run_universal_config_raw((ROOT / ".github/bos-universal-config.json").read_text())
+        run_universal_config_raw((ROOT / ".github/bos-universal-config.json").read_text(encoding="utf-8"))
     )
     assert hub_config["gate"] == {
         "node_lint_mode": "auto",
@@ -1411,7 +1411,7 @@ def main() -> None:
     # trigger surface is asserted for all of them rather than a hand-listed
     # subset that new workflows can silently escape.
     for runtime_name in sorted(reusable):
-        runtime_body = (ROOT / ".github/workflows" / runtime_name).read_text()
+        runtime_body = (ROOT / ".github/workflows" / runtime_name).read_text(encoding="utf-8")
         assert "\n  workflow_call:\n" in runtime_body, runtime_name
         for forbidden in (
             "workflow_dispatch",
@@ -1430,12 +1430,12 @@ def main() -> None:
             ), (runtime_name, forbidden)
     gatekeeper_runtime = (
         ROOT / ".github/workflows/bos-universal-gatekeeper.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "  workflow_call:" in gatekeeper_runtime
     assert "  workflow_dispatch:" not in gatekeeper_runtime
     hub_gatekeeper_kicker = (
         ROOT / ".github/workflows/bos-hub-gatekeeper-kicker.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     assert "name: '[KICKER] Blackout Secure Hub Gatekeeper'" in hub_gatekeeper_kicker
     assert "  schedule:" in hub_gatekeeper_kicker
     assert "  workflow_dispatch:" in hub_gatekeeper_kicker
@@ -1471,9 +1471,9 @@ def main() -> None:
 
     gatekeeper_workflow = (
         ROOT / ".github/workflows/bos-universal-gatekeeper.yml"
-    ).read_text()
+    ).read_text(encoding="utf-8")
     metadata_route = workflow_job_body(gatekeeper_workflow, "repo-metadata")
-    metadata_sync = (ROOT / ".github/workflows/repo-metadata-sync.yml").read_text()
+    metadata_sync = (ROOT / ".github/workflows/repo-metadata-sync.yml").read_text(encoding="utf-8")
     for field in ("description_mode", "description_fallback"):
         assert f"{field}: ${{{{ inputs.repo_metadata_{field} }}}}" in metadata_route
         assert f"{field}: ${{{{ inputs.{field} }}}}" in metadata_sync
@@ -1486,8 +1486,8 @@ def main() -> None:
     assert "RELEASE_PAT:\n        description:" in gatekeeper_workflow
     assert "GATEWALL_APP_PRIVATE_KEY:" in gatekeeper_workflow
 
-    overlay = json.loads((ROOT / "sync-files/legal/osi-overlay.json").read_text())
-    catalogue = json.loads((ROOT / "sync-files/legal/osi-licenses.json").read_text())
+    overlay = json.loads((ROOT / "sync-files/legal/osi-overlay.json").read_text(encoding="utf-8"))
+    catalogue = json.loads((ROOT / "sync-files/legal/osi-licenses.json").read_text(encoding="utf-8"))
     for identifier in ("CNRI-Python-GPL-Compatible", "Python-2.0.1"):
         expected_policy = {
             "category": "legacy",

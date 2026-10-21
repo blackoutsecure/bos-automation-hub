@@ -37,6 +37,7 @@ on:
       - "scripts/test_infrastructure_contract.py"
       - ".github/actions/infrastructure-contract/**"
       - ".github/actions/cloudflare-worker-delivery/**"
+      - ".github/actions/ai-remediation-pr/**"
       - "tools/gatekeeper-app-setup/**"
       - ".github/actions/release-validation/**"
       - "sync-files/config/release-validation-global-config.json"
@@ -58,6 +59,7 @@ on:
       - "scripts/test_infrastructure_contract.py"
       - ".github/actions/infrastructure-contract/**"
       - ".github/actions/cloudflare-worker-delivery/**"
+      - ".github/actions/ai-remediation-pr/**"
       - "tools/gatekeeper-app-setup/**"
       - ".github/actions/release-validation/**"
       - "sync-files/config/release-validation-global-config.json"
@@ -97,6 +99,9 @@ jobs:
         run: python3 scripts/test_gatekeeper_app_setup.py
       - name: Validate infrastructure ownership and authorization
         run: python3 scripts/test_infrastructure_contract.py
+
+      - name: Test AI remediation reconciliation
+        run: python3 -m unittest discover -s .github/actions/ai-remediation-pr -p "test_*.py" -v
 
   actionlint:
     name: actionlint

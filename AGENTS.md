@@ -41,11 +41,13 @@ targets, not against the working tree.
 ```bash
 cd /Volumes/devbox/repos/blackoutsecure/bos-automation-hub
 
-# Offline contract tests. These four are exactly what lint.yml runs, in this order.
+# Offline contracts and action unit tests; these are the checks in lint.yml.
 python3 scripts/test_universal_config_contract.py
 python3 scripts/test_sync_action_pins.py
 python3 scripts/test_release_validation.py
 python3 scripts/test_gatekeeper_app_setup.py
+python3 scripts/test_infrastructure_contract.py
+python3 -m unittest discover -s .github/actions/ai-remediation-pr -p "test_*.py" -v
 
 # Not in lint.yml; run by hand after touching the README-header composite.
 # Needs bash, python3 + PyYAML, and (optionally) shellcheck.
@@ -81,11 +83,15 @@ shellcheck scripts/test_check_readme_header.sh
 `.github/workflows/lint.yml` is the only always-on CI here. It fires on `push` to `main`
 and `dev`, on `pull_request`, and on `workflow_dispatch`, scoped to a path list covering
 `**/*.md`, `**/*.yml`, `**/*.yaml`, `**/*.sh`, `.shellcheckrc`,
-`.github/bos-universal-config.json`, the `scripts/` files, `tools/gatekeeper-app-setup/**`,
-`.github/actions/release-validation/**`, and
+`.github/bos-universal-config.json`, the `scripts/` files,
+`.github/actions/ai-remediation-pr/**`,
+`.github/actions/infrastructure-contract/**`,
+`.github/actions/cloudflare-worker-delivery/**`,
+`tools/gatekeeper-app-setup/**`, `.github/actions/release-validation/**`, and
 `sync-files/config/release-validation-global-config.json`. Three jobs run:
 
-1. `universal config contract` — the four `python3 scripts/test_*.py` commands above.
+1. `universal config contract` — five offline contract scripts and the
+   `ai-remediation-pr` unittest suite listed above.
 2. `actionlint` — the kit lint composite with `run_actionlint: "true"` and
    `severity: "fail"`. This is the blocking lint job; its name is preserved so branch
    protection checks named `actionlint` keep matching.
@@ -97,9 +103,9 @@ security, sync, and metadata maintenance on a six-hourly cron, on pushes touchin
 `.github/bos-universal-config.json`, `.github/actions/**`, `bos-universal-gatekeeper.yml`,
 `repo-metadata-sync.yml`, or `README.md`, and on manual dispatch.
 
-Locally, narrowest first: run the single `scripts/test_*.py` covering what you touched,
-then `actionlint`, then the other three contract tests, then `yamllint`/`markdownlint` if
-you edited YAML or Markdown, then `git diff --check`.
+Locally, narrowest first: run the test covering what you touched, then `actionlint`,
+then the other five offline suites, then `yamllint`/`markdownlint` if you edited YAML
+or Markdown, then `git diff --check`.
 
 Be explicit about what these prove. `test_universal_config_contract.py` validates universal
 config and gate input forwarding, managed-service output, branch and ref ownership,
@@ -107,10 +113,13 @@ semantic runtime promotion, and internal README links. `test_sync_action_pins.py
 pin _shape_ — an immutable 40-character SHA plus a trailing `# vX.Y.Z` comment — and the
 SemVer ranking. `test_release_validation.py` exercises the release-validation engine's
 pass/fail behaviour without network access. `test_gatekeeper_app_setup.py` tests the
-loopback helper's server module. None of them start a runner, call GitHub, or execute a
-workflow. A change to a reusable workflow, a composite action's runtime behaviour, or a
-managed sync payload must be exercised by a real caller — a dispatch of the hub's own
-gatekeeper kicker, or a `hub_ref: dev` run from a consumer — before promotion to `main`.
+loopback helper's server module. The `ai-remediation-pr` unittest suite exercises
+recommendation normalization, API token forwarding, PR reconciliation, and validated
+patch gating with mocked GitHub and git calls. These tests do not start a runner, call
+GitHub, or execute a workflow. A change to a reusable workflow, a composite action's
+runtime behaviour, or a managed sync payload must be exercised by a real caller — a
+dispatch of the hub's own gatekeeper kicker, or a `hub_ref: dev` run from a consumer —
+before promotion to `main`.
 
 ## Architecture
 
@@ -335,6 +344,8 @@ The hub's own `.github/bos-universal-config.json` also carries the `action_pins`
 - `scripts/test_sync_action_pins.py` — offline; pin-resolver and rewriter unit tests, asserting SHA-plus-comment shape and SemVer ranking.
 - `scripts/test_release_validation.py` — offline; drives `.github/actions/release-validation/validate.py` pass/fail behaviour.
 - `scripts/test_gatekeeper_app_setup.py` — offline; loads `tools/gatekeeper-app-setup/server.py` by path and mocks its externals.
+- `scripts/test_infrastructure_contract.py` — offline; exercises infrastructure ownership, environment authorization, and deployment preflight contracts.
+- `.github/actions/ai-remediation-pr/test_reconcile.py` — stdlib `unittest`; covers structured identity, mocked API calls, PR creation/update, and validated-patch gating.
 - `scripts/test_check_readme_header.sh` — fixture-driven test for the `check-readme-header` composite; extracts the embedded shell from `action.yml`, so it needs PyYAML. Not wired into `lint.yml`.
 - `scripts/sync_action_pins.py` — `--check` / `--write` / `--json`; imports the shared resolver from `.github/actions/resolve-latest-action-ref/resolve.py` so ranking has one definition.
 - `scripts/build_osi_catalogue.py` — merges the SPDX license list with the hand-curated `sync-files/legal/osi-overlay.json` into `osi-licenses.json`; fails the build on overlay drift rather than silently dropping an entry.
@@ -434,7 +445,7 @@ non-obvious choice exists rather than restating the code.
 
 ### Always
 
-- Run the four `python3 scripts/test_*.py` contract tests and `actionlint` before finishing.
+- Run the five offline contract scripts, the `ai-remediation-pr` unittest suite, and `actionlint` before finishing.
 - Pin every `uses:` to a commit SHA with a trailing `# vX.Y.Z` comment.
 - Declare least-privilege `permissions:` at the job level; keep the workflow default read-only.
 - Pass inputs into bash through `env:`, never as `${{ … }}` inside a `run:` body.

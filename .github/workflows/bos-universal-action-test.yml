@@ -88,6 +88,7 @@ jobs:
           repository: blackoutsecure/bos-automation-hub
           ref: main
           path: hub-config
+          persist-credentials: false
           sparse-checkout: sync-files/config/action-test-global-config.json
           sparse-checkout-cone-mode: false
       - name: Load universal config

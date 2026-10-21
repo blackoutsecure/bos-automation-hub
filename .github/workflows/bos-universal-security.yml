@@ -405,6 +405,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Run kit lint composite
         uses: blackoutsecure/bos-marketplace-kit/.github/actions/lint@c3ca87e5c5c9d72237ce8ff426a759b0f878de91 # v0.1.28
         with:
@@ -552,6 +554,8 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
@@ -681,6 +685,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           # Need full history so the composite can diff against base.
           fetch-depth: 0
       - name: Check `uses:` pinning
@@ -703,6 +708,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Validate README header
         uses: blackoutsecure/bos-automation-hub/.github/actions/check-readme-header@dev
         with:

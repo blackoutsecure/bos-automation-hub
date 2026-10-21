@@ -29,12 +29,12 @@ script="${work}/script.sh"
 python3 - "${action_yml}" "${script}" <<'PY'
 import sys, yaml
 src, dst = sys.argv[1], sys.argv[2]
-with open(src) as f:
+with open(src, encoding="utf-8") as f:
     data = yaml.safe_load(f)
 for st in data["runs"]["steps"]:
     if "run" in st:
-        with open(dst, "w") as out:
-            out.write(st["run"])
+        with open(dst, "w", encoding="utf-8", newline="\n") as out:
+            out.write(st["run"].replace("\r", ""))
         break
 PY
 
@@ -65,6 +65,7 @@ run_case() {
     printf '[ok] %-22s exit=%d\n' "${name}" "${actual}"
   else
     printf '[FAIL] %-22s expected=%d actual=%d\n' "${name}" "${exp_exit}" "${actual}"
+    echo "----- stdout -----"; cat "${dir}/out"
     echo "----- stderr -----"; cat "${dir}/err"
     fail=1
   fi
