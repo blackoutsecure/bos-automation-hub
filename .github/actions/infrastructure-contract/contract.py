@@ -73,8 +73,10 @@ def inspect_registry(value: object, root: Path, repository: str, stack_id: str) 
             raise ValueError("State keys must be isolated per stack and environment.")
         seen_states.add(state_key)
         text(backend.get("bucket_variable"), "Backend bucket variable", re.compile(r"^[A-Z][A-Z0-9_]+$"))
-        text(stack.get("environment"), "Apply environment", NAME)
-        text(stack.get("planning_environment", f"{identifier}-plan"), "Planning environment", NAME)
+        apply_environment = text(stack.get("environment"), "Apply environment", NAME)
+        planning_environment = text(stack.get("planning_environment", f"{identifier}-plan"), "Planning environment", NAME)
+        if apply_environment == planning_environment:
+            raise ValueError("Planning and apply must use separate credential environments.")
         text(stack.get("settings_variable"), "Settings variable", re.compile(r"^[A-Z][A-Z0-9_]+$"))
         resources = stack.get("allowed_resources")
         if not isinstance(resources, list) or not resources or len(resources) > 100:

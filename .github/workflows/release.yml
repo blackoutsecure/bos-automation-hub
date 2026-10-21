@@ -538,7 +538,13 @@ jobs:
   # ---------------------------------------------------------------------------
   balena:
     name: Balena block
-    if: ${{ inputs.balena }}
+    if: >-
+      always()
+      && !cancelled()
+      && inputs.balena
+      && needs.resolve.result == 'success'
+      && needs.release-validation.result == 'success'
+      && (needs.docker.result == 'success' || needs.docker.result == 'skipped')
     needs: [resolve, release-validation, docker]
     permissions:
       contents: write # allow `sync_balena_yml` commit-back

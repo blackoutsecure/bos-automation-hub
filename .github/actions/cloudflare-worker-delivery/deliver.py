@@ -18,17 +18,20 @@ def deliver(application: Path, configuration: Path, secrets: Path, workspace: Pa
     secrets = secrets.resolve(strict=True)
     if not configuration.is_relative_to(application / ".wrangler"):
         raise ValueError("Generated Worker configuration must belong to the pinned application.")
+    if not configuration.is_file() or not secrets.is_file():
+        raise ValueError("Worker configuration and private secrets must be regular files.")
     launcher = application / "node_modules" / "tsx" / "dist" / "cli.mjs"
     script = application / "scripts" / "deployment.ts"
-    if not launcher.is_file() or not script.is_file():
-        raise ValueError("The application must implement the guarded delivery contract.")
+    verifier = application / "scripts" / "verify-deployment.ts"
+    if not all(path.is_file() for path in (launcher, script, verifier)):
+        raise ValueError("The application must implement migration, deployment and verification before delivery.")
     for operation in ("migrate", "deploy"):
         arguments = ["node", str(launcher), str(script), operation, "--config", str(configuration)]
         if operation == "deploy":
             arguments += ["--secrets-file", str(secrets)]
         subprocess.run(arguments, cwd=application, check=True)
     subprocess.run(
-        ["node", str(launcher), str(application / "scripts" / "verify-deployment.ts"), "--config", str(configuration)],
+        ["node", str(launcher), str(verifier), "--config", str(configuration)],
         cwd=application,
         check=True,
     )

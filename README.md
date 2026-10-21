@@ -524,6 +524,58 @@ are additive opt-in interfaces. Candidate consumers pin an exact development
 commit until normal hub promotion is explicitly approved; no organization-wide
 runtime or managed-file policy is changed by introducing these helpers.
 
+### Infrastructure and delivery integration
+
+Use the existing execution boundaries together rather than creating a second
+deployment engine:
+
+| Surface | Shared entrypoint | Ownership and handoff |
+| --- | --- | --- |
+| Request authorization | [Gatekeeper receiver](sync-files/workflows/bos-universal-gatekeeper-kicker.yml) and [infrastructure adapter](.github/actions/infrastructure-authorize/action.yml) | Gatekeeper evaluates the actual triggering actor. The infrastructure adapter enforces its repository-scoped policy on dispatch and scheduled drift; do not replace it with the receiver's event exemptions. |
+| Internal web control plane | [Cloud Compass service](https://github.com/blackoutsecure/bos-cloud-compass/blob/dev/docs/service-setup.md) | Entra-authenticated registry/workflow access and exported review-only IaC/capacity proposals. Optional Access and AI do not replace Gatekeeper, protected approvals or immutable source review; the portal has no provider/state credentials or PR-write permission. |
+| Terraform plan/apply/drift | [Infrastructure executor](.github/workflows/bos-universal-infrastructure.yml) | Caller-owned immutable registry, roots, private R2 state/plans, isolated planning/apply credentials and protected apply approval. |
+| Worker delivery | [Worker delivery leaf](.github/actions/cloudflare-worker-delivery/action.yml) | After reviewed Terraform apply, the caller passes generated configuration and a private secrets file to the pinned application's migration, deploy and smoke contracts. The leaf does not own state or approve apply. |
+| Pages deployment | [Pages workflow](.github/workflows/deploy-cloudflare-pages.yml) | The existing site pipeline stages/builds/uploads public site content; bind `deployment_environment` when protected deployment is required. It does not consume a Terraform plan. |
+| Docker publication | [Artifact release](.github/workflows/release.yml) → [Docker workflow](.github/workflows/docker-build-push.yml) | Release validation precedes image builds/publication. Images are application artifacts, not a Terraform state backend or a fleet deployment. |
+| Balena block/fleet delivery | [Block publisher](.github/workflows/balena-block-publish.yml) / [fleet workflow](.github/workflows/balena-fleet-deploy.yml) → [shared publisher](.github/actions/balena-publish/action.yml) | Both use the same publisher; block publication and per-fleet rollout retain separate caller policy and targets. |
+
+The authoritative private infrastructure repository already invokes the pinned
+Worker delivery helper after consuming and applying the exact saved plan.
+Worker delivery checks all three application scripts plus configuration/secrets
+files **before** migrations start. A failure in migration, deploy or smoke
+verification stops the chain; it does not roll back Terraform or make a plan
+reusable. Application checks, secret payload validation and immutable application
+checkout remain the caller's responsibility.
+
+Pages, Docker and Balena are not additional operations of the current Terraform
+stack registry. Their direct reusable workflows are trusted delivery leaves,
+not independent requester-authorization services: callers must retain their
+authorized front door, validation gates, explicit targets and environment
+protections. A successful Terraform plan must never authorize an unrelated
+Pages upload, image publication or fleet release.
+
+Keep private R2 state credentials, saved plans and backend metadata out of
+Pages build artifacts, Docker build arguments/layers and Balena sources.
+Provider delivery tokens remain purpose-scoped; no new org-wide App permission,
+secret forwarding, portal operation or managed-service selection is needed.
+If Terraform owns a Pages project's bindings/settings, leave the Pages
+workflow's optional binding reconciliation disabled for those same settings;
+do not give two tools ownership of one resource.
+
+Balena block publication can run without Docker when explicitly enabled and
+the release resolver and validation succeeded. A skipped Docker stage uses
+the existing platform fallback; a failed/cancelled Docker stage or failed
+release validation blocks Balena. This is distinct from approving a fleet
+rollout, which remains a separate workflow call.
+
+These are source-branch integration changes, not a hub runtime promotion.
+Existing `@main` consumers and immutable infrastructure pins do not receive
+them automatically. Review and exercise a trusted real caller before normal
+hub promotion; update an infrastructure pin only to a reviewed immutable hub
+commit, in its registry and caller/CI workflows together. Re-plan after any
+source or executor change. Offline contract tests do not prove live provider
+access, environment approval or deployment readiness.
+
 Gate and release workflows intentionally remain separate because they run at
 different trust and permission boundaries:
 

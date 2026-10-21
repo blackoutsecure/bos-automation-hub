@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import io
 import os
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr
@@ -25,6 +26,13 @@ def load(name: str, filename: str):
 contract = load("infrastructure_contract", "contract.py")
 auth = load("infrastructure_authorization", "authorize.py")
 preflight = load("infrastructure_preflight", "preflight.py")
+delivery_spec = importlib.util.spec_from_file_location(
+    "worker_delivery", ROOT / ".github" / "actions" / "cloudflare-worker-delivery" / "deliver.py",
+)
+if delivery_spec is None or delivery_spec.loader is None:
+    raise RuntimeError("Worker delivery test module is unavailable.")
+delivery = importlib.util.module_from_spec(delivery_spec)
+delivery_spec.loader.exec_module(delivery)
 
 
 def registry() -> dict:
@@ -92,6 +100,12 @@ class ContractTests(unittest.TestCase):
         value = registry()
         value["stacks"].append(copy.deepcopy(value["stacks"][0]))
         with self.assertRaises(ValueError):
+            contract.inspect_registry(value, self.root, value["repository"], "flipiq-production")
+
+    def test_plan_and_apply_credentials_cannot_share_an_environment(self) -> None:
+        value = registry()
+        value["stacks"][0]["planning_environment"] = value["stacks"][0]["environment"]
+        with self.assertRaisesRegex(ValueError, "separate"):
             contract.inspect_registry(value, self.root, value["repository"], "flipiq-production")
 
     def test_unbounded_path_rejected(self) -> None:
@@ -244,6 +258,74 @@ class ContractTests(unittest.TestCase):
         self.assertIn('fail_closed: "true"', source)
         self.assertNotIn("secrets.", source)
         self.assertNotIn("TOKEN", source.split("id: gate", 1)[0])
+
+
+class WorkerDeliveryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name).resolve()
+        self.application = self.root / ".workloads" / "example"
+        for relative in (
+            "package.json", "node_modules/tsx/dist/cli.mjs",
+            "scripts/deployment.ts", "scripts/verify-deployment.ts", ".wrangler/production.jsonc",
+        ):
+            path = self.application / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("{}", encoding="utf-8")
+        self.configuration = self.application / ".wrangler" / "production.jsonc"
+        self.secrets = self.root / "private-secrets.json"
+        self.secrets.write_text("{}", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.directory.cleanup()
+
+    def deliver(self) -> None:
+        delivery.deliver(self.application, self.configuration, self.secrets, self.root)
+
+    def test_migration_deployment_and_smoke_follow_the_application_contract(self) -> None:
+        with patch.object(delivery.subprocess, "run") as run:
+            self.deliver()
+        self.assertEqual(run.call_count, 3)
+        calls = [call.args[0] for call in run.call_args_list]
+        self.assertEqual([call[3] for call in calls[:2]], ["migrate", "deploy"])
+        self.assertIn("--secrets-file", calls[1])
+        self.assertNotIn("--secrets-file", calls[0])
+        self.assertEqual(calls[2][2], str(self.application / "scripts" / "verify-deployment.ts"))
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs["cwd"], self.application)
+            self.assertIs(call.kwargs["check"], True)
+            self.assertNotIn("terraform", call.args[0])
+
+    def test_missing_verifier_blocks_before_any_migration(self) -> None:
+        (self.application / "scripts" / "verify-deployment.ts").unlink()
+        with patch.object(delivery.subprocess, "run") as run, self.assertRaises(ValueError):
+            self.deliver()
+        run.assert_not_called()
+
+    def test_nonfile_configuration_or_secrets_blocks_before_migration(self) -> None:
+        for attribute in ("configuration", "secrets"):
+            path = getattr(self, attribute)
+            path.unlink()
+            path.mkdir()
+            with self.subTest(attribute=attribute), patch.object(delivery.subprocess, "run") as run, self.assertRaises(ValueError):
+                self.deliver()
+            run.assert_not_called()
+            path.rmdir()
+            path.write_text("{}", encoding="utf-8")
+
+    def test_each_failed_delivery_phase_stops_following_phases(self) -> None:
+        for phase in range(3):
+            outcomes = [None] * phase + [subprocess.CalledProcessError(1, "offline-delivery")]
+            with self.subTest(phase=phase), patch.object(delivery.subprocess, "run", side_effect=outcomes) as run:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.deliver()
+                self.assertEqual(run.call_count, phase + 1)
+
+    def test_configuration_cannot_escape_the_application(self) -> None:
+        self.configuration = self.secrets
+        with patch.object(delivery.subprocess, "run") as run, self.assertRaises(ValueError):
+            self.deliver()
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

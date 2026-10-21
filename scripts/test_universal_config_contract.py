@@ -888,6 +888,27 @@ def main() -> None:
     assert "${plat}-${arch}-standalone.tar.gz" in balena_publisher
     assert "sync-balena-yml:" in balena_block
     assert "matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}" in balena_fleet
+    artifact_release = (ROOT / ".github/workflows/release.yml").read_text()
+    balena_release_job = workflow_job_body(artifact_release, "balena")
+    for required_gate in (
+        "always()", "!cancelled()", "inputs.balena",
+        "needs.resolve.result == 'success'",
+        "needs.release-validation.result == 'success'",
+        "(needs.docker.result == 'success' || needs.docker.result == 'skipped')",
+    ):
+        assert required_gate in balena_release_job, required_gate
+    assert "needs: [resolve, release-validation, docker]" in balena_release_job
+    assert "block_platforms: ${{ inputs.platforms }}" in balena_release_job
+    for delivery_leaf in (
+        "deploy-cloudflare-pages.yml", "docker-build-push.yml",
+        "balena-block-publish.yml", "balena-fleet-deploy.yml",
+    ):
+        body = (ROOT / ".github/workflows" / delivery_leaf).read_text()
+        for infrastructure_only_input in (
+            "STATE_ACCESS_KEY_ID", "STATE_SECRET_ACCESS_KEY",
+            "INFRA_STACK_SETTINGS", "INFRA_PLAN_RUN_ID",
+        ):
+            assert infrastructure_only_input not in body, (delivery_leaf, infrastructure_only_input)
 
     docker_workflow = (
         ROOT / ".github/workflows/docker-build-push.yml"
